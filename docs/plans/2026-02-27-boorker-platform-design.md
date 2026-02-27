@@ -74,13 +74,65 @@ All nodes are symmetric — same firmware, same capabilities. Any node can serve
 | Gateway Node | Bridges to external services (webhooks, email) |
 | Any/All | Nodes can fulfill multiple roles simultaneously |
 
-### Remote Access
+### Remote Access (MicroLink Tailscale)
 
-MicroLink provides Tailscale VPN integration on ESP32-S3:
+MicroLink ([github.com/CamM2325/microlink](https://github.com/CamM2325/microlink)) provides full Tailscale protocol support on ESP32-S3:
+
+**Capabilities:**
+- Join your Tailscale network (tailnet) from ESP32
 - Access web interface from anywhere via Tailscale IP
+- WireGuard encryption (ChaCha20-Poly1305)
+- NAT traversal via DERP relay
 - No port forwarding or dynamic DNS needed
-- End-to-end encrypted connection
-- Works even when local WiFi unavailable (via LoRa relay)
+
+**Platform Requirements:**
+- ESP-IDF v5.0+ (not Arduino framework)
+- ESP32-S3 with 8MB PSRAM (Heltec V3 qualifies)
+- Valid Tailscale auth key
+
+**Memory Usage (ESP32-S3 with PSRAM):**
+| Component | Usage |
+|-----------|-------|
+| MicroLink | ~50KB SRAM + 64KB PSRAM |
+| Available for app | 400KB+ |
+
+**Integration Pattern:**
+
+```cpp
+#include "microlink.h"
+
+// Initialize on startup
+microlink_config_t config;
+microlink_get_default_config(&config);
+config.auth_key = "tskey-auth-xxxxx";  // From Tailscale admin
+config.device_name = "boorker-basement";
+microlink_t *tailscale = microlink_init(&config);
+
+// Connect to tailnet
+microlink_connect(tailscale);
+
+// Main loop - call regularly
+void loop() {
+    microlink_update(tailscale);
+
+    if (microlink_is_connected(tailscale)) {
+        // Web server accessible via Tailscale IP
+        // e.g., http://100.x.y.z/ from any tailnet device
+    }
+
+    // Get our Tailscale IP for display
+    char vpn_ip[16];
+    microlink_get_vpn_ip(tailscale, vpn_ip, sizeof(vpn_ip));
+}
+```
+
+**Configuration Storage:**
+- Auth key stored in NVS (encrypted flash partition)
+- Device name configurable via web interface
+- First-time setup via WiFi AP mode
+
+**LoRa Relay Mode:**
+When WiFi unavailable, the display node (with WiFi) can relay Tailscale traffic for the basement node via LoRa. This provides remote access even when the basement node has no direct internet.
 
 ## Sensor Plugin System
 
@@ -590,18 +642,32 @@ When USB power is lost, the driver triggers an immediate alert via the rules eng
 | Long press (3s) | Cycle display mode |
 | Very long press (10s) | Enter config mode (AP) |
 
+## Development Framework
+
+**ESP-IDF v5.3** (not Arduino) — required for MicroLink Tailscale support.
+
+Benefits:
+- Full access to ESP32-S3 features (PSRAM, USB)
+- Better memory management for concurrent WiFi + LoRa + Tailscale
+- Native FreeRTOS task management
+- More control over power management
+
+Trade-offs:
+- Steeper learning curve than Arduino
+- C-based (not C++ Arduino style)
+- Longer compile times
+
 ## Libraries & Dependencies
 
-| Library | Purpose |
-|---------|---------|
-| RadioLib | LoRa (SX1262) |
-| U8g2 | OLED display |
-| ArduinoJson | Configuration, API |
-| ESPAsyncWebServer | Web interface |
-| AsyncTCP | WebSocket |
-| MicroLink | Tailscale VPN |
-| DHT sensor library | DHT22 driver |
-| LittleFS | Data storage |
+| Library | Purpose | Notes |
+|---------|---------|-------|
+| MicroLink | Tailscale VPN | ESP-IDF component |
+| esp-idf-lib/dht | DHT22 driver | ESP-IDF port |
+| esp-idf-ssd1306 | OLED display | SSD1306 I2C driver |
+| cJSON | Configuration, API | Included in ESP-IDF |
+| esp_http_server | Web interface | Included in ESP-IDF |
+| LittleFS | Data storage | ESP-IDF component |
+| LoRa SX126x driver | LoRa (SX1262) | ESP-IDF component |
 
 ## Future Enhancements (Out of Scope for MVP)
 
