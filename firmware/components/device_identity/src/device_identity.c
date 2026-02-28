@@ -80,24 +80,59 @@ static esp_err_t load_or_generate_credentials(void)
         generate_random_digits(s_identity.ble_pop, 6);
 
         // Store in NVS
-        nvs_set_str(handle, NVS_KEY_WEB_PASS, s_identity.web_password);
-        nvs_set_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password);
-        nvs_set_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop);
-        nvs_set_u8(handle, NVS_KEY_FIRST_BOOT, 1);
+        ret = nvs_set_str(handle, NVS_KEY_WEB_PASS, s_identity.web_password);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set web_pass: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
+
+        ret = nvs_set_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set ap_pass: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
+
+        ret = nvs_set_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set ble_pop: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
+
+        ret = nvs_set_u8(handle, NVS_KEY_FIRST_BOOT, 1);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set first_boot: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
 
         ret = nvs_commit(handle);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
         }
 
         ESP_LOGI(TAG, "Credentials generated for %s", s_identity.node_name);
     } else if (ret == ESP_OK) {
         // Load existing credentials
         len = sizeof(s_identity.ap_password);
-        nvs_get_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password, &len);
+        ret = nvs_get_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password, &len);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read ap_pass: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
 
         len = sizeof(s_identity.ble_pop);
-        nvs_get_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop, &len);
+        ret = nvs_get_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop, &len);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to read ble_pop: %s", esp_err_to_name(ret));
+            nvs_close(handle);
+            return ret;
+        }
 
         // Check if first boot was acknowledged
         uint8_t fb = 0;
@@ -106,6 +141,7 @@ static esp_err_t load_or_generate_credentials(void)
         }
 
         ESP_LOGI(TAG, "Credentials loaded for %s", s_identity.node_name);
+        ret = ESP_OK;  // Ensure success return
     } else {
         ESP_LOGE(TAG, "Failed to read NVS: %s", esp_err_to_name(ret));
     }
@@ -183,12 +219,25 @@ esp_err_t device_identity_regenerate(void)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for regenerate: %s", esp_err_to_name(ret));
         return ret;
     }
 
     // Erase all credentials
-    nvs_erase_all(handle);
-    nvs_commit(handle);
+    ret = nvs_erase_all(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase NVS: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+
+    ret = nvs_commit(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit erase: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+
     nvs_close(handle);
 
     // Re-initialize (will generate new credentials)
@@ -198,6 +247,10 @@ esp_err_t device_identity_regenerate(void)
 
 esp_err_t device_identity_get_qr_json(char *buf, size_t buf_len)
 {
+    if (buf == NULL || buf_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (!s_initialized) {
         return ESP_ERR_INVALID_STATE;
     }
