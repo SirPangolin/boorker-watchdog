@@ -1,7 +1,12 @@
 #include "wifi_prov_internal.h"
 #include "sdkconfig.h"
 
+#include <string.h>
+
 #include "esp_log.h"
+
+// Security: Default PoP PIN that should be changed for production
+#define DEFAULT_POP_PIN "boorker123"
 #include "esp_wifi.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
@@ -82,8 +87,21 @@ esp_err_t wifi_prov_start(const char *device_name)
     wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
     const char *pop = CONFIG_WIFI_MGR_PROV_POP;
 
-    // Configure service name (BLE device name)
-    wifi_prov_scheme_ble_set_service_uuid((uint8_t *)"\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78\x12\x34\x56\x78");
+    // Security warning if using default PIN
+    if (strcmp(pop, DEFAULT_POP_PIN) == 0) {
+        ESP_LOGW(TAG, "========================================");
+        ESP_LOGW(TAG, "WARNING: Using default Proof-of-Possession PIN!");
+        ESP_LOGW(TAG, "Change CONFIG_WIFI_MGR_PROV_POP for production.");
+        ESP_LOGW(TAG, "========================================");
+    }
+
+    // BLE service UUID (generated: b00e4e8c-7c9a-4e5d-8a2f-1d3c5f7a9b0e)
+    // Use a unique UUID to avoid conflicts with other BLE devices
+    static uint8_t service_uuid[16] = {
+        0xb0, 0x0e, 0x4e, 0x8c, 0x7c, 0x9a, 0x4e, 0x5d,
+        0x8a, 0x2f, 0x1d, 0x3c, 0x5f, 0x7a, 0x9b, 0x0e
+    };
+    wifi_prov_scheme_ble_set_service_uuid(service_uuid);
 
     // Start provisioning
     ret = wifi_prov_mgr_start_provisioning(security, pop, device_name, NULL);
@@ -95,7 +113,7 @@ esp_err_t wifi_prov_start(const char *device_name)
 
     s_prov_active = true;
     ESP_LOGI(TAG, "BLE provisioning active. Use ESP BLE Prov app to configure.");
-    ESP_LOGI(TAG, "Proof-of-Possession PIN: %s", pop);
+    // Note: PoP PIN is configured via menuconfig (CONFIG_WIFI_MGR_PROV_POP)
 
     return ESP_OK;
 }

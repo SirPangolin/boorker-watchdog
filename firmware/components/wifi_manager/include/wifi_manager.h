@@ -16,10 +16,11 @@ extern "C" {
 
 // Event types for callbacks
 typedef enum {
-    WIFI_MGR_EVENT_CONNECTED,      // Got IP address
-    WIFI_MGR_EVENT_DISCONNECTED,   // Lost connection
-    WIFI_MGR_EVENT_PROVISIONING,   // Entered provisioning mode
-    WIFI_MGR_EVENT_PROVISIONED,    // Credentials received via BLE
+    WIFI_MGR_EVENT_CONNECTED,           // Got IP address
+    WIFI_MGR_EVENT_DISCONNECTED,        // Lost connection
+    WIFI_MGR_EVENT_PROVISIONING,        // Entered provisioning mode
+    WIFI_MGR_EVENT_PROVISIONED,         // Credentials received via BLE
+    WIFI_MGR_EVENT_RECONNECT_EXHAUSTED, // Max reconnection attempts reached
 } wifi_mgr_event_t;
 
 // Callback signature
