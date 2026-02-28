@@ -12,6 +12,10 @@
 
 static const char *TAG = "boorker";
 
+// Flag to signal main task to init Tailscale (can't init from event callback - stack overflow)
+static volatile bool s_wifi_connected = false;
+static volatile bool s_tailscale_initialized = false;
+
 static void tailscale_callback(ts_mgr_event_t event, void *ctx)
 {
     char ip[16];
@@ -52,15 +56,10 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 {
     switch (event) {
         case WIFI_MGR_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "WiFi connected - initializing Tailscale...");
-
-            // Initialize Tailscale after WiFi is connected
-            ts_mgr_config_t ts_config = {
-                .device_name = "boorker-dev",
-                .callback = tailscale_callback,
-                .callback_ctx = NULL,
-            };
-            ts_mgr_init(&ts_config);
+            // Don't init Tailscale here - callback runs on sys_evt task with limited stack
+            // Set flag for main task to handle
+            s_wifi_connected = true;
+            ESP_LOGI(TAG, "WiFi connected - Tailscale will init from main task");
             break;
 
         case WIFI_MGR_EVENT_DISCONNECTED:
@@ -149,6 +148,15 @@ void app_main(void)
     if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }
+
+    // Initialize Tailscale from main task (has adequate stack - can't init from callback)
+    ESP_LOGI(TAG, "Initializing Tailscale from main task...");
+    ts_mgr_config_t ts_config = {
+        .device_name = "boorker-dev",
+        .callback = tailscale_callback,
+        .callback_ctx = NULL,
+    };
+    ts_mgr_init(&ts_config);
 
     // Main loop - heartbeat
     while (1) {

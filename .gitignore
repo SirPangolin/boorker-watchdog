@@ -312,3 +312,5 @@ managed_components/
 
 # Secrets
 firmware/main/secrets.h
+firmware/secrets.h
+secrets.h
