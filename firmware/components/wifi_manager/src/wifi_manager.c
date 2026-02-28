@@ -1,4 +1,5 @@
 #include "wifi_manager.h"
+#include "wifi_prov_internal.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -7,6 +8,7 @@
 #include "esp_netif.h"
 #include "esp_timer.h"
 #include "nvs_flash.h"
+#include "wifi_provisioning/manager.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
@@ -37,6 +39,7 @@ static struct {
     bool wifi_started;
     esp_event_handler_instance_t wifi_event_instance;
     esp_event_handler_instance_t ip_event_instance;
+    esp_event_handler_instance_t prov_event_instance;
 } s_wifi_mgr = {
     .state = WIFI_MGR_STATE_IDLE,
     .reconnect_delay_ms = CONFIG_WIFI_MGR_RECONNECT_INITIAL_DELAY_MS,
@@ -60,6 +63,28 @@ static const char *state_names[] = {
     [WIFI_MGR_STATE_PROVISIONING] = "PROVISIONING",
     [WIFI_MGR_STATE_RECONNECTING] = "RECONNECTING",
 };
+
+static void prov_event_handler_internal(void *arg, esp_event_base_t event_base,
+                                        int32_t event_id, void *event_data)
+{
+    switch (event_id) {
+        case WIFI_PROV_CRED_SUCCESS:
+            ESP_LOGI(TAG, "Credentials received successfully");
+            xEventGroupSetBits(s_wifi_mgr.event_group, WIFI_MGR_PROVISIONED_BIT);
+            notify_callback(WIFI_MGR_EVENT_PROVISIONED);
+            break;
+
+        case WIFI_PROV_END:
+            // Provisioning ended, WiFi should auto-connect
+            if (s_wifi_mgr.state == WIFI_MGR_STATE_PROVISIONING) {
+                set_state(WIFI_MGR_STATE_CONNECTING);
+            }
+            break;
+
+        default:
+            break;
+    }
+}
 
 esp_err_t wifi_mgr_init(const wifi_mgr_config_t *config)
 {
@@ -100,6 +125,9 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *config)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, &ip_event_handler, NULL,
         &s_wifi_mgr.ip_event_instance));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+        WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &prov_event_handler_internal, NULL,
+        &s_wifi_mgr.prov_event_instance));
 
     // Set WiFi mode and start
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
@@ -265,10 +293,20 @@ EventGroupHandle_t wifi_mgr_get_event_group(void)
 
 esp_err_t wifi_mgr_start_provisioning(void)
 {
-    ESP_LOGI(TAG, "Starting provisioning... (stub)");
+    // Stop any reconnection attempts
+    if (s_wifi_mgr.reconnect_timer) {
+        esp_timer_stop(s_wifi_mgr.reconnect_timer);
+    }
+
+    // Disconnect if connected
+    if (s_wifi_mgr.state == WIFI_MGR_STATE_CONNECTED) {
+        esp_wifi_disconnect();
+    }
+
     set_state(WIFI_MGR_STATE_PROVISIONING);
     notify_callback(WIFI_MGR_EVENT_PROVISIONING);
-    return ESP_OK;
+
+    return wifi_prov_start(s_wifi_mgr.device_name);
 }
 
 esp_err_t wifi_mgr_clear_credentials(void)
@@ -289,6 +327,8 @@ esp_err_t wifi_mgr_stop(void)
         s_wifi_mgr.wifi_event_instance);
     esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP,
         s_wifi_mgr.ip_event_instance);
+    esp_event_handler_instance_unregister(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID,
+        s_wifi_mgr.prov_event_instance);
 
     if (s_wifi_mgr.wifi_started) {
         esp_wifi_stop();
