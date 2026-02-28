@@ -16,634 +16,178 @@
 - ESP-IDF v5.5.3: https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/
 - MicroLink: https://github.com/CamM2325/microlink
 - Tailscale Auth Keys: https://login.tailscale.com/admin/settings/keys
-- usbipd-win: https://github.com/dorssel/usbipd-win
 
 ---
 
-## Phase 0: WSL2 USB Passthrough Setup
+## Prerequisites
 
-WSL2 doesn't have native USB access. We use **usbipd-win** to forward USB devices from Windows to WSL2.
+### Environment Setup
 
-### Task 0: Install usbipd-win for USB Passthrough
+Use the `esp32-wsl2-dev` plugin to validate and manage the development environment:
 
-**Step 1: Install usbipd on Windows**
-
-Open **PowerShell as Administrator** and run:
-```powershell
-winget install usbipd
+```
+/esp:check    # Validate WSL2, usbipd, ESP-IDF, tools
+/esp:attach   # Attach USB device to WSL2
+/esp:flash    # Flash firmware
+/esp:monitor  # Monitor serial output
 ```
 
-Expected: usbipd installs successfully
+**Required before proceeding:**
+- WSL2 Ubuntu with usbipd-win installed
+- ESP-IDF v5.5.3 installed at `~/esp/esp-idf`
+- User in `dialout` group
+- ESP32-S3-DevKitC-1 connected via USB
 
-**Step 2: Install USB/IP tools in WSL2**
+### Hardware Notes
 
-In WSL2 Ubuntu terminal:
-```bash
-sudo apt update
-sudo apt install linux-tools-generic hwdata
-sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
-```
+The ESP32-S3-DevKitC-1 has **two USB ports**:
 
-**Step 3: Verify usbipd installation**
+| Port | Chip | Linux Device | Use Case |
+|------|------|--------------|----------|
+| **UART** | CP2102N | `/dev/ttyUSB0` | Serial console (recommended for WSL2) |
+| **USB** | Native | `/dev/ttyACM0` | Flashing, JTAG debugging |
 
-In PowerShell (Admin):
-```powershell
-usbipd --version
-```
-
-Expected: Version number (e.g., `5.x.x`)
-
-**Step 4: Test USB device listing**
-
-Plug in the ESP32-S3-DEVKITC-1 via USB, then in PowerShell (Admin):
-```powershell
-usbipd list
-```
-
-Expected output (example):
-```
-Connected:
-BUSID  VID:PID    DEVICE                           STATE
-1-3    303a:1001  USB Serial Device (COM3)         Not shared
-```
-
-Note your BUSID (e.g., `1-3`) — you'll need this for flashing.
-
-**Step 5: Create helper scripts (optional but recommended)**
-
-Create `~/esp-attach.ps1` on Windows (save to your user folder):
-```powershell
-# Run as: powershell -ExecutionPolicy Bypass -File ~/esp-attach.ps1
-$busid = (usbipd list | Select-String "303a:1001" | ForEach-Object { ($_ -split '\s+')[0] })
-if ($busid) {
-    usbipd bind --busid $busid 2>$null
-    usbipd attach --wsl --busid $busid
-    Write-Host "ESP32 attached to WSL on busid $busid"
-} else {
-    Write-Host "ESP32 not found. Is it plugged in?"
-}
-```
-
-**Step 6: Test attaching to WSL2**
-
-In PowerShell (Admin):
-```powershell
-usbipd bind --busid 1-3
-usbipd attach --wsl --busid 1-3
-```
-
-Then in WSL2:
-```bash
-ls /dev/ttyACM*
-```
-
-Expected: `/dev/ttyACM0` appears
-
-**Step 7: Add user to dialout group (WSL2)**
-
-```bash
-sudo usermod -a -G dialout $USER
-```
-
-Note: Log out and back into WSL2 for this to take effect.
+**Recommendation:** Use UART port (`/dev/ttyUSB0`) for serial monitoring in WSL2 - it survives device resets without USB re-enumeration.
 
 ---
 
-### USB Workflow Reference
+## Phase 1: Project Structure (Complete)
 
-Each time you want to flash:
+The ESP-IDF project skeleton exists at `firmware/`:
 
-1. **Plug in ESP32** to Windows USB
-2. **PowerShell (Admin):**
-   ```powershell
-   usbipd list                           # Find BUSID
-   usbipd bind --busid <BUSID>           # First time only
-   usbipd attach --wsl --busid <BUSID>   # Attach to WSL
-   ```
-3. **WSL2:** `idf.py -p /dev/ttyACM0 flash monitor`
-4. **When done:** Unplug, or `usbipd detach --busid <BUSID>`
+```
+firmware/
+├── CMakeLists.txt
+├── sdkconfig.defaults
+├── components/
+│   └── .gitkeep
+└── main/
+    ├── CMakeLists.txt
+    └── main.c
+```
 
----
-
-## Phase 1: Development Environment Setup
-
-### Task 1: Install ESP-IDF Prerequisites
-
-**Step 1: Install system dependencies**
-
-Run (Ubuntu/Debian):
+**Verify build:**
 ```bash
-sudo apt-get update
-sudo apt-get install git wget flex bison gperf python3 python3-pip python3-venv cmake ninja-build ccache libffi-dev libssl-dev dfu-util libusb-1.0-0
-```
-
-**Step 2: Verify installations**
-
-Run:
-```bash
-git --version && cmake --version && ninja --version && python3 --version
-```
-
-Expected: Version numbers for each tool (cmake >= 3.16)
-
-**Step 3: Commit** - N/A (system setup)
-
----
-
-### Task 2: Clone and Install ESP-IDF v5.5.3
-
-**Step 1: Create esp directory and clone**
-
-Run:
-```bash
-mkdir -p ~/esp
-cd ~/esp
-git clone -b v5.5.3 --recursive https://github.com/espressif/esp-idf.git
-```
-
-Expected: Repository cloned with all submodules (~2-5 minutes)
-
-**Step 2: Install ESP-IDF tools for ESP32-S3**
-
-Run:
-```bash
-cd ~/esp/esp-idf
-./install.sh esp32s3
-```
-
-Expected: Tools downloaded and installed (~5-10 minutes)
-
-**Step 3: Set up environment**
-
-Run:
-```bash
-. $HOME/esp/esp-idf/export.sh
-```
-
-Expected: Environment variables set, `idf.py` available
-
-**Step 4: Add alias to shell profile**
-
-Run:
-```bash
-echo 'alias get_idf=". $HOME/esp/esp-idf/export.sh"' >> ~/.bashrc
-```
-
-**Step 5: Verify installation**
-
-Run:
-```bash
-idf.py --version
-```
-
-Expected: `ESP-IDF v5.5.3` or similar
-
----
-
-### Task 3: Create Boorker Project Structure
-
-**Files:**
-- Create: `firmware/CMakeLists.txt`
-- Create: `firmware/main/CMakeLists.txt`
-- Create: `firmware/main/main.c`
-- Create: `firmware/sdkconfig.defaults` (at project root, NOT in main/)
-- Create: `firmware/components/.gitkeep` (empty dir placeholder)
-
-**Step 1: Create project directories**
-
-Run:
-```bash
-cd ~/claude/boorker-watchdog
-mkdir -p firmware/main firmware/components
-touch firmware/components/.gitkeep
-```
-
-> **Note:** The `components` directory MUST exist (even if empty) because `CMakeLists.txt` references it in `EXTRA_COMPONENT_DIRS`. Without it, `idf.py set-target` will fail with "Directory specified in EXTRA_COMPONENT_DIRS doesn't exist".
-
-**Step 2: Create root CMakeLists.txt**
-
-Create `firmware/CMakeLists.txt`:
-```cmake
-cmake_minimum_required(VERSION 3.16)
-
-set(EXTRA_COMPONENT_DIRS components)
-
-include($ENV{IDF_PATH}/tools/cmake/project.cmake)
-project(boorker)
-```
-
-**Step 3: Create main component CMakeLists.txt**
-
-Create `firmware/main/CMakeLists.txt`:
-```cmake
-idf_component_register(
-    SRCS "main.c"
-    INCLUDE_DIRS "."
-)
-```
-
-**Step 4: Create minimal main.c**
-
-Create `firmware/main/main.c`:
-```c
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "esp_heap_caps.h"
-#include "nvs_flash.h"
-
-static const char *TAG = "boorker";
-
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Boorker starting...");
-
-    // Initialize NVS (required for WiFi and storage)
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ESP_LOGI(TAG, "NVS initialized");
-    ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
-    ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-
-    while (1) {
-        ESP_LOGI(TAG, "Heartbeat - heap: %lu", esp_get_free_heap_size());
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
-}
-```
-
-> **Note:** Use `heap_caps_get_free_size(MALLOC_CAP_SPIRAM)` for PSRAM, not `esp_get_free_internal_heap_size()` which only shows internal SRAM.
-
-**Step 5: Create sdkconfig.defaults (at project root)**
-
-Create `firmware/sdkconfig.defaults` (NOT in `main/` — ESP-IDF looks for it at the project root where the root `CMakeLists.txt` is):
-```
-# Target
-CONFIG_IDF_TARGET="esp32s3"
-
-# PSRAM Configuration (critical for MicroLink)
-CONFIG_SPIRAM=y
-CONFIG_SPIRAM_MODE_OCT=y
-CONFIG_SPIRAM_SPEED_80M=y
-CONFIG_SPIRAM_BOOT_INIT=y
-CONFIG_SPIRAM_USE_MALLOC=y
-CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=4096
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
-
-# Partition Table (large app for MicroLink)
-CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
-
-# Stack size
-CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192
-
-# Log level
-CONFIG_LOG_DEFAULT_LEVEL_INFO=y
-```
-
-**Step 6: Build and verify**
-
-Run:
-```bash
+source ~/esp/esp-idf/export.sh
 cd ~/claude/boorker-watchdog/firmware
-get_idf  # or . $HOME/esp/esp-idf/export.sh
-idf.py set-target esp32s3
 idf.py build
 ```
-
-Expected: Build succeeds with "Project build complete" message
-
-**Step 7: Commit**
-
-```bash
-cd ~/claude/boorker-watchdog
-git add firmware/
-git commit -m "feat: add ESP-IDF project skeleton for Boorker
-
-- CMakeLists.txt for ESP-IDF build system
-- Minimal main.c with NVS init and heap monitoring
-- sdkconfig.defaults with PSRAM and ESP32-S3 settings"
-```
-
----
-
-### Task 3.5: Configure VS Code for ESP-IDF (Optional)
-
-After the first successful build, configure VS Code IntelliSense to recognize ESP-IDF headers.
-
-**Step 1: Create .vscode directory**
-
-```bash
-mkdir -p ~/claude/boorker-watchdog/.vscode
-```
-
-**Step 2: Create c_cpp_properties.json**
-
-Create `.vscode/c_cpp_properties.json`:
-```json
-{
-    "configurations": [
-        {
-            "name": "ESP-IDF",
-            "compileCommands": "${workspaceFolder}/firmware/build/compile_commands.json",
-            "includePath": [
-                "${workspaceFolder}/firmware/**",
-                "${env:HOME}/esp/esp-idf/components/**"
-            ],
-            "defines": [
-                "ESP_PLATFORM",
-                "IDF_VER=\"5.5.3\""
-            ],
-            "compilerPath": "${env:HOME}/.espressif/tools/xtensa-esp-elf/esp-14.2.0_20251107/xtensa-esp-elf/bin/xtensa-esp32s3-elf-gcc",
-            "cStandard": "c17",
-            "cppStandard": "c++17",
-            "intelliSenseMode": "linux-gcc-x64"
-        }
-    ],
-    "version": 4
-}
-```
-
-> **Important Notes:**
-> - `compilerPath` must be an exact path — globs like `*` do NOT work
-> - The toolchain version (`esp-14.2.0_20251107`) may differ; find yours with:
->   ```bash
->   find ~/.espressif/tools -name "xtensa-esp32s3-elf-gcc" -type f
->   ```
-> - `compile_commands.json` is generated by `idf.py build` — IntelliSense works best after building
-
-**Step 3: Reload VS Code**
-
-Press `Ctrl+Shift+P` → "Developer: Reload Window"
-
-**Step 4: Add to .gitignore (optional)**
-
-```bash
-echo ".vscode/" >> .gitignore
-```
-
----
-
-### Task 4: Flash and Test on Hardware
-
-**Step 1: Connect ESP32-S3-DEVKITC-1 via USB**
-
-Note: The DevKitC-1 has two USB ports. Use the **USB** port (not UART) for native USB.
-
-**Step 2: Find the serial port**
-
-Run:
-```bash
-ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null
-```
-
-Expected: `/dev/ttyACM0` or `/dev/ttyUSB0`
-
-**Step 3: Flash the firmware**
-
-Run:
-```bash
-cd ~/claude/boorker-watchdog/firmware
-idf.py -p /dev/ttyACM0 flash monitor
-```
-
-Expected output:
-```
-I (xxx) boorker: Boorker starting...
-I (xxx) boorker: NVS initialized
-I (xxx) boorker: Free heap: ~370000 bytes
-I (xxx) boorker: Free PSRAM: ~8000000 bytes
-I (xxx) boorker: Heartbeat - heap: ~370000
-```
-
-**Step 4: Exit monitor**
-
-Press `Ctrl+]` to exit
 
 ---
 
 ## Phase 2: WiFi Connection
 
-### Task 5: Add WiFi Station Mode
+> **Design Document:** See [WiFi Manager Design](./2026-02-28-wifi-manager-design.md) for full architecture details.
 
-**Files:**
-- Modify: `firmware/main/main.c`
-- Create: `firmware/main/wifi.h`
-- Create: `firmware/main/wifi.c`
-- Modify: `firmware/main/CMakeLists.txt`
-- Modify: `firmware/sdkconfig.defaults`
+### Overview
 
-**Step 1: Update CMakeLists.txt**
+WiFi is implemented as a reusable ESP-IDF component (`wifi_manager`) with:
 
-Edit `firmware/main/CMakeLists.txt`:
-```cmake
-idf_component_register(
-    SRCS "main.c" "wifi.c"
-    INCLUDE_DIRS "."
-)
+| Feature | Description |
+|---------|-------------|
+| **BLE Provisioning** | First-time setup via ESP BLE Prov app |
+| **NVS Storage** | Encrypted credential storage |
+| **Auto-reconnect** | Exponential backoff (1s → 5min), never gives up |
+| **mDNS** | Device discoverable as `boorker.local` |
+| **Power Management** | Modem sleep for battery efficiency |
+| **Security** | WPA3 preferred, Proof-of-Possession for BLE |
+
+### Task 5: Implement wifi_manager Component
+
+**Files to create:**
+```
+firmware/components/wifi_manager/
+├── CMakeLists.txt
+├── Kconfig
+├── include/wifi_manager.h
+└── src/
+    ├── wifi_manager.c
+    ├── wifi_provisioning.c
+    ├── wifi_power.c
+    └── wifi_mdns.c
 ```
 
-**Step 2: Create wifi.h**
+**Step 1: Build and configure**
 
-Create `firmware/main/wifi.h`:
-```c
-#ifndef WIFI_H
-#define WIFI_H
-
-#include "esp_err.h"
-
-/**
- * Initialize WiFi in station mode and connect to AP
- * Blocks until connected or max retries exceeded
- *
- * @param ssid WiFi network name
- * @param password WiFi password
- * @return ESP_OK on success, ESP_FAIL on connection failure
- */
-esp_err_t wifi_init_sta(const char *ssid, const char *password);
-
-/**
- * Check if WiFi is currently connected
- * @return true if connected
- */
-bool wifi_is_connected(void);
-
-#endif // WIFI_H
-```
-
-**Step 3: Create wifi.c**
-
-Create `firmware/main/wifi.c`:
-```c
-#include "wifi.h"
-#include <string.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-#include "esp_wifi.h"
-#include "esp_log.h"
-#include "esp_event.h"
-#include "nvs_flash.h"
-
-static const char *TAG = "wifi";
-
-#define WIFI_CONNECTED_BIT BIT0
-#define WIFI_FAIL_BIT      BIT1
-#define MAX_RETRY          5
-
-static EventGroupHandle_t s_wifi_event_group;
-static int s_retry_num = 0;
-static bool s_is_connected = false;
-
-static void event_handler(void *arg, esp_event_base_t event_base,
-                          int32_t event_id, void *event_data)
-{
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        s_is_connected = false;
-        if (s_retry_num < MAX_RETRY) {
-            esp_wifi_connect();
-            s_retry_num++;
-            ESP_LOGI(TAG, "Retrying connection (%d/%d)", s_retry_num, MAX_RETRY);
-        } else {
-            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
-        }
-    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
-        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Connected! IP: " IPSTR, IP2STR(&event->ip_info.ip));
-        s_retry_num = 0;
-        s_is_connected = true;
-        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
-    }
-}
-
-esp_err_t wifi_init_sta(const char *ssid, const char *password)
-{
-    s_wifi_event_group = xEventGroupCreate();
-
-    ESP_ERROR_CHECK(esp_netif_init());
-    ESP_ERROR_CHECK(esp_event_loop_create_default());
-    esp_netif_create_default_wifi_sta();
-
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                    ESP_EVENT_ANY_ID, &event_handler, NULL, &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                    IP_EVENT_STA_GOT_IP, &event_handler, NULL, &instance_got_ip));
-
-    wifi_config_t wifi_config = {
-        .sta = {
-            .threshold.authmode = WIFI_AUTH_WPA2_PSK,
-        },
-    };
-    strncpy((char *)wifi_config.sta.ssid, ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char *)wifi_config.sta.password, password, sizeof(wifi_config.sta.password) - 1);
-
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
-    ESP_ERROR_CHECK(esp_wifi_start());
-
-    ESP_LOGI(TAG, "Connecting to %s...", ssid);
-
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
-            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
-            pdFALSE, pdFALSE, portMAX_DELAY);
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        return ESP_OK;
-    } else {
-        ESP_LOGE(TAG, "Failed to connect to %s", ssid);
-        return ESP_FAIL;
-    }
-}
-
-bool wifi_is_connected(void)
-{
-    return s_is_connected;
-}
-```
-
-**Step 4: Update main.c to use WiFi**
-
-Edit `firmware/main/main.c`:
-```c
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "nvs_flash.h"
-#include "wifi.h"
-
-static const char *TAG = "boorker";
-
-// TODO: Move to NVS or Kconfig
-#define WIFI_SSID     "YOUR_WIFI_SSID"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Boorker starting...");
-
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
-
-    // Connect to WiFi
-    ret = wifi_init_sta(WIFI_SSID, WIFI_PASSWORD);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "WiFi connection failed!");
-        return;
-    }
-
-    ESP_LOGI(TAG, "WiFi connected, free heap: %lu", esp_get_free_heap_size());
-
-    while (1) {
-        ESP_LOGI(TAG, "Heartbeat - connected: %s, heap: %lu",
-                 wifi_is_connected() ? "yes" : "no",
-                 esp_get_free_heap_size());
-        vTaskDelay(pdMS_TO_TICKS(5000));
-    }
-}
-```
-
-**Step 5: Build and flash**
-
-Run:
 ```bash
 cd ~/claude/boorker-watchdog/firmware
-idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py set-target esp32s3
+idf.py menuconfig
+# Navigate to: Component config → WiFi Manager
+# Set device name and PoP PIN
 ```
 
-Expected: WiFi connects and shows IP address
+**Step 2: Update main.c**
 
-**Step 6: Commit**
+```c
+#include "wifi_manager.h"
+
+static void wifi_callback(wifi_mgr_event_t event, void *ctx) {
+    switch (event) {
+        case WIFI_MGR_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "WiFi connected");
+            break;
+        case WIFI_MGR_EVENT_PROVISIONING:
+            ESP_LOGI(TAG, "Open ESP BLE Prov app to configure WiFi");
+            break;
+        default:
+            break;
+    }
+}
+
+void app_main(void) {
+    nvs_flash_init();
+
+    wifi_mgr_config_t config = {
+        .device_name = "boorker-dev",
+        .callback = wifi_callback,
+    };
+    wifi_mgr_init(&config);
+
+    // Wait for connection
+    EventGroupHandle_t events = wifi_mgr_get_event_group();
+    xEventGroupWaitBits(events, WIFI_MGR_CONNECTED_BIT,
+                        pdFALSE, pdTRUE, portMAX_DELAY);
+
+    ESP_LOGI(TAG, "WiFi ready, starting services...");
+}
+```
+
+**Step 3: First-time provisioning**
+
+1. Flash firmware: `idf.py -p /dev/ttyUSB0 flash`
+2. Install "ESP BLE Prov" app (iOS/Android)
+3. Open app → Scan for "boorker-dev"
+4. Enter Proof-of-Possession PIN (default: `boorker123`)
+5. Select WiFi network and enter password
+6. Device stores credentials and connects
+
+**Step 4: Verify**
 
 ```bash
-git add firmware/main/
-git commit -m "feat: add WiFi station mode connection
+/esp:monitor
+```
 
-- wifi.c/h with event-driven connection handling
-- Auto-retry on disconnect (max 5 attempts)
-- Integrated into main.c startup"
+Expected:
+```
+I (xxx) wifi_manager: Checking for stored credentials...
+I (xxx) wifi_manager: Connecting to saved network...
+I (xxx) wifi_manager: Connected! IP: 192.168.1.xxx
+I (xxx) wifi_manager: mDNS registered: boorker-dev.local
+```
+
+**Step 5: Commit**
+
+```bash
+git add firmware/components/wifi_manager/
+git commit -m "feat: add wifi_manager component
+
+- BLE provisioning with Proof-of-Possession
+- NVS encrypted credential storage
+- Exponential backoff reconnection
+- mDNS discovery (device.local)
+- Power management (modem sleep)
+- Callbacks + event groups for state notification"
 ```
 
 ---
@@ -658,7 +202,6 @@ git commit -m "feat: add WiFi station mode connection
 
 **Step 1: Add MicroLink as submodule**
 
-Run:
 ```bash
 cd ~/claude/boorker-watchdog/firmware/components
 git submodule add https://github.com/CamM2325/microlink.git
@@ -687,7 +230,6 @@ CONFIG_ESP_HTTP_CLIENT_ENABLE_HTTPS=y
 
 **Step 3: Clean and reconfigure**
 
-Run:
 ```bash
 cd ~/claude/boorker-watchdog/firmware
 rm -rf build sdkconfig
@@ -695,17 +237,14 @@ idf.py set-target esp32s3
 idf.py menuconfig
 ```
 
-Navigate to: `Component config → MicroLink` and verify defaults are sensible.
+Navigate to: `Component config → MicroLink` and verify defaults.
 Press `Q` then `Y` to save and exit.
 
-**Step 4: Build to verify component integration**
+**Step 4: Build to verify**
 
-Run:
 ```bash
 idf.py build
 ```
-
-Expected: Build succeeds with MicroLink compiled
 
 **Step 5: Commit**
 
@@ -722,37 +261,27 @@ git commit -m "feat: add MicroLink component for Tailscale VPN
 
 ### Task 7: Generate Tailscale Auth Key
 
-**Step 1: Log into Tailscale admin console**
+**Step 1:** Open https://login.tailscale.com/admin/settings/keys
 
-Open: https://login.tailscale.com/admin/settings/keys
+**Step 2:** Generate auth key:
+- Reusable: Yes (for development)
+- Ephemeral: No (device persists)
+- Tags: Optional, e.g., `tag:iot`
 
-**Step 2: Generate auth key**
-
-- Click "Generate auth key"
-- Options:
-  - Reusable: Yes (for development)
-  - Ephemeral: No (we want the device to persist)
-  - Tags: Optional, e.g., `tag:iot`
-- Copy the key (starts with `tskey-auth-`)
-
-**Step 3: Store key securely**
-
-For development, create a local config file (NOT committed):
-
-Create `firmware/main/secrets.h`:
+**Step 3:** Create `firmware/main/secrets.h` (NOT committed):
 ```c
 #ifndef SECRETS_H
 #define SECRETS_H
 
-#define WIFI_SSID     "your_wifi_ssid"
-#define WIFI_PASSWORD "your_wifi_password"
+// WiFi credentials handled by wifi_manager (BLE provisioning + NVS)
+// No need to define WIFI_SSID/WIFI_PASSWORD here
+
 #define TAILSCALE_AUTH_KEY "tskey-auth-xxxxxxxxxxxxx"
 
 #endif // SECRETS_H
 ```
 
-**Step 4: Add to .gitignore**
-
+**Step 4:** Add to .gitignore:
 ```bash
 echo "firmware/main/secrets.h" >> .gitignore
 git add .gitignore
@@ -771,50 +300,25 @@ git commit -m "chore: ignore secrets.h"
 
 **Step 1: Update CMakeLists.txt**
 
-Edit `firmware/main/CMakeLists.txt`:
 ```cmake
 idf_component_register(
-    SRCS "main.c" "wifi.c" "tailscale.c"
+    SRCS "main.c" "tailscale.c"
     INCLUDE_DIRS "."
-    REQUIRES microlink
+    REQUIRES wifi_manager microlink
 )
 ```
 
 **Step 2: Create tailscale.h**
 
-Create `firmware/main/tailscale.h`:
 ```c
 #ifndef TAILSCALE_H
 #define TAILSCALE_H
 
 #include "esp_err.h"
 
-/**
- * Initialize and connect to Tailscale network
- * Requires WiFi to be connected first
- *
- * @param auth_key Tailscale auth key (tskey-auth-xxx)
- * @param device_name Name shown in Tailscale admin
- * @return ESP_OK on success
- */
 esp_err_t tailscale_init(const char *auth_key, const char *device_name);
-
-/**
- * Must be called regularly from main loop
- */
 void tailscale_update(void);
-
-/**
- * Check if connected to Tailscale network
- */
 bool tailscale_is_connected(void);
-
-/**
- * Get the Tailscale IP address (100.x.y.z)
- * @param buf Buffer to store IP string
- * @param buf_len Buffer length
- * @return ESP_OK if connected and IP available
- */
 esp_err_t tailscale_get_ip(char *buf, size_t buf_len);
 
 #endif // TAILSCALE_H
@@ -822,7 +326,6 @@ esp_err_t tailscale_get_ip(char *buf, size_t buf_len);
 
 **Step 3: Create tailscale.c**
 
-Create `firmware/main/tailscale.c`:
 ```c
 #include "tailscale.h"
 #include "microlink.h"
@@ -878,50 +381,32 @@ esp_err_t tailscale_get_ip(char *buf, size_t buf_len)
 
 **Step 4: Update main.c**
 
-Edit `firmware/main/main.c`:
 ```c
-#include <stdio.h>
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "esp_log.h"
-#include "esp_system.h"
-#include "nvs_flash.h"
-#include "wifi.h"
+#include "wifi_manager.h"
 #include "tailscale.h"
 #include "secrets.h"
 
-static const char *TAG = "boorker";
-
-void app_main(void)
-{
-    ESP_LOGI(TAG, "Boorker starting...");
-    ESP_LOGI(TAG, "Free heap: %lu, PSRAM: %lu",
-             esp_get_free_heap_size(),
-             heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
+static void on_wifi_connected(wifi_mgr_event_t event, void *ctx) {
+    if (event == WIFI_MGR_EVENT_CONNECTED) {
+        // Start Tailscale once WiFi is up
+        tailscale_init(TAILSCALE_AUTH_KEY, "boorker-dev");
     }
-    ESP_ERROR_CHECK(ret);
+}
 
-    // Connect to WiFi
-    ret = wifi_init_sta(WIFI_SSID, WIFI_PASSWORD);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "WiFi connection failed!");
-        return;
-    }
+void app_main(void) {
+    nvs_flash_init();
 
-    ESP_LOGI(TAG, "WiFi connected, heap: %lu", esp_get_free_heap_size());
+    // Initialize WiFi (blocks until connected or provisioning)
+    wifi_mgr_config_t wifi_cfg = {
+        .device_name = "boorker-dev",
+        .callback = on_wifi_connected,
+    };
+    wifi_mgr_init(&wifi_cfg);
 
-    // Connect to Tailscale
-    ret = tailscale_init(TAILSCALE_AUTH_KEY, "boorker-dev");
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Tailscale init failed!");
-        return;
-    }
+    // Wait for WiFi connection
+    xEventGroupWaitBits(wifi_mgr_get_event_group(),
+                        WIFI_MGR_CONNECTED_BIT,
+                        pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Main loop
     char ts_ip[16] = {0};
@@ -930,11 +415,7 @@ void app_main(void)
 
         if (tailscale_is_connected()) {
             tailscale_get_ip(ts_ip, sizeof(ts_ip));
-            ESP_LOGI(TAG, "Tailscale connected: %s, heap: %lu",
-                     ts_ip, esp_get_free_heap_size());
-        } else {
-            ESP_LOGI(TAG, "Tailscale connecting..., heap: %lu",
-                     esp_get_free_heap_size());
+            ESP_LOGI(TAG, "Tailscale: %s, heap: %lu", ts_ip, esp_get_free_heap_size());
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -942,41 +423,16 @@ void app_main(void)
 }
 ```
 
-**Step 5: Build and flash**
+**Step 5: Build, flash, verify**
 
-Run:
 ```bash
-cd ~/claude/boorker-watchdog/firmware
-idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
+idf.py build && idf.py -p /dev/ttyUSB0 flash
+/esp:monitor
 ```
 
-Expected:
-```
-I (xxx) boorker: Boorker starting...
-I (xxx) boorker: WiFi connected
-I (xxx) tailscale: Connecting to Tailscale as 'boorker-dev'...
-I (xxx) boorker: Tailscale connected: 100.x.y.z
-```
-
-**Step 6: Verify from another device**
-
-From any device on your Tailscale network:
+From another Tailscale device:
 ```bash
 tailscale ping boorker-dev
-```
-
-Expected: Successful ping response
-
-**Step 7: Commit**
-
-```bash
-git add firmware/main/
-git commit -m "feat: integrate MicroLink Tailscale VPN
-
-- tailscale.c/h wrapper for MicroLink API
-- Connect to Tailscale after WiFi
-- Display Tailscale IP in logs"
 ```
 
 ---
@@ -993,32 +449,23 @@ git commit -m "feat: integrate MicroLink Tailscale VPN
 
 **Step 1: Update CMakeLists.txt**
 
-Edit `firmware/main/CMakeLists.txt`:
 ```cmake
 idf_component_register(
-    SRCS "main.c" "wifi.c" "tailscale.c" "webserver.c"
+    SRCS "main.c" "tailscale.c" "webserver.c"
     INCLUDE_DIRS "."
-    REQUIRES microlink esp_http_server json
+    REQUIRES wifi_manager microlink esp_http_server json
 )
 ```
 
 **Step 2: Create webserver.h**
 
-Create `firmware/main/webserver.h`:
 ```c
 #ifndef WEBSERVER_H
 #define WEBSERVER_H
 
 #include "esp_err.h"
 
-/**
- * Start the HTTP server on port 80
- */
 esp_err_t webserver_start(void);
-
-/**
- * Stop the HTTP server
- */
 void webserver_stop(void);
 
 #endif // WEBSERVER_H
@@ -1026,7 +473,6 @@ void webserver_stop(void);
 
 **Step 3: Create webserver.c**
 
-Create `firmware/main/webserver.c`:
 ```c
 #include "webserver.h"
 #include "esp_http_server.h"
@@ -1034,7 +480,7 @@ Create `firmware/main/webserver.c`:
 #include "esp_system.h"
 #include "cJSON.h"
 #include "tailscale.h"
-#include "wifi.h"
+#include "wifi_manager.h"
 
 static const char *TAG = "webserver";
 static httpd_handle_t s_server = NULL;
@@ -1065,7 +511,7 @@ static esp_err_t status_handler(httpd_req_t *req)
     cJSON_AddStringToObject(root, "device", "boorker-dev");
     cJSON_AddNumberToObject(root, "heap_free", esp_get_free_heap_size());
     cJSON_AddNumberToObject(root, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    cJSON_AddBoolToObject(root, "wifi_connected", wifi_is_connected());
+    cJSON_AddBoolToObject(root, "wifi_connected", wifi_mgr_is_connected());
     cJSON_AddBoolToObject(root, "tailscale_connected", tailscale_is_connected());
 
     char ts_ip[16] = "N/A";
@@ -1095,18 +541,10 @@ esp_err_t webserver_start(void)
         return ESP_FAIL;
     }
 
-    httpd_uri_t root = {
-        .uri = "/",
-        .method = HTTP_GET,
-        .handler = root_handler
-    };
-    httpd_register_uri_handler(s_server, &root);
+    httpd_uri_t root = { .uri = "/", .method = HTTP_GET, .handler = root_handler };
+    httpd_uri_t status = { .uri = "/api/status", .method = HTTP_GET, .handler = status_handler };
 
-    httpd_uri_t status = {
-        .uri = "/api/status",
-        .method = HTTP_GET,
-        .handler = status_handler
-    };
+    httpd_register_uri_handler(s_server, &root);
     httpd_register_uri_handler(s_server, &status);
 
     ESP_LOGI(TAG, "Web server started");
@@ -1122,63 +560,33 @@ void webserver_stop(void)
 }
 ```
 
-**Step 4: Update main.c to start web server**
+**Step 4: Update main.c**
 
-Add after Tailscale init in `firmware/main/main.c`:
 ```c
 #include "webserver.h"
 
-// ... in app_main(), after tailscale_init():
-
-    // Start web server
-    ret = webserver_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Web server failed to start");
-    }
+// After tailscale_init():
+webserver_start();
 ```
 
-**Step 5: Build, flash, test**
-
-Run:
-```bash
-idf.py build
-idf.py -p /dev/ttyACM0 flash monitor
-```
-
-Test locally (from same network):
-```bash
-curl http://<local-ip>/api/status
-```
-
-Test via Tailscale (from any tailnet device):
-```bash
-curl http://100.x.y.z/api/status
-```
-
-Expected JSON response with device status.
-
-**Step 6: Commit**
+**Step 5: Test**
 
 ```bash
-git add firmware/main/
-git commit -m "feat: add HTTP web server with status API
-
-- Root page with device info
-- /api/status JSON endpoint with heap, WiFi, Tailscale status
-- Accessible via local IP and Tailscale IP"
+idf.py build && idf.py -p /dev/ttyUSB0 flash
+curl http://100.x.y.z/api/status  # Via Tailscale
 ```
 
 ---
 
 ## Summary
 
-After completing all tasks, you will have:
-
-1. ESP-IDF v5.5.3 development environment
-2. Boorker firmware project with PSRAM support
-3. WiFi connection with auto-reconnect
-4. Tailscale VPN via MicroLink (accessible from anywhere)
-5. Basic web server with status API
+| Phase | Description | Status |
+|-------|-------------|--------|
+| Prerequisites | Environment setup via `esp32-wsl2-dev` plugin | ✓ |
+| Phase 1 | Project structure | ✓ |
+| Phase 2 | WiFi connection | Pending |
+| Phase 3 | MicroLink/Tailscale | Pending |
+| Phase 4 | Web server | Pending |
 
 **Next phases (after Heltec V3 arrives):**
 - LoRa mesh communication
