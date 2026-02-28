@@ -14,6 +14,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
+#include "freertos/semphr.h"
 
 #include <string.h>
 
@@ -31,6 +32,7 @@ typedef enum {
 // Internal state
 static struct {
     wifi_mgr_state_t state;
+    SemaphoreHandle_t state_mutex;
     EventGroupHandle_t event_group;
     wifi_mgr_callback_t callback;
     void *callback_ctx;
@@ -38,6 +40,7 @@ static struct {
     esp_netif_t *sta_netif;
     esp_timer_handle_t reconnect_timer;
     uint32_t reconnect_delay_ms;
+    uint8_t reconnect_attempts;
     bool wifi_started;
     esp_event_handler_instance_t wifi_event_instance;
     esp_event_handler_instance_t ip_event_instance;
@@ -45,6 +48,7 @@ static struct {
 } s_wifi_mgr = {
     .state = WIFI_MGR_STATE_IDLE,
     .reconnect_delay_ms = CONFIG_WIFI_MGR_RECONNECT_INITIAL_DELAY_MS,
+    .reconnect_attempts = 0,
 };
 
 // Forward declarations
@@ -92,10 +96,19 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *config)
 {
     ESP_LOGI(TAG, "Initializing WiFi manager...");
 
+    // Create state mutex for thread safety
+    s_wifi_mgr.state_mutex = xSemaphoreCreateMutex();
+    if (s_wifi_mgr.state_mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to create state mutex");
+        return ESP_ERR_NO_MEM;
+    }
+
     // Create event group
     s_wifi_mgr.event_group = xEventGroupCreate();
     if (s_wifi_mgr.event_group == NULL) {
         ESP_LOGE(TAG, "Failed to create event group");
+        vSemaphoreDelete(s_wifi_mgr.state_mutex);
+        s_wifi_mgr.state_mutex = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -209,8 +222,9 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
         ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
 
-        // Reset reconnect delay on successful connection
+        // Reset reconnect state on successful connection
         s_wifi_mgr.reconnect_delay_ms = CONFIG_WIFI_MGR_RECONNECT_INITIAL_DELAY_MS;
+        s_wifi_mgr.reconnect_attempts = 0;
 
         set_state(WIFI_MGR_STATE_CONNECTED);
 
@@ -232,7 +246,20 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
 
 static void reconnect_timer_callback(void *arg)
 {
-    ESP_LOGI(TAG, "Attempting reconnection...");
+    s_wifi_mgr.reconnect_attempts++;
+
+#if CONFIG_WIFI_MGR_RECONNECT_MAX_ATTEMPTS > 0
+    if (s_wifi_mgr.reconnect_attempts >= CONFIG_WIFI_MGR_RECONNECT_MAX_ATTEMPTS) {
+        ESP_LOGW(TAG, "Max reconnection attempts (%d) reached",
+                 CONFIG_WIFI_MGR_RECONNECT_MAX_ATTEMPTS);
+        notify_callback(WIFI_MGR_EVENT_RECONNECT_EXHAUSTED);
+        // Stay in RECONNECTING state but stop retrying
+        // Application can call wifi_mgr_start_provisioning() if desired
+        return;
+    }
+#endif
+
+    ESP_LOGI(TAG, "Attempting reconnection (attempt %d)...", s_wifi_mgr.reconnect_attempts);
     set_state(WIFI_MGR_STATE_CONNECTING);
     esp_wifi_connect();
 
@@ -245,12 +272,14 @@ static void reconnect_timer_callback(void *arg)
 
 static void set_state(wifi_mgr_state_t new_state)
 {
+    xSemaphoreTake(s_wifi_mgr.state_mutex, portMAX_DELAY);
     if (s_wifi_mgr.state != new_state) {
         ESP_LOGI(TAG, "State: %s -> %s",
                  state_names[s_wifi_mgr.state],
                  state_names[new_state]);
         s_wifi_mgr.state = new_state;
     }
+    xSemaphoreGive(s_wifi_mgr.state_mutex);
 }
 
 static void notify_callback(wifi_mgr_event_t event)
@@ -334,29 +363,55 @@ esp_err_t wifi_mgr_stop(void)
     // Stop mDNS
     wifi_mdns_stop();
 
+    // Stop provisioning if active
+    wifi_prov_stop();
+
     if (s_wifi_mgr.reconnect_timer) {
         esp_timer_stop(s_wifi_mgr.reconnect_timer);
         esp_timer_delete(s_wifi_mgr.reconnect_timer);
         s_wifi_mgr.reconnect_timer = NULL;
     }
 
-    esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID,
-        s_wifi_mgr.wifi_event_instance);
-    esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP,
-        s_wifi_mgr.ip_event_instance);
-    esp_event_handler_instance_unregister(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID,
-        s_wifi_mgr.prov_event_instance);
+    // Unregister event handlers
+    if (s_wifi_mgr.wifi_event_instance) {
+        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID,
+            s_wifi_mgr.wifi_event_instance);
+        s_wifi_mgr.wifi_event_instance = NULL;
+    }
+    if (s_wifi_mgr.ip_event_instance) {
+        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP,
+            s_wifi_mgr.ip_event_instance);
+        s_wifi_mgr.ip_event_instance = NULL;
+    }
+    if (s_wifi_mgr.prov_event_instance) {
+        esp_event_handler_instance_unregister(WIFI_PROV_EVENT, ESP_EVENT_ANY_ID,
+            s_wifi_mgr.prov_event_instance);
+        s_wifi_mgr.prov_event_instance = NULL;
+    }
 
+    // Stop and deinitialize WiFi
     if (s_wifi_mgr.wifi_started) {
         esp_wifi_stop();
         s_wifi_mgr.wifi_started = false;
     }
+    esp_wifi_deinit();
 
+    // Destroy network interface
+    if (s_wifi_mgr.sta_netif) {
+        esp_netif_destroy_default_wifi(s_wifi_mgr.sta_netif);
+        s_wifi_mgr.sta_netif = NULL;
+    }
+
+    // Clean up synchronization primitives
     if (s_wifi_mgr.event_group) {
         vEventGroupDelete(s_wifi_mgr.event_group);
         s_wifi_mgr.event_group = NULL;
     }
+    if (s_wifi_mgr.state_mutex) {
+        vSemaphoreDelete(s_wifi_mgr.state_mutex);
+        s_wifi_mgr.state_mutex = NULL;
+    }
 
-    set_state(WIFI_MGR_STATE_IDLE);
+    s_wifi_mgr.state = WIFI_MGR_STATE_IDLE;
     return ESP_OK;
 }

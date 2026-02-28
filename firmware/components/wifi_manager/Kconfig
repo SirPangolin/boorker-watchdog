@@ -26,6 +26,14 @@ menu "WiFi Manager"
         help
             Exponential backoff caps at this value (default 5 minutes)
 
+    config WIFI_MGR_RECONNECT_MAX_ATTEMPTS
+        int "Maximum reconnection attempts (0 = infinite)"
+        default 0
+        help
+            Number of reconnection attempts before firing
+            WIFI_MGR_EVENT_RECONNECT_EXHAUSTED callback.
+            Set to 0 for infinite retries (default behavior).
+
     config WIFI_MGR_ENABLE_POWER_SAVE
         bool "Enable WiFi power saving (modem sleep)"
         default y

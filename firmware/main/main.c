@@ -34,6 +34,11 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
         case WIFI_MGR_EVENT_PROVISIONED:
             ESP_LOGI(TAG, "Credentials saved - connecting...");
             break;
+
+        case WIFI_MGR_EVENT_RECONNECT_EXHAUSTED:
+            ESP_LOGW(TAG, "Max reconnection attempts reached");
+            ESP_LOGI(TAG, "Consider re-provisioning with wifi_mgr_start_provisioning()");
+            break;
     }
 }
 
