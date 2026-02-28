@@ -1,5 +1,6 @@
 #include "wifi_manager.h"
 #include "wifi_prov_internal.h"
+#include "wifi_mdns_internal.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -171,6 +172,9 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
             ESP_LOGW(TAG, "Disconnected from AP (reason: %d)", event->reason);
 
+            // Stop mDNS since we're no longer connected
+            wifi_mdns_stop();
+
             xEventGroupClearBits(s_wifi_mgr.event_group, WIFI_MGR_CONNECTED_BIT);
             xEventGroupSetBits(s_wifi_mgr.event_group, WIFI_MGR_DISCONNECTED_BIT);
 
@@ -211,6 +215,9 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
 
         xEventGroupClearBits(s_wifi_mgr.event_group, WIFI_MGR_DISCONNECTED_BIT);
         xEventGroupSetBits(s_wifi_mgr.event_group, WIFI_MGR_CONNECTED_BIT);
+
+        // Start mDNS
+        wifi_mdns_start(s_wifi_mgr.device_name);
 
         notify_callback(WIFI_MGR_EVENT_CONNECTED);
     }
@@ -317,6 +324,9 @@ esp_err_t wifi_mgr_clear_credentials(void)
 
 esp_err_t wifi_mgr_stop(void)
 {
+    // Stop mDNS
+    wifi_mdns_stop();
+
     if (s_wifi_mgr.reconnect_timer) {
         esp_timer_stop(s_wifi_mgr.reconnect_timer);
         esp_timer_delete(s_wifi_mgr.reconnect_timer);
