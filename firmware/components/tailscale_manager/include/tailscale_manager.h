@@ -14,7 +14,6 @@ typedef enum {
     TS_MGR_EVENT_CONNECTED,           ///< Got Tailscale IP
     TS_MGR_EVENT_DISCONNECTED,        ///< Lost connection, will retry
     TS_MGR_EVENT_UNCONFIGURED,        ///< No auth key in NVS
-    TS_MGR_EVENT_AUTH_FAILED,         ///< Invalid/expired auth key
     TS_MGR_EVENT_RECONNECT_EXHAUSTED, ///< Max reconnection attempts reached
     TS_MGR_EVENT_KEY_UPDATED,         ///< New auth key set
 } ts_mgr_event_t;
@@ -38,7 +37,12 @@ typedef struct {
  *
  * Checks NVS for stored auth key. If found, begins connection.
  * If not found, fires TS_MGR_EVENT_UNCONFIGURED.
- * Requires WiFi to be connected first.
+ *
+ * Should be called after WiFi is connected for immediate connection attempts.
+ * If WiFi isn't ready, connection will fail but can be retried when WiFi connects.
+ *
+ * @note Call from main task or task with adequate stack (>8KB) - MicroLink
+ *       performs heavy initialization. Do NOT call from event callbacks.
  *
  * @param config Configuration (can be NULL for defaults)
  * @return ESP_OK on success

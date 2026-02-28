@@ -137,7 +137,12 @@ static esp_err_t start_microlink(void)
 
     set_state(TS_MGR_STATE_CONNECTING);
     ESP_LOGI(TAG, "Connecting to Tailscale as '%s'...", s_ts_mgr.device_name);
-    microlink_connect(s_ts_mgr.ml_handle);
+
+    esp_err_t ret = microlink_connect(s_ts_mgr.ml_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "microlink_connect failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
     return ESP_OK;
 }
@@ -147,14 +152,23 @@ static void update_task(void *arg)
     bool was_connected = false;
 
     while (!s_ts_mgr.stop_requested) {
-        if (s_ts_mgr.ml_handle != NULL &&
-            s_ts_mgr.state != TS_MGR_STATE_UNCONFIGURED) {
+        // Check state with mutex to avoid race conditions
+        bool should_update = false;
+        xSemaphoreTake(s_ts_mgr.state_mutex, portMAX_DELAY);
+        should_update = (s_ts_mgr.ml_handle != NULL &&
+                         s_ts_mgr.state != TS_MGR_STATE_UNCONFIGURED);
+        xSemaphoreGive(s_ts_mgr.state_mutex);
 
-            microlink_update(s_ts_mgr.ml_handle);
+        if (should_update) {
+            esp_err_t update_ret = microlink_update(s_ts_mgr.ml_handle);
+            if (update_ret != ESP_OK) {
+                ESP_LOGW(TAG, "microlink_update failed: %s", esp_err_to_name(update_ret));
+            }
 
             bool is_connected = microlink_is_connected(s_ts_mgr.ml_handle);
 
             xSemaphoreTake(s_ts_mgr.state_mutex, portMAX_DELAY);
+            ts_mgr_state_t old_state = s_ts_mgr.state;
 
             if (is_connected && !was_connected) {
                 // Just connected
@@ -163,14 +177,14 @@ static void update_task(void *arg)
                 s_ts_mgr.reconnect_delay_ms = CONFIG_TS_MGR_RECONNECT_INITIAL_MS;
                 xSemaphoreGive(s_ts_mgr.state_mutex);
 
-                ESP_LOGI(TAG, "State: %s -> CONNECTED", state_names[s_ts_mgr.state]);
+                ESP_LOGI(TAG, "State: %s -> CONNECTED", state_names[old_state]);
                 notify_callback(TS_MGR_EVENT_CONNECTED);
             } else if (!is_connected && was_connected) {
                 // Just disconnected
                 s_ts_mgr.state = TS_MGR_STATE_RECONNECTING;
                 xSemaphoreGive(s_ts_mgr.state_mutex);
 
-                ESP_LOGW(TAG, "State: CONNECTED -> RECONNECTING");
+                ESP_LOGW(TAG, "State: %s -> RECONNECTING", state_names[old_state]);
                 notify_callback(TS_MGR_EVENT_DISCONNECTED);
                 handle_reconnect();
             } else {
@@ -183,6 +197,8 @@ static void update_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(CONFIG_TS_MGR_UPDATE_INTERVAL_MS));
     }
 
+    // Signal task is exiting
+    s_ts_mgr.update_task = NULL;
     vTaskDelete(NULL);
 }
 
@@ -212,7 +228,10 @@ static void handle_reconnect(void)
 
     if (s_ts_mgr.ml_handle) {
         set_state(TS_MGR_STATE_CONNECTING);
-        microlink_connect(s_ts_mgr.ml_handle);
+        esp_err_t ret = microlink_connect(s_ts_mgr.ml_handle);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "microlink_connect failed during reconnect: %s", esp_err_to_name(ret));
+        }
     }
 }
 
@@ -241,10 +260,19 @@ esp_err_t ts_mgr_stop(void)
 
     s_ts_mgr.stop_requested = true;
 
-    // Wait for task to stop
+    // Wait for task to actually stop (task sets update_task = NULL before exiting)
     if (s_ts_mgr.update_task) {
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_TS_MGR_UPDATE_INTERVAL_MS * 2));
-        s_ts_mgr.update_task = NULL;
+        int max_wait_ms = CONFIG_TS_MGR_UPDATE_INTERVAL_MS * 3;
+        int waited_ms = 0;
+        while (s_ts_mgr.update_task != NULL && waited_ms < max_wait_ms) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            waited_ms += 10;
+        }
+        if (s_ts_mgr.update_task != NULL) {
+            ESP_LOGW(TAG, "Update task did not stop within timeout, forcing delete");
+            vTaskDelete(s_ts_mgr.update_task);
+            s_ts_mgr.update_task = NULL;
+        }
     }
 
     // Disconnect and deinit MicroLink
@@ -268,7 +296,13 @@ esp_err_t ts_mgr_stop(void)
 
 bool ts_mgr_is_connected(void)
 {
-    return s_ts_mgr.state == TS_MGR_STATE_CONNECTED;
+    if (s_ts_mgr.state_mutex == NULL) {
+        return false;
+    }
+    xSemaphoreTake(s_ts_mgr.state_mutex, portMAX_DELAY);
+    bool connected = (s_ts_mgr.state == TS_MGR_STATE_CONNECTED);
+    xSemaphoreGive(s_ts_mgr.state_mutex);
+    return connected;
 }
 
 bool ts_mgr_is_configured(void)
@@ -306,9 +340,15 @@ esp_err_t ts_mgr_set_auth_key(const char *key)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Validate key format
+    // Validate key format and length
     if (strncmp(key, "tskey-auth-", 11) != 0) {
         ESP_LOGE(TAG, "Invalid auth key format (must start with 'tskey-auth-')");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t key_len = strlen(key);
+    if (key_len >= AUTH_KEY_MAX_LEN) {
+        ESP_LOGE(TAG, "Auth key too long (%d >= %d)", key_len, AUTH_KEY_MAX_LEN);
         return ESP_ERR_INVALID_ARG;
     }
 

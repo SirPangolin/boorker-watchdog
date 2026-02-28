@@ -23,20 +23,23 @@ esp_err_t ts_nvs_store_key(const char *key)
     }
 
     ret = nvs_set_str(handle, NVS_KEY_AUTH, key);
-    if (ret == ESP_OK) {
-        ret = nvs_commit(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set auth key in NVS: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+
+    ret = nvs_commit(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
     }
 
     nvs_close(handle);
-
-    if (ret == ESP_OK) {
-        // Never log the key itself - only length for debugging
-        ESP_LOGI(TAG, "Auth key stored (length: %d)", strlen(key));
-    } else {
-        ESP_LOGE(TAG, "Failed to store auth key: %s", esp_err_to_name(ret));
-    }
-
-    return ret;
+    // Never log the key itself - only length for debugging
+    ESP_LOGI(TAG, "Auth key stored (length: %d)", strlen(key));
+    return ESP_OK;
 }
 
 esp_err_t ts_nvs_load_key(char *buf, size_t buf_len)
@@ -82,7 +85,12 @@ esp_err_t ts_nvs_clear_key(void)
 
     ret = nvs_erase_key(handle, NVS_KEY_AUTH);
     if (ret == ESP_OK || ret == ESP_ERR_NVS_NOT_FOUND) {
-        nvs_commit(handle);
+        esp_err_t commit_ret = nvs_commit(handle);
+        if (commit_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to commit NVS clear: %s", esp_err_to_name(commit_ret));
+            nvs_close(handle);
+            return commit_ret;
+        }
         ret = ESP_OK;
     }
 
