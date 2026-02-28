@@ -5,6 +5,7 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "mbedtls/sha256.h"
+#include "mbedtls/constant_time.h"
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -123,7 +124,11 @@ static esp_err_t load_or_create_password(void)
         }
 
         uint8_t changed = 0;
-        nvs_get_u8(handle, NVS_KEY_PASS_CHANGED, &changed);
+        ret = nvs_get_u8(handle, NVS_KEY_PASS_CHANGED, &changed);
+        if (ret != ESP_OK && ret != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to read pass_changed: %s", esp_err_to_name(ret));
+            // Continue with default (not changed) - non-fatal
+        }
         s_password_changed = (changed == 1);
     } else {
         ESP_LOGE(TAG, "Failed to read pass_hash: %s", esp_err_to_name(ret));
@@ -183,7 +188,7 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
     uint8_t hash[HASH_LEN];
     hash_password(password, s_password_salt, hash);
 
-    if (memcmp(hash, s_password_hash, HASH_LEN) != 0) {
+    if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
         s_failed_attempts++;
         ESP_LOGW(TAG, "Failed login attempt (%d/%d)", s_failed_attempts, MAX_FAILED_ATTEMPTS);
 
@@ -221,7 +226,8 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
     s_sessions[slot].created = now;
     s_sessions[slot].valid = true;
 
-    strcpy(token_out, s_sessions[slot].token);
+    strncpy(token_out, s_sessions[slot].token, WEB_AUTH_SESSION_TOKEN_LEN);
+    token_out[WEB_AUTH_SESSION_TOKEN_LEN] = '\0';
     ESP_LOGI(TAG, "Login successful, session created");
     return ESP_OK;
 }
@@ -268,7 +274,7 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     uint8_t hash[HASH_LEN];
     hash_password(current_password, s_password_salt, hash);
 
-    if (memcmp(hash, s_password_hash, HASH_LEN) != 0) {
+    if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -325,10 +331,19 @@ bool web_auth_check_request(httpd_req_t *req)
         if (session) {
             session += 8; // Skip "session="
             char *end = strchr(session, ';');
-            if (end) *end = '\0';
 
-            if (web_auth_validate_session(session)) {
-                return true;
+            // Calculate token length safely
+            size_t token_len = end ? (size_t)(end - session) : strlen(session);
+
+            // Validate token length before use
+            if (token_len > 0 && token_len <= WEB_AUTH_SESSION_TOKEN_LEN) {
+                char token[WEB_AUTH_SESSION_TOKEN_LEN + 1];
+                strncpy(token, session, token_len);
+                token[token_len] = '\0';
+
+                if (web_auth_validate_session(token)) {
+                    return true;
+                }
             }
         }
     }
