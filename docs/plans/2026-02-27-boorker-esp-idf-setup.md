@@ -10,10 +10,118 @@
 
 **Hardware:** ESP32-S3-DEVKITC-1-N32R8V (32MB Flash, 8MB PSRAM)
 
+**Development Environment:** WSL2 Ubuntu 24.04 on Windows 11
+
 **Documentation References:**
 - ESP-IDF v5.5.3: https://docs.espressif.com/projects/esp-idf/en/stable/esp32s3/
 - MicroLink: https://github.com/CamM2325/microlink
 - Tailscale Auth Keys: https://login.tailscale.com/admin/settings/keys
+- usbipd-win: https://github.com/dorssel/usbipd-win
+
+---
+
+## Phase 0: WSL2 USB Passthrough Setup
+
+WSL2 doesn't have native USB access. We use **usbipd-win** to forward USB devices from Windows to WSL2.
+
+### Task 0: Install usbipd-win for USB Passthrough
+
+**Step 1: Install usbipd on Windows**
+
+Open **PowerShell as Administrator** and run:
+```powershell
+winget install usbipd
+```
+
+Expected: usbipd installs successfully
+
+**Step 2: Install USB/IP tools in WSL2**
+
+In WSL2 Ubuntu terminal:
+```bash
+sudo apt update
+sudo apt install linux-tools-generic hwdata
+sudo update-alternatives --install /usr/local/bin/usbip usbip /usr/lib/linux-tools/*-generic/usbip 20
+```
+
+**Step 3: Verify usbipd installation**
+
+In PowerShell (Admin):
+```powershell
+usbipd --version
+```
+
+Expected: Version number (e.g., `4.x.x`)
+
+**Step 4: Test USB device listing**
+
+Plug in the ESP32-S3-DEVKITC-1 via USB, then in PowerShell (Admin):
+```powershell
+usbipd list
+```
+
+Expected output (example):
+```
+Connected:
+BUSID  VID:PID    DEVICE                           STATE
+1-3    303a:1001  USB Serial Device (COM3)         Not shared
+```
+
+Note your BUSID (e.g., `1-3`) — you'll need this for flashing.
+
+**Step 5: Create helper scripts (optional but recommended)**
+
+Create `~/esp-attach.ps1` on Windows (save to your user folder):
+```powershell
+# Run as: powershell -ExecutionPolicy Bypass -File ~/esp-attach.ps1
+$busid = (usbipd list | Select-String "303a:1001" | ForEach-Object { ($_ -split '\s+')[0] })
+if ($busid) {
+    usbipd bind --busid $busid 2>$null
+    usbipd attach --wsl --busid $busid
+    Write-Host "ESP32 attached to WSL on busid $busid"
+} else {
+    Write-Host "ESP32 not found. Is it plugged in?"
+}
+```
+
+**Step 6: Test attaching to WSL2**
+
+In PowerShell (Admin):
+```powershell
+usbipd bind --busid 1-3
+usbipd attach --wsl --busid 1-3
+```
+
+Then in WSL2:
+```bash
+ls /dev/ttyACM*
+```
+
+Expected: `/dev/ttyACM0` appears
+
+**Step 7: Add user to dialout group (WSL2)**
+
+```bash
+sudo usermod -a -G dialout $USER
+```
+
+Note: Log out and back into WSL2 for this to take effect.
+
+---
+
+### USB Workflow Reference
+
+Each time you want to flash:
+
+1. **Plug in ESP32** to Windows USB
+2. **PowerShell (Admin):**
+   ```powershell
+   usbipd list                           # Find BUSID
+   usbipd bind --busid <BUSID>           # First time only
+   usbipd attach --wsl --busid <BUSID>   # Attach to WSL
+   ```
+3. **WSL2:** `idf.py -p /dev/ttyACM0 flash monitor`
+4. **When done:** Unplug, or `usbipd detach --busid <BUSID>`
 
 ---
 
