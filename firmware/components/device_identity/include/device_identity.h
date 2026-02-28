@@ -10,6 +10,9 @@ extern "C" {
 
 /**
  * Device identity - unique credentials generated at first boot
+ *
+ * @note Thread Safety: Functions must be called from single task or
+ *       externally synchronized. Typically called during initialization.
  */
 typedef struct {
     char node_name[32];       // boorker-XXXX (MAC-derived)
