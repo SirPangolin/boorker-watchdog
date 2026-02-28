@@ -1,6 +1,7 @@
 #include "wifi_manager.h"
 #include "wifi_prov_internal.h"
 #include "wifi_mdns_internal.h"
+#include "wifi_power_internal.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -218,6 +219,12 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
 
         // Start mDNS
         wifi_mdns_start(s_wifi_mgr.device_name);
+
+        // Enable power save
+        esp_err_t ps_ret = wifi_power_enable();
+        if (ps_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Power save not enabled: %s", esp_err_to_name(ps_ret));
+        }
 
         notify_callback(WIFI_MGR_EVENT_CONNECTED);
     }
