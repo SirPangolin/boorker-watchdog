@@ -1,0 +1,21 @@
+idf_component_register(
+    SRCS
+        "src/wifi_manager.c"
+        "src/wifi_provisioning.c"
+        "src/wifi_power.c"
+        "src/wifi_mdns.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_event
+        esp_netif
+        wifi_provisioning
+        protocomm
+        bt
+        esp_timer
+        log
+    PRIV_REQUIRES
+        mdns
+)

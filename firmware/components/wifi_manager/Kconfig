@@ -1,0 +1,50 @@
+menu "WiFi Manager"
+
+    config WIFI_MGR_DEVICE_NAME
+        string "Device name for mDNS and provisioning"
+        default "boorker"
+        help
+            Used for mDNS (name.local) and BLE advertising name.
+            Should be unique on local network.
+
+    config WIFI_MGR_PROV_POP
+        string "Proof-of-Possession PIN for BLE provisioning"
+        default "boorker123"
+        help
+            User must enter this PIN in the ESP BLE Prov app.
+            CHANGE THIS for production devices!
+
+    config WIFI_MGR_RECONNECT_INITIAL_DELAY_MS
+        int "Initial reconnection delay (ms)"
+        default 1000
+        help
+            First retry delay after disconnect
+
+    config WIFI_MGR_RECONNECT_MAX_DELAY_MS
+        int "Maximum reconnection delay (ms)"
+        default 300000
+        help
+            Exponential backoff caps at this value (default 5 minutes)
+
+    config WIFI_MGR_RECONNECT_MAX_ATTEMPTS
+        int "Maximum reconnection attempts (0 = infinite)"
+        default 0
+        help
+            Number of reconnection attempts before firing
+            WIFI_MGR_EVENT_RECONNECT_EXHAUSTED callback.
+            Set to 0 for infinite retries (default behavior).
+
+    config WIFI_MGR_ENABLE_POWER_SAVE
+        bool "Enable WiFi power saving (modem sleep)"
+        default y
+        help
+            Reduces power consumption when idle.
+            Adds slight latency to first packet after idle.
+
+    config WIFI_MGR_ENABLE_MDNS
+        bool "Enable mDNS discovery"
+        default y
+        help
+            Register device as <name>.local for easy discovery.
+
+endmenu
