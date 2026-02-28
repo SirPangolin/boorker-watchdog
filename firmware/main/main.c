@@ -7,6 +7,7 @@
 #include "esp_console.h"
 #include "nvs_flash.h"
 
+#include "version.h"
 #include "wifi_manager.h"
 #include "tailscale_manager.h"
 
@@ -99,7 +100,7 @@ static void init_console(void)
 
 void app_main(void)
 {
-    ESP_LOGI(TAG, "Boorker starting...");
+    ESP_LOGI(TAG, "Boorker v%s starting...", BOORKER_VERSION_STRING);
 
     // Initialize NVS (required for WiFi and Tailscale credential storage)
     esp_err_t ret = nvs_flash_init();
