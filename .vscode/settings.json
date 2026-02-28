@@ -1,0 +1,3 @@
+{
+    "cmake.sourceDirectory": "${env:HOME}/claude/boorker-watchdog/firmware"
+}
