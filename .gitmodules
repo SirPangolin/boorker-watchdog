@@ -1,0 +1,3 @@
+[submodule "firmware/components/microlink"]
+	path = firmware/components/microlink
+	url = https://github.com/CamM2325/microlink.git

@@ -4,17 +4,55 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_console.h"
 #include "nvs_flash.h"
 
 #include "wifi_manager.h"
+#include "tailscale_manager.h"
 
 static const char *TAG = "boorker";
+
+static void tailscale_callback(ts_mgr_event_t event, void *ctx)
+{
+    char ip[16];
+    switch (event) {
+        case TS_MGR_EVENT_CONNECTED:
+            if (ts_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
+                ESP_LOGI(TAG, "Tailscale connected: %s", ip);
+            } else {
+                ESP_LOGW(TAG, "Tailscale connected but IP retrieval failed");
+            }
+            break;
+
+        case TS_MGR_EVENT_DISCONNECTED:
+            ESP_LOGW(TAG, "Tailscale disconnected - reconnecting...");
+            break;
+
+        case TS_MGR_EVENT_UNCONFIGURED:
+            ESP_LOGI(TAG, "========================================");
+            ESP_LOGI(TAG, "Tailscale not configured");
+            ESP_LOGI(TAG, "Use 'ts_auth <key>' to set auth key");
+            ESP_LOGI(TAG, "Get key from: https://login.tailscale.com/admin/settings/keys");
+            ESP_LOGI(TAG, "========================================");
+            break;
+
+        case TS_MGR_EVENT_RECONNECT_EXHAUSTED:
+            ESP_LOGW(TAG, "Tailscale reconnection exhausted");
+            break;
+
+        case TS_MGR_EVENT_KEY_UPDATED:
+            ESP_LOGI(TAG, "Tailscale auth key updated");
+            break;
+    }
+}
 
 static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 {
     switch (event) {
         case WIFI_MGR_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "WiFi connected - ready for services");
+            // Tailscale init happens in main task after xEventGroupWaitBits returns
+            // Don't init here - callback runs on sys_evt task with limited stack
+            ESP_LOGI(TAG, "WiFi connected");
             break;
 
         case WIFI_MGR_EVENT_DISCONNECTED:
@@ -36,17 +74,34 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
             break;
 
         case WIFI_MGR_EVENT_RECONNECT_EXHAUSTED:
-            ESP_LOGW(TAG, "Max reconnection attempts reached");
-            ESP_LOGI(TAG, "Consider re-provisioning with wifi_mgr_start_provisioning()");
+            ESP_LOGW(TAG, "WiFi reconnection attempts exhausted");
             break;
     }
+}
+
+static void init_console(void)
+{
+    esp_console_repl_t *repl = NULL;
+    esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
+    repl_config.prompt = "boorker>";
+    repl_config.max_cmdline_length = 256;
+
+    esp_console_dev_uart_config_t uart_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
+
+    ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
+
+    // Register Tailscale console commands
+    ts_console_register();
+
+    ESP_ERROR_CHECK(esp_console_start_repl(repl));
+    ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
 }
 
 void app_main(void)
 {
     ESP_LOGI(TAG, "Boorker starting...");
 
-    // Initialize NVS (required for WiFi credential storage)
+    // Initialize NVS (required for WiFi and Tailscale credential storage)
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
@@ -58,10 +113,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-    // Initialize WiFi manager
+    // Initialize console for ts_auth command
+    init_console();
+
+    // Initialize WiFi manager (Tailscale init happens in callback)
     wifi_mgr_config_t wifi_config = {
         .device_name = "boorker-dev",
-        .start_provisioning = false,  // Only if no stored credentials
+        .start_provisioning = false,
         .callback = wifi_event_callback,
         .callback_ctx = NULL,
     };
@@ -78,16 +136,30 @@ void app_main(void)
     xEventGroupWaitBits(events, WIFI_MGR_CONNECTED_BIT,
                         pdFALSE, pdTRUE, portMAX_DELAY);
 
-    // Get IP address
+    // Get WiFi IP address
     char ip[16];
     if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
-        ESP_LOGI(TAG, "Connected with IP: %s", ip);
+        ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
+    }
+
+    // Initialize Tailscale from main task (has adequate stack - can't init from callback)
+    ESP_LOGI(TAG, "Initializing Tailscale from main task...");
+    ts_mgr_config_t ts_config = {
+        .device_name = "boorker-dev",
+        .callback = tailscale_callback,
+        .callback_ctx = NULL,
+    };
+    ret = ts_mgr_init(&ts_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Tailscale manager init failed: %s", esp_err_to_name(ret));
+        // Continue without Tailscale - WiFi still works
     }
 
     // Main loop - heartbeat
     while (1) {
-        ESP_LOGI(TAG, "Heartbeat - state: %s, heap: %lu",
+        ESP_LOGI(TAG, "Heartbeat - WiFi: %s, Tailscale: %s, heap: %lu",
                  wifi_mgr_get_state_name(),
+                 ts_mgr_get_state_name(),
                  esp_get_free_heap_size());
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
