@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Boorker Login</title>
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body class="login-page">
+    <div class="login-container">
+        <h1>boorker</h1>
+        <form id="login-form">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" value="admin" readonly>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" required autofocus>
+            </div>
+            <div id="error-msg" class="error hidden"></div>
+            <button type="submit" id="login-btn">Login</button>
+        </form>
+    </div>
+    <script>
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const errorEl = document.getElementById('error-msg');
+            const btn = document.getElementById('login-btn');
+
+            errorEl.classList.add('hidden');
+            btn.disabled = true;
+            btn.textContent = 'Logging in...';
+
+            try {
+                const resp = await fetch('/api/v1/auth/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        username: document.getElementById('username').value,
+                        password: document.getElementById('password').value
+                    })
+                });
+
+                const data = await resp.json();
+
+                if (resp.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorEl.textContent = data.attempts_remaining !== undefined
+                        ? `Invalid password. ${data.attempts_remaining} attempts remaining.`
+                        : 'Login failed';
+                    errorEl.classList.remove('hidden');
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error';
+                errorEl.classList.remove('hidden');
+            }
+
+            btn.disabled = false;
+            btn.textContent = 'Login';
+        });
+    </script>
+</body>
+</html>
