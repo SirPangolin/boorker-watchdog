@@ -9,7 +9,9 @@
 
 #include "version.h"
 #include "wifi_manager.h"
+#if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
+#endif
 #include "device_identity.h"
 #include "web_auth.h"
 #include "web_server.h"
@@ -17,6 +19,7 @@
 
 static const char *TAG = "boorker";
 
+#if CONFIG_TS_MGR_ENABLED
 static void tailscale_callback(ts_mgr_event_t event, void *ctx)
 {
     char ip[16];
@@ -50,6 +53,7 @@ static void tailscale_callback(ts_mgr_event_t event, void *ctx)
             break;
     }
 }
+#endif
 
 static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 {
@@ -96,8 +100,10 @@ static void init_console(void)
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
 
+#if CONFIG_TS_MGR_ENABLED
     // Register Tailscale console commands
     ts_console_register();
+#endif
 
     // Register system console commands
     ret = system_console_register();
@@ -113,6 +119,13 @@ static void init_console(void)
 
 void app_main(void)
 {
+#if CONFIG_TS_MGR_ENABLED
+    // Reduce log spam from chatty components
+    esp_log_level_set("microlink", ESP_LOG_WARN);
+    esp_log_level_set("microlink_disco", ESP_LOG_WARN);
+    esp_log_level_set("microlink_coord", ESP_LOG_WARN);
+#endif
+
     ESP_LOGI(TAG, "Boorker v%s starting...", BOORKER_VERSION_STRING);
 
     // Initialize NVS (required for WiFi and Tailscale credential storage)
@@ -200,6 +213,7 @@ void app_main(void)
         }
     }
 
+#if CONFIG_TS_MGR_ENABLED
     // Initialize Tailscale from main task (has adequate stack - can't init from callback)
     ESP_LOGI(TAG, "Initializing Tailscale from main task...");
     ts_mgr_config_t ts_config = {
@@ -212,13 +226,22 @@ void app_main(void)
         ESP_LOGE(TAG, "Tailscale manager init failed: %s", esp_err_to_name(ret));
         // Continue without Tailscale - WiFi still works
     }
+#else
+    ESP_LOGI(TAG, "Tailscale disabled in config");
+#endif
 
     // Main loop - heartbeat
     while (1) {
+#if CONFIG_TS_MGR_ENABLED
         ESP_LOGI(TAG, "Heartbeat - WiFi: %s, Tailscale: %s, heap: %lu",
                  wifi_mgr_get_state_name(),
                  ts_mgr_get_state_name(),
                  esp_get_free_heap_size());
+#else
+        ESP_LOGI(TAG, "Heartbeat - WiFi: %s, heap: %lu",
+                 wifi_mgr_get_state_name(),
+                 esp_get_free_heap_size());
+#endif
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }

@@ -12,7 +12,9 @@
 #include "version.h"
 #include "device_identity.h"
 #include "wifi_manager.h"
+#if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
+#endif
 #include <string.h>
 #include <stdio.h>
 
@@ -325,6 +327,7 @@ static int cmd_status(int argc, char **argv)
     }
     printf("\n");
 
+#if CONFIG_TS_MGR_ENABLED
     // Tailscale status
     char ts_ip[16] = {0};
     printf("Tailscale: %s", ts_mgr_get_state_name());
@@ -332,6 +335,9 @@ static int cmd_status(int argc, char **argv)
         printf(" (%s)", ts_ip);
     }
     printf("\n");
+#else
+    printf("Tailscale: disabled\n");
+#endif
 
     return 0;
 }
