@@ -125,6 +125,10 @@ void app_main(void)
     }
 
     const device_identity_t *identity = device_identity_get();
+    if (identity == NULL) {
+        ESP_LOGE(TAG, "Failed to get device identity");
+        return;
+    }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
     // Show credentials on first boot (until OLED is implemented)
@@ -179,7 +183,11 @@ void app_main(void)
         ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
         // Continue without web server
     } else {
-        ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+        if (ip[0] != '\0') {
+            ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+        } else {
+            ESP_LOGI(TAG, "Web server started");
+        }
     }
 
     // Initialize Tailscale from main task (has adequate stack - can't init from callback)
