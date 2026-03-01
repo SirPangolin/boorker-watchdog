@@ -384,6 +384,12 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     return ESP_OK;
 }
 
+void web_auth_invalidate_all_sessions(void)
+{
+    memset(s_sessions, 0, sizeof(s_sessions));
+    ESP_LOGI(TAG, "All sessions invalidated");
+}
+
 bool web_auth_check_request(httpd_req_t *req)
 {
     if (req == NULL) return false;

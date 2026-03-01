@@ -57,6 +57,11 @@ void web_auth_logout(const char *token);
 esp_err_t web_auth_change_password(const char *current_password, const char *new_password);
 
 /**
+ * Invalidate all active sessions (logout all devices)
+ */
+void web_auth_invalidate_all_sessions(void);
+
+/**
  * Check if request is authenticated (session cookie)
  */
 bool web_auth_check_request(httpd_req_t *req);

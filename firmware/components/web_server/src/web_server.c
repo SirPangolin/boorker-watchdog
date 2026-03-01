@@ -1,7 +1,10 @@
 #include "web_server.h"
 #include "web_auth.h"
 #include "device_identity.h"
+#include "system_console.h"
+#include "version.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include "esp_littlefs.h"
 #include "esp_system.h"
 #include "esp_chip_info.h"
@@ -230,6 +233,189 @@ static esp_err_t api_auth_logout(httpd_req_t *req)
     return ESP_OK;
 }
 
+// GET /api/v1/auth/status - no auth required (used to check if password changed)
+static esp_err_t api_auth_status(httpd_req_t *req)
+{
+    httpd_resp_set_type(req, "application/json");
+
+    bool authenticated = web_auth_check_request(req);
+    bool password_changed = web_auth_password_changed();
+
+    char resp[128];
+    snprintf(resp, sizeof(resp),
+             "{\"authenticated\":%s,\"password_changed\":%s}",
+             authenticated ? "true" : "false",
+             password_changed ? "true" : "false");
+
+    httpd_resp_sendstr(req, resp);
+    return ESP_OK;
+}
+
+// PUT /api/v1/auth/password
+static esp_err_t api_auth_password(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK; // Auth failed, response already sent
+    }
+
+    char buf[256];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret <= 0) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
+        return ESP_FAIL;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Invalid JSON");
+        return ESP_FAIL;
+    }
+
+    cJSON *current = cJSON_GetObjectItem(json, "current_password");
+    cJSON *new_pass = cJSON_GetObjectItem(json, "new_password");
+
+    if (!cJSON_IsString(current) || !cJSON_IsString(new_pass)) {
+        cJSON_Delete(json);
+        httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "Missing current_password or new_password");
+        return ESP_FAIL;
+    }
+
+    // Validate new password length
+    size_t new_len = strlen(new_pass->valuestring);
+    if (new_len < 8 || new_len > 64) {
+        cJSON_Delete(json);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Password must be 8-64 characters\"}");
+        return ESP_OK;
+    }
+
+    esp_err_t err = web_auth_change_password(current->valuestring, new_pass->valuestring);
+    cJSON_Delete(json);
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (err == ESP_OK) {
+        // Clear session cookie (user must re-login)
+        httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else if (err == ESP_ERR_INVALID_ARG) {
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Current password incorrect\"}");
+    } else {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+// POST /api/v1/system/reboot - schedule reboot
+// DELETE /api/v1/system/reboot - cancel pending reboot
+static esp_err_t api_system_reboot(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK; // Auth failed, response already sent
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (req->method == HTTP_DELETE) {
+        // Cancel pending reboot
+        esp_err_t err = system_reboot_cancel();
+        if (err == ESP_OK) {
+            httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Reboot cancelled\"}");
+        } else {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No reboot pending\"}");
+        }
+        return ESP_OK;
+    }
+
+    // POST - schedule reboot
+    uint32_t delay = 3; // Default delay
+
+    // Check for body with delay
+    int content_len = req->content_len;
+    if (content_len > 0 && content_len < 64) {
+        char buf[64];
+        int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+        if (ret > 0) {
+            buf[ret] = '\0';
+            cJSON *json = cJSON_Parse(buf);
+            if (json) {
+                cJSON *delay_json = cJSON_GetObjectItem(json, "delay");
+                if (cJSON_IsNumber(delay_json)) {
+                    delay = (uint32_t)delay_json->valueint;
+                }
+                cJSON_Delete(json);
+            }
+        }
+    }
+
+    // Check if reboot already pending
+    if (system_reboot_is_pending()) {
+        uint32_t remaining = system_reboot_get_remaining();
+        char resp[96];
+        snprintf(resp, sizeof(resp),
+                 "{\"error\":true,\"message\":\"Reboot already pending\",\"remaining\":%lu}",
+                 (unsigned long)remaining);
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, resp);
+        return ESP_OK;
+    }
+
+    esp_err_t err = system_reboot_schedule(delay);
+    if (err == ESP_OK) {
+        char resp[64];
+        snprintf(resp, sizeof(resp), "{\"success\":true,\"delay\":%lu}", (unsigned long)delay);
+        httpd_resp_sendstr(req, resp);
+    } else {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
+}
+
+// POST /api/v1/system/factory-reset
+static esp_err_t api_system_factory_reset(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    // Reset web auth password to default
+    esp_err_t err = web_auth_reset_password();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    // Regenerate device identity (new credentials)
+    err = device_identity_regenerate();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to regenerate identity: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
+
+    // Clear session cookie
+    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
+    httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Factory reset complete, rebooting...\"}");
+
+    // Schedule reboot after response sent
+    system_reboot_schedule(2);
+
+    return ESP_OK;
+}
+
 // GET /api/v1/system/status
 static esp_err_t api_system_status(httpd_req_t *req)
 {
@@ -246,6 +432,7 @@ static esp_err_t api_system_status(httpd_req_t *req)
 
     cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
     cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
+    cJSON_AddNumberToObject(json, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     const device_identity_t *id = device_identity_get();
     if (id) {
@@ -292,6 +479,8 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
+    cJSON_AddStringToObject(json, "idf_version", esp_get_idf_version());
     cJSON_AddNumberToObject(json, "chip_revision", chip_info.revision);
     cJSON_AddNumberToObject(json, "cores", chip_info.cores);
 
@@ -318,6 +507,29 @@ static esp_err_t api_system_info(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, resp);
     free(resp);
+
+    return ESP_OK;
+}
+
+// GET /api/v1/system/qr - returns QR JSON for device setup
+static esp_err_t api_system_qr(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    char qr_json[256];
+    esp_err_t err = device_identity_get_qr_json(qr_json, sizeof(qr_json));
+
+    httpd_resp_set_type(req, "application/json");
+
+    if (err == ESP_OK) {
+        httpd_resp_sendstr(req, qr_json);
+    } else {
+        ESP_LOGE(TAG, "Failed to get QR JSON: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
 
     return ESP_OK;
 }
@@ -397,6 +609,28 @@ esp_err_t web_server_start(void)
         if (first_error == ESP_OK) first_error = ret;
     }
 
+    httpd_uri_t uri_auth_status = {
+        .uri = "/api/v1/auth/status",
+        .method = HTTP_GET,
+        .handler = api_auth_status,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_auth_status);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/auth/status: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_auth_password = {
+        .uri = "/api/v1/auth/password",
+        .method = HTTP_PUT,
+        .handler = api_auth_password,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_auth_password);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/auth/password: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
     httpd_uri_t uri_status = {
         .uri = "/api/v1/system/status",
         .method = HTTP_GET,
@@ -416,6 +650,51 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_info);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/system/info: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_qr = {
+        .uri = "/api/v1/system/qr",
+        .method = HTTP_GET,
+        .handler = api_system_qr,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_qr);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/system/qr: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    // Reboot endpoint - POST to schedule, DELETE to cancel
+    httpd_uri_t uri_reboot_post = {
+        .uri = "/api/v1/system/reboot",
+        .method = HTTP_POST,
+        .handler = api_system_reboot,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_reboot_post);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register POST /api/v1/system/reboot: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_reboot_delete = {
+        .uri = "/api/v1/system/reboot",
+        .method = HTTP_DELETE,
+        .handler = api_system_reboot,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_reboot_delete);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register DELETE /api/v1/system/reboot: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_factory_reset = {
+        .uri = "/api/v1/system/factory-reset",
+        .method = HTTP_POST,
+        .handler = api_system_factory_reset,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_factory_reset);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/system/factory-reset: %s", esp_err_to_name(ret));
         if (first_error == ESP_OK) first_error = ret;
     }
 
