@@ -3,7 +3,11 @@
 #include "esp_console.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_chip_info.h"
+#include "esp_idf_version.h"
+#include "esp_heap_caps.h"
 #include "argtable3/argtable3.h"
+#include "version.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -161,6 +165,49 @@ static int cmd_reboot(int argc, char **argv)
     return 0;
 }
 
+static int cmd_version(int argc, char **argv)
+{
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+
+    printf("Boorker v%s\n", BOORKER_VERSION_STRING);
+    printf("ESP-IDF %s\n", esp_get_idf_version());
+    printf("Chip: ESP32-S3 rev%d, %d cores\n", chip_info.revision, chip_info.cores);
+
+    return 0;
+}
+
+static int cmd_free(int argc, char **argv)
+{
+    printf("Memory:\n");
+    printf("  Heap:  %lu bytes free (min: %lu)\n",
+           (unsigned long)esp_get_free_heap_size(),
+           (unsigned long)esp_get_minimum_free_heap_size());
+
+    // Check for PSRAM - returns 0 if not available
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (psram_free > 0) {
+        printf("  PSRAM: %lu bytes free\n", (unsigned long)psram_free);
+    }
+
+    return 0;
+}
+
+static int cmd_uptime(int argc, char **argv)
+{
+    int64_t uptime_us = esp_timer_get_time();
+    uint32_t uptime_sec = uptime_us / 1000000;
+
+    uint32_t hours = uptime_sec / 3600;
+    uint32_t minutes = (uptime_sec % 3600) / 60;
+    uint32_t seconds = uptime_sec % 60;
+
+    printf("Uptime: %luh %lum %lus\n",
+           (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
+
+    return 0;
+}
+
 esp_err_t system_console_register(void)
 {
     // Reboot command
@@ -176,6 +223,33 @@ esp_err_t system_console_register(void)
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&reboot_cmd));
 
-    ESP_LOGI(TAG, "Registered command: reboot");
+    // Version command
+    const esp_console_cmd_t version_cmd = {
+        .command = "version",
+        .help = "Show firmware version",
+        .hint = NULL,
+        .func = &cmd_version,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&version_cmd));
+
+    // Free command
+    const esp_console_cmd_t free_cmd = {
+        .command = "free",
+        .help = "Show memory statistics",
+        .hint = NULL,
+        .func = &cmd_free,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&free_cmd));
+
+    // Uptime command
+    const esp_console_cmd_t uptime_cmd = {
+        .command = "uptime",
+        .help = "Show system uptime",
+        .hint = NULL,
+        .func = &cmd_uptime,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&uptime_cmd));
+
+    ESP_LOGI(TAG, "Registered commands: reboot, version, free, uptime");
     return ESP_OK;
 }
