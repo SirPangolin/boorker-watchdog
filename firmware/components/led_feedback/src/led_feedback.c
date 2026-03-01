@@ -15,6 +15,11 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
+#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#include "led_strips.h"
+#include "driver/rmt_types.h"
+#endif
+
 #include <string.h>
 
 static const char *TAG = "led_feedback";
@@ -60,7 +65,8 @@ static struct {
     bool enabled;
     uint8_t brightness;
     bool alerts_only;
-    led_state_t current_state;
+    uint16_t active_states;      // Bitmask of active states
+    led_state_t displayed_state; // Currently displayed state (for stopping pattern)
     led_indicator_handle_t handle;
     SemaphoreHandle_t mutex;
 } s_led = {
@@ -68,10 +74,29 @@ static struct {
     .enabled = true,
     .brightness = CONFIG_LED_FEEDBACK_DEFAULT_BRIGHTNESS,
     .alerts_only = false,
-    .current_state = LED_FB_OFF,
+    .active_states = 0,
+    .displayed_state = LED_FB_OFF,
     .handle = NULL,
     .mutex = NULL,
 };
+
+/**
+ * @brief Get highest priority active state (lowest bit set)
+ * @return Highest priority active state, or LED_FB_OFF if none active
+ */
+static led_state_t get_highest_priority_state(void)
+{
+    if (s_led.active_states == 0) {
+        return LED_FB_OFF;
+    }
+    // Find lowest set bit (highest priority state)
+    for (int i = 0; i < LED_FB_MAX; i++) {
+        if (s_led.active_states & (1 << i)) {
+            return (led_state_t)i;
+        }
+    }
+    return LED_FB_OFF;
+}
 
 // --------------------------------------------------------------------------
 // NVS Functions
@@ -225,9 +250,10 @@ static bool should_show_state(led_state_t state)
 }
 
 /**
- * @brief Apply the current state to the LED
+ * @brief Apply the highest priority active state to the LED
  *
- * Must be called with mutex held.
+ * Must be called with mutex held. Determines which state should be displayed
+ * based on active_states bitmask and updates the LED accordingly.
  *
  * @return ESP_OK on success, or error from led_indicator functions
  */
@@ -237,33 +263,37 @@ static esp_err_t apply_current_state(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret;
+    esp_err_t ret = ESP_OK;
+    led_state_t new_state = get_highest_priority_state();
 
-    // Stop any current pattern
-    ret = led_indicator_stop(s_led.handle, (int)s_led.current_state);
+    // Skip if no change needed
+    if (new_state == s_led.displayed_state) {
+        return ESP_OK;
+    }
+
+    // Stop currently displayed pattern
+    ret = led_indicator_stop(s_led.handle, (int)s_led.displayed_state);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to stop pattern %s: %s",
-                 state_names[s_led.current_state], esp_err_to_name(ret));
+                 state_names[s_led.displayed_state], esp_err_to_name(ret));
     }
 
-    if (should_show_state(s_led.current_state)) {
-        // Start the pattern for current state
-        ret = led_indicator_start(s_led.handle, (int)s_led.current_state);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to start pattern %s: %s",
-                     state_names[s_led.current_state], esp_err_to_name(ret));
-            return ret;
-        }
-        ESP_LOGD(TAG, "Showing state: %s", state_names[s_led.current_state]);
-    } else {
-        // Turn off LED
-        ret = led_indicator_start(s_led.handle, (int)LED_FB_OFF);
-        if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to start OFF pattern: %s", esp_err_to_name(ret));
-            return ret;
-        }
-        ESP_LOGD(TAG, "State %s suppressed", state_names[s_led.current_state]);
+    // Determine what to show
+    led_state_t show_state = new_state;
+    if (!should_show_state(new_state)) {
+        show_state = LED_FB_OFF;
     }
+
+    // Start new pattern
+    ret = led_indicator_start(s_led.handle, (int)show_state);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to start pattern %s: %s",
+                 state_names[show_state], esp_err_to_name(ret));
+        return ret;
+    }
+
+    s_led.displayed_state = new_state;
+    ESP_LOGD(TAG, "Displaying: %s", state_names[show_state]);
 
     return ESP_OK;
 }
@@ -289,6 +319,32 @@ esp_err_t led_feedback_init(void)
     // Load config from NVS (errors logged but don't fail init)
     load_config_from_nvs();
 
+#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+    // Configure LED indicator with WS2812 RGB strip mode
+    led_indicator_strips_config_t strips_config = {
+        .led_strip_cfg = {
+            .strip_gpio_num = CONFIG_LED_FEEDBACK_GPIO,
+            .max_leds = 1,  // Single onboard LED
+            .led_model = LED_MODEL_WS2812,
+            .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+            .flags.invert_out = CONFIG_LED_FEEDBACK_ACTIVE_LOW,
+        },
+        .led_strip_driver = LED_STRIP_RMT,
+        .led_strip_rmt_cfg = {
+            .clk_src = RMT_CLK_SRC_DEFAULT,
+            .resolution_hz = 10000000,  // 10 MHz
+            .mem_block_symbols = 0,     // Use default
+            .flags.with_dma = true,
+        },
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_STRIPS_MODE,
+        .led_indicator_strips_config = &strips_config,
+        .blink_lists = led_patterns,
+        .blink_list_num = LED_FB_MAX,
+    };
+#else
     // Configure LED indicator with LEDC (PWM) mode
     led_indicator_ledc_config_t ledc_config = {
         .is_active_level_high = !CONFIG_LED_FEEDBACK_ACTIVE_LOW,
@@ -304,6 +360,7 @@ esp_err_t led_feedback_init(void)
         .blink_lists = led_patterns,
         .blink_list_num = LED_FB_MAX,
     };
+#endif
 
     s_led.handle = led_indicator_create(&config);
     if (s_led.handle == NULL) {
@@ -320,10 +377,16 @@ esp_err_t led_feedback_init(void)
     }
 
     s_led.initialized = true;
-    s_led.current_state = LED_FB_OFF;
+    s_led.active_states = 0;
+    s_led.displayed_state = LED_FB_OFF;
 
-    ESP_LOGI(TAG, "Initialized on GPIO %d (brightness=%d%%)",
+#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+    ESP_LOGI(TAG, "Initialized WS2812 on GPIO %d (brightness=%d%%)",
              CONFIG_LED_FEEDBACK_GPIO, s_led.brightness);
+#else
+    ESP_LOGI(TAG, "Initialized LEDC on GPIO %d (brightness=%d%%)",
+             CONFIG_LED_FEEDBACK_GPIO, s_led.brightness);
+#endif
 
     return ESP_OK;
 }
@@ -342,7 +405,7 @@ esp_err_t led_feedback_deinit(void)
 
     // Stop any active pattern
     if (s_led.handle != NULL) {
-        esp_err_t ret = led_indicator_stop(s_led.handle, (int)s_led.current_state);
+        esp_err_t ret = led_indicator_stop(s_led.handle, (int)s_led.displayed_state);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to stop pattern during deinit: %s", esp_err_to_name(ret));
         }
@@ -351,7 +414,8 @@ esp_err_t led_feedback_deinit(void)
     }
 
     s_led.initialized = false;
-    s_led.current_state = LED_FB_OFF;
+    s_led.active_states = 0;
+    s_led.displayed_state = LED_FB_OFF;
 
     // Give back mutex before deleting
     xSemaphoreGive(s_led.mutex);
@@ -377,29 +441,14 @@ esp_err_t led_feedback_set_state(led_state_t state)
         return ESP_ERR_TIMEOUT;
     }
 
+    // Set bit in active states bitmask
+    uint16_t old_states = s_led.active_states;
+    s_led.active_states |= (1 << state);
+
     esp_err_t ret = ESP_OK;
-
-    // Lower enum value = higher priority
-    // Only change if new state has higher or equal priority
-    if (state <= s_led.current_state || s_led.current_state == LED_FB_OFF) {
-        if (s_led.current_state != state) {
-            // Stop old pattern
-            if (s_led.handle != NULL) {
-                esp_err_t stop_ret = led_indicator_stop(s_led.handle, (int)s_led.current_state);
-                if (stop_ret != ESP_OK) {
-                    ESP_LOGW(TAG, "Failed to stop pattern %s: %s",
-                             state_names[s_led.current_state], esp_err_to_name(stop_ret));
-                }
-            }
-
-            s_led.current_state = state;
-            ESP_LOGI(TAG, "State -> %s", state_names[state]);
-
-            ret = apply_current_state();
-        }
-    } else {
-        ESP_LOGD(TAG, "State %s ignored (current %s has higher priority)",
-                 state_names[state], state_names[s_led.current_state]);
+    if (s_led.active_states != old_states) {
+        ESP_LOGI(TAG, "State + %s (active: 0x%04x)", state_names[state], s_led.active_states);
+        ret = apply_current_state();
     }
 
     xSemaphoreGive(s_led.mutex);
@@ -421,25 +470,14 @@ esp_err_t led_feedback_clear_state(led_state_t state)
         return ESP_ERR_TIMEOUT;
     }
 
+    // Clear bit in active states bitmask
+    uint16_t old_states = s_led.active_states;
+    s_led.active_states &= ~(1 << state);
+
     esp_err_t ret = ESP_OK;
-
-    if (s_led.current_state == state) {
-        // Stop current pattern
-        if (s_led.handle != NULL) {
-            esp_err_t stop_ret = led_indicator_stop(s_led.handle, (int)state);
-            if (stop_ret != ESP_OK) {
-                ESP_LOGW(TAG, "Failed to stop pattern %s: %s",
-                         state_names[state], esp_err_to_name(stop_ret));
-            }
-        }
-
-        // Fall back to OFF state
-        // Note: This implementation does not track pending states. When a state
-        // is cleared, LED falls back to OFF rather than the next highest priority.
-        s_led.current_state = LED_FB_OFF;
-        ESP_LOGI(TAG, "Cleared %s -> OFF", state_names[state]);
-
-        ret = apply_current_state();
+    if (s_led.active_states != old_states) {
+        ESP_LOGI(TAG, "State - %s (active: 0x%04x)", state_names[state], s_led.active_states);
+        ret = apply_current_state();  // Will show next highest priority
     }
 
     xSemaphoreGive(s_led.mutex);
@@ -452,8 +490,8 @@ led_state_t led_feedback_get_state(void)
         return LED_FB_OFF;
     }
 
-    // Reading a single enum value is atomic on ESP32
-    return s_led.current_state;
+    // Return the currently displayed state
+    return s_led.displayed_state;
 }
 
 // --------------------------------------------------------------------------
