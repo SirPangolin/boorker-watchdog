@@ -10,6 +10,9 @@
 #include "version.h"
 #include "wifi_manager.h"
 #include "tailscale_manager.h"
+#include "device_identity.h"
+#include "web_auth.h"
+#include "web_server.h"
 
 static const char *TAG = "boorker";
 
@@ -114,12 +117,32 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
+    // Initialize device identity (generates credentials on first boot)
+    ret = device_identity_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Device identity init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    const device_identity_t *identity = device_identity_get();
+    ESP_LOGI(TAG, "Device: %s", identity->node_name);
+
+    // Show credentials on first boot (until OLED is implemented)
+    if (device_identity_is_first_boot()) {
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "FIRST BOOT - SAVE THESE CREDENTIALS:");
+        ESP_LOGI(TAG, "  Web Password: %s", identity->web_password);
+        ESP_LOGI(TAG, "  AP Password: %s", identity->ap_password);
+        ESP_LOGI(TAG, "  BLE PoP: %s", identity->ble_pop);
+        ESP_LOGI(TAG, "========================================");
+    }
+
     // Initialize console for ts_auth command
     init_console();
 
     // Initialize WiFi manager (Tailscale init happens in callback)
     wifi_mgr_config_t wifi_config = {
-        .device_name = "boorker-dev",
+        .device_name = identity->node_name,  // Use generated name instead of hardcoded
         .start_provisioning = false,
         .callback = wifi_event_callback,
         .callback_ctx = NULL,
@@ -143,10 +166,26 @@ void app_main(void)
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }
 
+    // Initialize web auth
+    ret = web_auth_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Web auth init failed: %s", esp_err_to_name(ret));
+        // Continue - web server can still work without auth in degraded mode
+    }
+
+    // Start web server
+    ret = web_server_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
+        // Continue without web server
+    } else {
+        ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+    }
+
     // Initialize Tailscale from main task (has adequate stack - can't init from callback)
     ESP_LOGI(TAG, "Initializing Tailscale from main task...");
     ts_mgr_config_t ts_config = {
-        .device_name = "boorker-dev",
+        .device_name = identity->node_name,  // Use generated name
         .callback = tailscale_callback,
         .callback_ctx = NULL,
     };
