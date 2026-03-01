@@ -76,8 +76,11 @@ static esp_err_t hash_password(const char *password, const uint8_t *salt, uint8_
 static void generate_token(char *token_out)
 {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    const uint32_t charset_len = sizeof(chars) - 1; // 62 characters
     for (int i = 0; i < WEB_AUTH_SESSION_TOKEN_LEN; i++) {
-        token_out[i] = chars[esp_random() % (sizeof(chars) - 1)];
+        // Use multiply-and-shift to avoid modulo bias
+        uint32_t index = (uint32_t)(((uint64_t)esp_random() * charset_len) >> 32);
+        token_out[i] = chars[index];
     }
     token_out[WEB_AUTH_SESSION_TOKEN_LEN] = '\0';
 }
@@ -445,14 +448,18 @@ int web_auth_get_attempts_remaining(void)
 
 esp_err_t web_auth_reset_password(void)
 {
+    ESP_LOGI(TAG, "Resetting password to default");
+
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for reset: %s", esp_err_to_name(ret));
         return ret;
     }
 
     ret = nvs_erase_all(handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to erase NVS: %s", esp_err_to_name(ret));
         nvs_close(handle);
         return ret;
     }
@@ -460,11 +467,13 @@ esp_err_t web_auth_reset_password(void)
     ret = nvs_commit(handle);
     nvs_close(handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS erase: %s", esp_err_to_name(ret));
         return ret;
     }
 
     s_initialized = false;
     s_password_changed = false;
 
+    ESP_LOGI(TAG, "NVS cleared, re-initializing with default password");
     return web_auth_init();
 }
