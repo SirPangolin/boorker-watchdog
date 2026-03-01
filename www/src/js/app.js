@@ -166,7 +166,9 @@ function renderSettings() {
     document.getElementById('logout-btn').addEventListener('click', async () => {
         try {
             await api('/auth/logout', { method: 'POST' });
-        } catch (e) {}
+        } catch (e) {
+            console.error('Logout failed:', e);
+        }
         window.location.href = '/login.html';
     });
 }
@@ -189,12 +191,19 @@ window.addEventListener('load', () => {
     navigate();
 
     // User menu
-    document.getElementById('user-menu').addEventListener('click', () => {
-        window.location.hash = '#/settings';
-    });
+    const userMenu = document.getElementById('user-menu');
+    if (userMenu) {
+        userMenu.addEventListener('click', () => {
+            window.location.hash = '#/settings';
+        });
+    }
 
     // Mobile menu toggle
-    document.getElementById('menu-toggle').addEventListener('click', () => {
-        document.getElementById('sidebar').classList.toggle('open');
-    });
+    const menuToggle = document.getElementById('menu-toggle');
+    const sidebar = document.getElementById('sidebar');
+    if (menuToggle && sidebar) {
+        menuToggle.addEventListener('click', () => {
+            sidebar.classList.toggle('open');
+        });
+    }
 });
