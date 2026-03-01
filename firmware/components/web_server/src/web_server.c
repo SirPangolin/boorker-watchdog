@@ -183,7 +183,13 @@ static esp_err_t api_auth_login(httpd_req_t *req)
 {
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
+    if (ret < 0) {
+        // Socket error
+        ESP_LOGD(TAG, "Login recv error: %d", ret);
+        return ESP_FAIL;  // Don't send response on socket error
+    }
+    if (ret == 0) {
+        // Connection closed or timeout - no body received
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
         return ESP_FAIL;
     }
@@ -234,6 +240,8 @@ static esp_err_t api_auth_logout(httpd_req_t *req)
         return ESP_OK; // Auth failed, response already sent
     }
 
+    bool session_invalidated = false;
+
     // Extract session token from cookie and invalidate server-side
     char cookie_buf[128];
     if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
@@ -246,15 +254,22 @@ static esp_err_t api_auth_logout(httpd_req_t *req)
                 char token[WEB_AUTH_SESSION_TOKEN_LEN + 1];
                 strncpy(token, session, token_len);
                 token[token_len] = '\0';
-                web_auth_logout(token);  // Invalidate server-side session
+                session_invalidated = web_auth_logout(token);
             }
         }
     }
 
-    // Clear cookie
+    // Always clear cookie (even if server-side invalidation failed)
     httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
     httpd_resp_set_type(req, "application/json");
-    httpd_resp_sendstr(req, "{\"success\":true}");
+
+    if (session_invalidated) {
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else {
+        // Session was already invalid or couldn't be found - still "logout" client
+        ESP_LOGW(TAG, "Logout: session not found server-side (may already be expired)");
+        httpd_resp_sendstr(req, "{\"success\":true,\"note\":\"session_not_found\"}");
+    }
     return ESP_OK;
 }
 
@@ -285,7 +300,11 @@ static esp_err_t api_auth_password(httpd_req_t *req)
 
     char buf[256];
     int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
-    if (ret <= 0) {
+    if (ret < 0) {
+        ESP_LOGD(TAG, "Password change recv error: %d", ret);
+        return ESP_FAIL;  // Don't send response on socket error
+    }
+    if (ret == 0) {
         httpd_resp_send_err(req, HTTPD_400_BAD_REQUEST, "No body");
         return ESP_FAIL;
     }
@@ -471,21 +490,30 @@ static esp_err_t api_system_status(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
-    cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
-    cJSON_AddNumberToObject(json, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    // Check all cJSON_Add* return values for NULL (allocation failure)
+    bool ok = true;
+    ok = ok && cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
+    ok = ok && cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
+    ok = ok && cJSON_AddNumberToObject(json, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     const device_identity_t *id = device_identity_get();
     if (id) {
-        cJSON_AddStringToObject(json, "node_name", id->node_name);
+        ok = ok && cJSON_AddStringToObject(json, "node_name", id->node_name);
     }
 
     // Add power stub (to be implemented with actual power monitoring)
     cJSON *power = cJSON_CreateObject();
     if (power != NULL) {
-        cJSON_AddStringToObject(power, "source", "unknown");
-        cJSON_AddBoolToObject(power, "ac_present", true);
-        cJSON_AddItemToObject(json, "power", power);
+        ok = ok && cJSON_AddStringToObject(power, "source", "unknown");
+        ok = ok && cJSON_AddBoolToObject(power, "ac_present", true);
+        ok = ok && cJSON_AddItemToObject(json, "power", power);
+    }
+
+    if (!ok) {
+        ESP_LOGE(TAG, "Failed to build status JSON - memory allocation failed");
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
     }
 
     char *resp = cJSON_PrintUnformatted(json);
@@ -520,10 +548,12 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
-    cJSON_AddStringToObject(json, "idf_version", esp_get_idf_version());
-    cJSON_AddNumberToObject(json, "chip_revision", chip_info.revision);
-    cJSON_AddNumberToObject(json, "cores", chip_info.cores);
+    // Check all cJSON_Add* return values for NULL (allocation failure)
+    bool ok = true;
+    ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
+    ok = ok && cJSON_AddStringToObject(json, "idf_version", esp_get_idf_version());
+    ok = ok && cJSON_AddNumberToObject(json, "chip_revision", chip_info.revision);
+    ok = ok && cJSON_AddNumberToObject(json, "cores", chip_info.cores);
 
     uint8_t mac[6];
     esp_err_t mac_ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -531,10 +561,17 @@ static esp_err_t api_system_info(httpd_req_t *req)
         char mac_str[18];
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                  mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        cJSON_AddStringToObject(json, "mac", mac_str);
+        ok = ok && cJSON_AddStringToObject(json, "mac", mac_str);
     } else {
         ESP_LOGW(TAG, "Failed to read MAC address: %s", esp_err_to_name(mac_ret));
-        cJSON_AddStringToObject(json, "mac", "unknown");
+        ok = ok && cJSON_AddStringToObject(json, "mac", "unknown");
+    }
+
+    if (!ok) {
+        ESP_LOGE(TAG, "Failed to build info JSON - memory allocation failed");
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
     }
 
     char *resp = cJSON_PrintUnformatted(json);
@@ -552,17 +589,25 @@ static esp_err_t api_system_info(httpd_req_t *req)
     return ESP_OK;
 }
 
-// GET /api/v1/system/qr - returns QR JSON for device setup
+// GET /api/v1/system/qr - returns QR JSON for device setup (first boot only)
 static esp_err_t api_system_qr(httpd_req_t *req)
 {
     if (web_auth_require(req) != ESP_OK) {
         return ESP_OK;
     }
 
+    httpd_resp_set_type(req, "application/json");
+
+    // Only expose credentials during first boot period (security measure)
+    if (!device_identity_is_first_boot()) {
+        ESP_LOGW(TAG, "QR endpoint accessed after first boot - credentials hidden");
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Credentials only available during first boot\"}");
+        return ESP_OK;
+    }
+
     char qr_json[256];
     esp_err_t err = device_identity_get_qr_json(qr_json, sizeof(qr_json));
-
-    httpd_resp_set_type(req, "application/json");
 
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, qr_json);

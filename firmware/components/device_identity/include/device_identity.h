@@ -8,6 +8,13 @@
 extern "C" {
 #endif
 
+// Field size constants for device_identity_t
+#define DEVICE_ID_NODE_NAME_LEN     32  // boorker-XXXX (MAC-derived)
+#define DEVICE_ID_WEB_PASSWORD_LEN  33  // Hardware RNG generated + null
+#define DEVICE_ID_AP_PASSWORD_LEN   33  // Hardware RNG generated + null
+#define DEVICE_ID_BLE_POP_LEN       7   // 6-digit PIN + null
+#define DEVICE_ID_NODE_SUFFIX_LEN   5   // Last 2 bytes of MAC as hex + null
+
 /**
  * Device identity - unique credentials generated at first boot
  *
@@ -15,11 +22,11 @@ extern "C" {
  *       externally synchronized. Typically called during initialization.
  */
 typedef struct {
-    char node_name[32];       // boorker-XXXX (MAC-derived)
-    char web_password[33];    // Hardware RNG generated
-    char ap_password[33];     // Hardware RNG generated
-    char ble_pop[7];          // 6-digit PIN
-    char node_suffix[5];      // Last 2 bytes of MAC as hex
+    char node_name[DEVICE_ID_NODE_NAME_LEN];
+    char web_password[DEVICE_ID_WEB_PASSWORD_LEN];
+    char ap_password[DEVICE_ID_AP_PASSWORD_LEN];
+    char ble_pop[DEVICE_ID_BLE_POP_LEN];
+    char node_suffix[DEVICE_ID_NODE_SUFFIX_LEN];
 } device_identity_t;
 
 /**
