@@ -10,6 +10,9 @@
 #include "freertos/semphr.h"
 #include "argtable3/argtable3.h"
 #include "version.h"
+#include "device_identity.h"
+#include "wifi_manager.h"
+#include "tailscale_manager.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -276,6 +279,54 @@ static int cmd_uptime(int argc, char **argv)
     return 0;
 }
 
+static int cmd_status(int argc, char **argv)
+{
+    // Header with version and node name
+    const device_identity_t *id = device_identity_get();
+    printf("Boorker v%s", BOORKER_VERSION_STRING);
+    if (id) {
+        printf(" - %s", id->node_name);
+    }
+    printf("\n");
+
+    // Uptime
+    uint64_t uptime_us = esp_timer_get_time();
+    uint64_t uptime_sec = uptime_us / 1000000;
+    uint32_t hours = (uint32_t)(uptime_sec / 3600);
+    uint32_t minutes = (uint32_t)((uptime_sec % 3600) / 60);
+    uint32_t seconds = (uint32_t)(uptime_sec % 60);
+    printf("Uptime: %luh %lum %lus\n",
+           (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
+
+    // Memory
+    printf("Memory:\n");
+    printf("  Heap:  %lu bytes free\n", (unsigned long)esp_get_free_heap_size());
+    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (psram_free > 0) {
+        printf("  PSRAM: %lu bytes free\n", (unsigned long)psram_free);
+    }
+
+    // WiFi status
+    char ip[16] = {0};
+    wifi_mgr_get_ip(ip, sizeof(ip));
+    printf("WiFi: %s", wifi_mgr_get_state_name());
+    if (ip[0] != '\0') {
+        printf(" (%s)", ip);
+    }
+    printf("\n");
+
+    // Tailscale status
+    char ts_ip[16] = {0};
+    ts_mgr_get_ip(ts_ip, sizeof(ts_ip));
+    printf("Tailscale: %s", ts_mgr_get_state_name());
+    if (ts_ip[0] != '\0') {
+        printf(" (%s)", ts_ip);
+    }
+    printf("\n");
+
+    return 0;
+}
+
 esp_err_t system_console_register(void)
 {
     esp_err_t ret;
@@ -339,6 +390,18 @@ esp_err_t system_console_register(void)
         ESP_LOGE(TAG, "Failed to register 'uptime' command: %s", esp_err_to_name(ret));
     }
 
-    ESP_LOGI(TAG, "Registered commands: reboot, version, free, uptime");
+    // Status command
+    const esp_console_cmd_t status_cmd = {
+        .command = "status",
+        .help = "Show system status overview",
+        .hint = NULL,
+        .func = &cmd_status,
+    };
+    ret = esp_console_cmd_register(&status_cmd);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register 'status' command: %s", esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(TAG, "Registered commands: reboot, version, free, uptime, status");
     return ESP_OK;
 }
