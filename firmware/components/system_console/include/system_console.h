@@ -11,7 +11,7 @@ extern "C" {
 /**
  * @brief Register all system console commands
  *
- * Commands: reboot, version, free, uptime
+ * Commands: reboot, version, free, uptime, status
  *
  * @note Thread-safe. Uses internal mutex for state protection.
  */
