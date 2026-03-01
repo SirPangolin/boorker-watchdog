@@ -202,11 +202,21 @@ esp_err_t device_identity_ack_first_boot(void)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for ack: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    nvs_set_u8(handle, NVS_KEY_FIRST_BOOT, 0);
+    ret = nvs_set_u8(handle, NVS_KEY_FIRST_BOOT, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set first_boot=0: %s", esp_err_to_name(ret));
+        nvs_close(handle);
+        return ret;
+    }
+
     ret = nvs_commit(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit first_boot ack: %s", esp_err_to_name(ret));
+    }
     nvs_close(handle);
 
     s_first_boot = false;

@@ -30,12 +30,19 @@ static const char* get_mime_type(const char *path)
 // Check for path traversal attempts
 static bool is_safe_path(const char *uri)
 {
-    // Reject path traversal attempts
+    // Reject path traversal attempts - literal ".."
     if (strstr(uri, "..") != NULL) {
         return false;
     }
-    // Also check URL-encoded variants
+    // URL-encoded variants (case insensitive)
+    // %2e = '.', so check all combinations: %2e%2e, %2e., .%2e
     if (strstr(uri, "%2e%2e") != NULL || strstr(uri, "%2E%2E") != NULL) {
+        return false;
+    }
+    if (strstr(uri, "%2e.") != NULL || strstr(uri, "%2E.") != NULL) {
+        return false;
+    }
+    if (strstr(uri, ".%2e") != NULL || strstr(uri, ".%2E") != NULL) {
         return false;
     }
     return true;
@@ -117,13 +124,26 @@ static esp_err_t file_handler(httpd_req_t *req)
     // Stream file
     char buf[512];
     size_t read_bytes;
+    bool read_error = false;
     while ((read_bytes = fread(buf, 1, sizeof(buf), f)) > 0) {
         if (httpd_resp_send_chunk(req, buf, read_bytes) != ESP_OK) {
             fclose(f);
             return ESP_FAIL;
         }
     }
+
+    // Check if loop ended due to error (not just EOF)
+    if (ferror(f)) {
+        ESP_LOGE(TAG, "Error reading file %s", filepath);
+        read_error = true;
+    }
     fclose(f);
+
+    if (read_error) {
+        // Can't send 500 after chunks started, just abort
+        return ESP_FAIL;
+    }
+
     httpd_resp_send_chunk(req, NULL, 0);
 
     return ESP_OK;
@@ -186,6 +206,23 @@ static esp_err_t api_auth_logout(httpd_req_t *req)
         return ESP_OK; // Auth failed, response already sent
     }
 
+    // Extract session token from cookie and invalidate server-side
+    char cookie_buf[128];
+    if (httpd_req_get_hdr_value_str(req, "Cookie", cookie_buf, sizeof(cookie_buf)) == ESP_OK) {
+        char *session = strstr(cookie_buf, "session=");
+        if (session) {
+            session += 8; // Skip "session="
+            char *end = strchr(session, ';');
+            size_t token_len = end ? (size_t)(end - session) : strlen(session);
+            if (token_len > 0 && token_len <= WEB_AUTH_SESSION_TOKEN_LEN) {
+                char token[WEB_AUTH_SESSION_TOKEN_LEN + 1];
+                strncpy(token, session, token_len);
+                token[token_len] = '\0';
+                web_auth_logout(token);  // Invalidate server-side session
+            }
+        }
+    }
+
     // Clear cookie
     httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
     httpd_resp_set_type(req, "application/json");
@@ -201,6 +238,12 @@ static esp_err_t api_system_status(httpd_req_t *req)
     }
 
     cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON object");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
     cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
 
@@ -211,9 +254,11 @@ static esp_err_t api_system_status(httpd_req_t *req)
 
     // Add power stub (to be implemented with actual power monitoring)
     cJSON *power = cJSON_CreateObject();
-    cJSON_AddStringToObject(power, "source", "unknown");
-    cJSON_AddBoolToObject(power, "ac_present", true);
-    cJSON_AddItemToObject(json, "power", power);
+    if (power != NULL) {
+        cJSON_AddStringToObject(power, "source", "unknown");
+        cJSON_AddBoolToObject(power, "ac_present", true);
+        cJSON_AddItemToObject(json, "power", power);
+    }
 
     char *resp = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
@@ -241,6 +286,12 @@ static esp_err_t api_system_info(httpd_req_t *req)
     esp_chip_info(&chip_info);
 
     cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create JSON object");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     cJSON_AddNumberToObject(json, "chip_revision", chip_info.revision);
     cJSON_AddNumberToObject(json, "cores", chip_info.cores);
 
@@ -321,28 +372,40 @@ esp_err_t web_server_start(void)
         .method = HTTP_POST,
         .handler = api_auth_login,
     };
-    httpd_register_uri_handler(s_server, &uri_login);
+    ret = httpd_register_uri_handler(s_server, &uri_login);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/auth/login: %s", esp_err_to_name(ret));
+    }
 
     httpd_uri_t uri_logout = {
         .uri = "/api/v1/auth/logout",
         .method = HTTP_POST,
         .handler = api_auth_logout,
     };
-    httpd_register_uri_handler(s_server, &uri_logout);
+    ret = httpd_register_uri_handler(s_server, &uri_logout);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/auth/logout: %s", esp_err_to_name(ret));
+    }
 
     httpd_uri_t uri_status = {
         .uri = "/api/v1/system/status",
         .method = HTTP_GET,
         .handler = api_system_status,
     };
-    httpd_register_uri_handler(s_server, &uri_status);
+    ret = httpd_register_uri_handler(s_server, &uri_status);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/system/status: %s", esp_err_to_name(ret));
+    }
 
     httpd_uri_t uri_info = {
         .uri = "/api/v1/system/info",
         .method = HTTP_GET,
         .handler = api_system_info,
     };
-    httpd_register_uri_handler(s_server, &uri_info);
+    ret = httpd_register_uri_handler(s_server, &uri_info);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register /api/v1/system/info: %s", esp_err_to_name(ret));
+    }
 
     // File handler (must be last - wildcard)
     httpd_uri_t uri_files = {
@@ -350,7 +413,10 @@ esp_err_t web_server_start(void)
         .method = HTTP_GET,
         .handler = file_handler,
     };
-    httpd_register_uri_handler(s_server, &uri_files);
+    ret = httpd_register_uri_handler(s_server, &uri_files);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register file handler: %s", esp_err_to_name(ret));
+    }
 
     ESP_LOGI(TAG, "Web server started on port %d", CONFIG_WEB_SERVER_PORT);
     return ESP_OK;
