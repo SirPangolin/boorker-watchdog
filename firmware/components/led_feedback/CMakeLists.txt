@@ -8,8 +8,8 @@ idf_component_register(
     REQUIRES
         led_indicator
         nvs_flash
-        esp_console
+        console
         freertos
     PRIV_REQUIRES
-        esp_log
+        log
 )

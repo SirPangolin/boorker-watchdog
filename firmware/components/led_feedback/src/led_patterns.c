@@ -85,17 +85,17 @@ static const blink_step_t pattern_off[] = {
 // Pattern list indexed by led_state_t
 // MUST match led_state_t enum order exactly
 blink_step_t const *led_patterns[] = {
-    [LED_STATE_ALERT_CRITICAL]       = pattern_alert_critical,
-    [LED_STATE_FIRST_BOOT]           = pattern_first_boot,
-    [LED_STATE_WIFI_PROVISIONING]    = pattern_wifi_provisioning,
-    [LED_STATE_WIFI_RECONNECTING]    = pattern_wifi_reconnecting,
-    [LED_STATE_ALERT_ACTIVE]         = pattern_alert_active,
-    [LED_STATE_WIFI_CONNECTING]      = pattern_wifi_connecting,
-    [LED_STATE_TAILSCALE_CONNECTING] = pattern_tailscale_connecting,
-    [LED_STATE_CONNECTED]            = pattern_connected,
-    [LED_STATE_OFF]                  = pattern_off,
+    [LED_FB_ALERT_CRITICAL]       = pattern_alert_critical,
+    [LED_FB_FIRST_BOOT]           = pattern_first_boot,
+    [LED_FB_WIFI_PROVISIONING]    = pattern_wifi_provisioning,
+    [LED_FB_WIFI_RECONNECTING]    = pattern_wifi_reconnecting,
+    [LED_FB_ALERT_ACTIVE]         = pattern_alert_active,
+    [LED_FB_WIFI_CONNECTING]      = pattern_wifi_connecting,
+    [LED_FB_TAILSCALE_CONNECTING] = pattern_tailscale_connecting,
+    [LED_FB_CONNECTED]            = pattern_connected,
+    [LED_FB_OFF]                  = pattern_off,
 };
 
 // Verify array size matches enum at compile time
-_Static_assert(sizeof(led_patterns) / sizeof(led_patterns[0]) == LED_STATE_MAX,
-               "led_patterns array size must match LED_STATE_MAX");
+_Static_assert(sizeof(led_patterns) / sizeof(led_patterns[0]) == LED_FB_MAX,
+               "led_patterns array size must match LED_FB_MAX");
