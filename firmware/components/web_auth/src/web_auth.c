@@ -36,15 +36,41 @@ static bool s_initialized = false;
 static int s_failed_attempts = 0;
 static time_t s_lockout_until = 0;
 
-static void hash_password(const char *password, const uint8_t *salt, uint8_t *hash_out)
+static esp_err_t hash_password(const char *password, const uint8_t *salt, uint8_t *hash_out)
 {
     mbedtls_sha256_context ctx;
     mbedtls_sha256_init(&ctx);
-    mbedtls_sha256_starts(&ctx, 0); // 0 = SHA-256
-    mbedtls_sha256_update(&ctx, salt, SALT_LEN);
-    mbedtls_sha256_update(&ctx, (const uint8_t *)password, strlen(password));
-    mbedtls_sha256_finish(&ctx, hash_out);
+
+    int ret = mbedtls_sha256_starts(&ctx, 0); // 0 = SHA-256
+    if (ret != 0) {
+        ESP_LOGE(TAG, "SHA-256 start failed: %d", ret);
+        mbedtls_sha256_free(&ctx);
+        return ESP_FAIL;
+    }
+
+    ret = mbedtls_sha256_update(&ctx, salt, SALT_LEN);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "SHA-256 update (salt) failed: %d", ret);
+        mbedtls_sha256_free(&ctx);
+        return ESP_FAIL;
+    }
+
+    ret = mbedtls_sha256_update(&ctx, (const uint8_t *)password, strlen(password));
+    if (ret != 0) {
+        ESP_LOGE(TAG, "SHA-256 update (password) failed: %d", ret);
+        mbedtls_sha256_free(&ctx);
+        return ESP_FAIL;
+    }
+
+    ret = mbedtls_sha256_finish(&ctx, hash_out);
+    if (ret != 0) {
+        ESP_LOGE(TAG, "SHA-256 finish failed: %d", ret);
+        mbedtls_sha256_free(&ctx);
+        return ESP_FAIL;
+    }
+
     mbedtls_sha256_free(&ctx);
+    return ESP_OK;
 }
 
 static void generate_token(char *token_out)
@@ -81,7 +107,12 @@ static esp_err_t load_or_create_password(void)
         esp_fill_random(s_password_salt, SALT_LEN);
 
         // Hash default password
-        hash_password(id->web_password, s_password_salt, s_password_hash);
+        esp_err_t hash_ret = hash_password(id->web_password, s_password_salt, s_password_hash);
+        if (hash_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to hash default password");
+            nvs_close(handle);
+            return hash_ret;
+        }
 
         // Store in NVS
         ret = nvs_set_blob(handle, NVS_KEY_PASS_HASH, s_password_hash, HASH_LEN);
@@ -186,7 +217,10 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
 
     // Hash provided password and compare
     uint8_t hash[HASH_LEN];
-    hash_password(password, s_password_salt, hash);
+    if (hash_password(password, s_password_salt, hash) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to hash login password");
+        return ESP_ERR_NO_MEM;
+    }
 
     if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
         s_failed_attempts++;
@@ -238,14 +272,20 @@ bool web_auth_validate_session(const char *token)
         return false;
     }
 
+    // Use constant-time comparison to prevent timing attacks
+    size_t token_len = strlen(token);
     for (int i = 0; i < WEB_AUTH_MAX_SESSIONS; i++) {
-        if (s_sessions[i].valid && strcmp(s_sessions[i].token, token) == 0) {
-            // Check expiry (1 hour)
-            if (time(NULL) - s_sessions[i].created > 3600) {
-                s_sessions[i].valid = false;
-                return false;
+        if (s_sessions[i].valid) {
+            // Constant-time comparison prevents timing attacks
+            if (token_len == WEB_AUTH_SESSION_TOKEN_LEN &&
+                mbedtls_ct_memcmp(s_sessions[i].token, token, WEB_AUTH_SESSION_TOKEN_LEN) == 0) {
+                // Check expiry (1 hour)
+                if (time(NULL) - s_sessions[i].created > 3600) {
+                    s_sessions[i].valid = false;
+                    return false;
+                }
+                return true;
             }
-            return true;
         }
     }
     return false;
@@ -255,11 +295,16 @@ void web_auth_logout(const char *token)
 {
     if (token == NULL) return;
 
+    size_t token_len = strlen(token);
     for (int i = 0; i < WEB_AUTH_MAX_SESSIONS; i++) {
-        if (s_sessions[i].valid && strcmp(s_sessions[i].token, token) == 0) {
-            s_sessions[i].valid = false;
-            ESP_LOGI(TAG, "Session invalidated");
-            return;
+        if (s_sessions[i].valid) {
+            // Constant-time comparison prevents timing attacks
+            if (token_len == WEB_AUTH_SESSION_TOKEN_LEN &&
+                mbedtls_ct_memcmp(s_sessions[i].token, token, WEB_AUTH_SESSION_TOKEN_LEN) == 0) {
+                s_sessions[i].valid = false;
+                ESP_LOGI(TAG, "Session invalidated");
+                return;
+            }
         }
     }
 }
@@ -272,7 +317,10 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
 
     // Verify current password
     uint8_t hash[HASH_LEN];
-    hash_password(current_password, s_password_salt, hash);
+    if (hash_password(current_password, s_password_salt, hash) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to hash current password");
+        return ESP_ERR_NO_MEM;
+    }
 
     if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
         return ESP_ERR_INVALID_ARG;
@@ -280,7 +328,10 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
 
     // Generate new salt and hash
     esp_fill_random(s_password_salt, SALT_LEN);
-    hash_password(new_password, s_password_salt, s_password_hash);
+    if (hash_password(new_password, s_password_salt, s_password_hash) != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to hash new password");
+        return ESP_ERR_NO_MEM;
+    }
 
     // Store
     nvs_handle_t handle;
