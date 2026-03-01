@@ -26,28 +26,31 @@ extern "C" {
 
 /**
  * @brief LED feedback states (priority order - lower value = higher priority)
+ *
+ * @note Enum values use LED_FB_ prefix to avoid conflict with led_indicator's
+ *       LED_STATE_OFF/LED_STATE_ON brightness values.
  */
 typedef enum {
     // Priority 0 (highest) - Immediate attention
-    LED_STATE_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
+    LED_FB_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
 
     // Priority 1 - Setup required
-    LED_STATE_FIRST_BOOT,           ///< Slow breathe (purple on RGB)
-    LED_STATE_WIFI_PROVISIONING,    ///< Slow blink (blue on RGB)
+    LED_FB_FIRST_BOOT,           ///< Slow breathe (purple on RGB)
+    LED_FB_WIFI_PROVISIONING,    ///< Slow blink (blue on RGB)
 
     // Priority 2 - Problems
-    LED_STATE_WIFI_RECONNECTING,    ///< Medium blink (yellow on RGB)
-    LED_STATE_ALERT_ACTIVE,         ///< Double-pulse slow (orange on RGB)
+    LED_FB_WIFI_RECONNECTING,    ///< Medium blink (yellow on RGB)
+    LED_FB_ALERT_ACTIVE,         ///< Double-pulse slow (orange on RGB)
 
     // Priority 3 - Transitional
-    LED_STATE_WIFI_CONNECTING,      ///< Fast blink (cyan on RGB)
-    LED_STATE_TAILSCALE_CONNECTING, ///< Fast blink (cyan on RGB)
+    LED_FB_WIFI_CONNECTING,      ///< Fast blink (cyan on RGB)
+    LED_FB_TAILSCALE_CONNECTING, ///< Fast blink (cyan on RGB)
 
     // Priority 4 (lowest) - Normal operation
-    LED_STATE_CONNECTED,            ///< Solid on (green on RGB)
-    LED_STATE_OFF,                  ///< Off
+    LED_FB_CONNECTED,            ///< Solid on (green on RGB)
+    LED_FB_OFF,                  ///< Off
 
-    LED_STATE_MAX                   ///< Sentinel for bounds checking
+    LED_FB_MAX                   ///< Sentinel for bounds checking
 } led_state_t;
 
 /**
@@ -81,7 +84,7 @@ esp_err_t led_feedback_deinit(void);
  *
  * @param state State to activate
  * @return ESP_OK on success
- * @return ESP_ERR_INVALID_ARG if state >= LED_STATE_MAX
+ * @return ESP_ERR_INVALID_ARG if state >= LED_FB_MAX
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
@@ -95,7 +98,7 @@ esp_err_t led_feedback_set_state(led_state_t state);
  *
  * @param state State to clear
  * @return ESP_OK on success
- * @return ESP_ERR_INVALID_ARG if state >= LED_STATE_MAX
+ * @return ESP_ERR_INVALID_ARG if state >= LED_FB_MAX
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
@@ -104,7 +107,7 @@ esp_err_t led_feedback_clear_state(led_state_t state);
 /**
  * @brief Get currently displayed state
  *
- * @return Current state, or LED_STATE_OFF if not initialized
+ * @return Current state, or LED_FB_OFF if not initialized
  */
 led_state_t led_feedback_get_state(void);
 
