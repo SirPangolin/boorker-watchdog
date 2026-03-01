@@ -28,7 +28,8 @@ extern "C" {
  * @brief LED feedback states (priority order - lower value = higher priority)
  *
  * @note Enum values use LED_FB_ prefix to avoid conflict with led_indicator's
- *       LED_STATE_OFF/LED_STATE_ON brightness values.
+ *       LED_STATE_OFF/LED_STATE_ON brightness values. The typedef remains
+ *       led_state_t for consistency with existing ESP-IDF component patterns.
  */
 typedef enum {
     // Priority 0 (highest) - Immediate attention
@@ -93,8 +94,11 @@ esp_err_t led_feedback_set_state(led_state_t state);
 /**
  * @brief Clear LED state (deactivates pattern)
  *
- * Removes this state from active set. If it was showing, the next highest
- * priority active state takes over.
+ * Removes this state from active set. If it was showing, LED state falls
+ * back to OFF.
+ *
+ * @note This implementation does not track pending states. Callers must
+ *       re-set any states they want displayed after clearing.
  *
  * @param state State to clear
  * @return ESP_OK on success
@@ -119,6 +123,8 @@ led_state_t led_feedback_get_state(void);
  *
  * @param enabled true to enable, false to disable
  * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
 esp_err_t led_feedback_set_enabled(bool enabled);
 
@@ -141,6 +147,8 @@ esp_err_t led_feedback_set_brightness(uint8_t percent);
  *
  * @param alerts_only true for alerts only, false for all states
  * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
 esp_err_t led_feedback_set_alerts_only(bool alerts_only);
 
@@ -150,6 +158,8 @@ esp_err_t led_feedback_set_alerts_only(bool alerts_only);
  * Persists enabled, brightness, and alerts_only settings.
  *
  * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  * @return ESP_ERR_NVS_* on NVS errors
  */
 esp_err_t led_feedback_save_config(void);
@@ -178,7 +188,7 @@ bool led_feedback_is_alerts_only(void);
 /**
  * @brief Register console commands
  *
- * Registers: led status, led on, led off, led brightness <n>, led alerts-only
+ * Registers: led, led_on, led_off, led_brightness, led_alerts, led_all
  *
  * @return ESP_OK on success
  */
