@@ -13,6 +13,7 @@
 #include "device_identity.h"
 #include "web_auth.h"
 #include "web_server.h"
+#include "system_console.h"
 
 static const char *TAG = "boorker";
 
@@ -96,6 +97,9 @@ static void init_console(void)
 
     // Register Tailscale console commands
     ts_console_register();
+
+    // Register system console commands
+    system_console_register();
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
