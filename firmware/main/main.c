@@ -63,6 +63,8 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 {
     switch (event) {
         case WIFI_MGR_EVENT_CONNECTED:
+            // Only clear WiFi-related states - wifi_manager doesn't own FIRST_BOOT
+            // FIRST_BOOT is cleared by web_auth when password is changed
             led_feedback_clear_state(LED_FB_WIFI_CONNECTING);
             led_feedback_clear_state(LED_FB_WIFI_RECONNECTING);
             led_feedback_clear_state(LED_FB_WIFI_PROVISIONING);
