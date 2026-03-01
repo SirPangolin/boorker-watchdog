@@ -1,0 +1,33 @@
+menu "Web Authentication"
+
+    config WEB_AUTH_DEFAULT_USERNAME
+        string "Default admin username"
+        default "admin"
+        help
+            The default username for web authentication. Only this username
+            is accepted for login.
+
+    config WEB_AUTH_SESSION_EXPIRY_SECONDS
+        int "Session expiry time (seconds)"
+        default 3600
+        range 60 86400
+        help
+            Time in seconds before a login session expires and requires
+            re-authentication. Default is 3600 (1 hour).
+
+    config WEB_AUTH_MAX_FAILED_ATTEMPTS
+        int "Max failed login attempts before lockout"
+        default 5
+        range 3 20
+        help
+            Number of failed login attempts before the account is locked.
+
+    config WEB_AUTH_LOCKOUT_SECONDS
+        int "Lockout duration (seconds)"
+        default 300
+        range 60 3600
+        help
+            Duration of account lockout after max failed attempts.
+            Default is 300 (5 minutes).
+
+endmenu

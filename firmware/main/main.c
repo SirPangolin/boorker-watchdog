@@ -9,10 +9,17 @@
 
 #include "version.h"
 #include "wifi_manager.h"
+#if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
+#endif
+#include "device_identity.h"
+#include "web_auth.h"
+#include "web_server.h"
+#include "system_console.h"
 
 static const char *TAG = "boorker";
 
+#if CONFIG_TS_MGR_ENABLED
 static void tailscale_callback(ts_mgr_event_t event, void *ctx)
 {
     char ip[16];
@@ -46,6 +53,7 @@ static void tailscale_callback(ts_mgr_event_t event, void *ctx)
             break;
     }
 }
+#endif
 
 static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 {
@@ -77,11 +85,16 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
         case WIFI_MGR_EVENT_RECONNECT_EXHAUSTED:
             ESP_LOGW(TAG, "WiFi reconnection attempts exhausted");
             break;
+
+        case WIFI_MGR_EVENT_COUNT:
+            // Sentinel value for bounds checking - should never occur
+            break;
     }
 }
 
 static void init_console(void)
 {
+    esp_err_t ret;
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "boorker>";
@@ -91,8 +104,23 @@ static void init_console(void)
 
     ESP_ERROR_CHECK(esp_console_new_repl_uart(&uart_config, &repl_config, &repl));
 
+#if CONFIG_TS_MGR_ENABLED
     // Register Tailscale console commands
-    ts_console_register();
+    ret = ts_console_register();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Tailscale console init failed: %s (commands may be unavailable)",
+                 esp_err_to_name(ret));
+        // Non-fatal - continue without tailscale commands
+    }
+#endif
+
+    // Register system console commands
+    ret = system_console_register();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "System console init failed: %s (commands may be unavailable)",
+                 esp_err_to_name(ret));
+        // Non-fatal - continue without system commands
+    }
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
@@ -100,6 +128,13 @@ static void init_console(void)
 
 void app_main(void)
 {
+#if CONFIG_TS_MGR_ENABLED
+    // Reduce log spam from chatty components
+    esp_log_level_set("microlink", ESP_LOG_WARN);
+    esp_log_level_set("microlink_disco", ESP_LOG_WARN);
+    esp_log_level_set("microlink_coord", ESP_LOG_WARN);
+#endif
+
     ESP_LOGI(TAG, "Boorker v%s starting...", BOORKER_VERSION_STRING);
 
     // Initialize NVS (required for WiFi and Tailscale credential storage)
@@ -114,12 +149,36 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
+    // Initialize device identity (generates credentials on first boot)
+    ret = device_identity_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Device identity init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    const device_identity_t *identity = device_identity_get();
+    if (identity == NULL) {
+        ESP_LOGE(TAG, "Failed to get device identity");
+        return;
+    }
+    ESP_LOGI(TAG, "Device: %s", identity->node_name);
+
+    // Show credentials on first boot (until OLED is implemented)
+    if (device_identity_is_first_boot()) {
+        ESP_LOGI(TAG, "========================================");
+        ESP_LOGI(TAG, "FIRST BOOT - SAVE THESE CREDENTIALS:");
+        ESP_LOGI(TAG, "  Web Password: %s", identity->web_password);
+        ESP_LOGI(TAG, "  AP Password: %s", identity->ap_password);
+        ESP_LOGI(TAG, "  BLE PoP: %s", identity->ble_pop);
+        ESP_LOGI(TAG, "========================================");
+    }
+
     // Initialize console for ts_auth command
     init_console();
 
     // Initialize WiFi manager (Tailscale init happens in callback)
     wifi_mgr_config_t wifi_config = {
-        .device_name = "boorker-dev",
+        .device_name = identity->node_name,  // Use generated name instead of hardcoded
         .start_provisioning = false,
         .callback = wifi_event_callback,
         .callback_ctx = NULL,
@@ -143,10 +202,32 @@ void app_main(void)
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }
 
+    // Initialize web auth (required for secure web server operation)
+    ret = web_auth_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Web auth init failed: %s - web server disabled for security",
+                 esp_err_to_name(ret));
+        // Don't start web server without authentication - security risk
+    } else {
+        // Start web server only if auth is available
+        ret = web_server_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
+            // Continue without web server
+        } else {
+            if (ip[0] != '\0') {
+                ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+            } else {
+                ESP_LOGI(TAG, "Web server started");
+            }
+        }
+    }
+
+#if CONFIG_TS_MGR_ENABLED
     // Initialize Tailscale from main task (has adequate stack - can't init from callback)
     ESP_LOGI(TAG, "Initializing Tailscale from main task...");
     ts_mgr_config_t ts_config = {
-        .device_name = "boorker-dev",
+        .device_name = identity->node_name,  // Use generated name
         .callback = tailscale_callback,
         .callback_ctx = NULL,
     };
@@ -155,13 +236,22 @@ void app_main(void)
         ESP_LOGE(TAG, "Tailscale manager init failed: %s", esp_err_to_name(ret));
         // Continue without Tailscale - WiFi still works
     }
+#else
+    ESP_LOGI(TAG, "Tailscale disabled in config");
+#endif
 
     // Main loop - heartbeat
     while (1) {
+#if CONFIG_TS_MGR_ENABLED
         ESP_LOGI(TAG, "Heartbeat - WiFi: %s, Tailscale: %s, heap: %lu",
                  wifi_mgr_get_state_name(),
                  ts_mgr_get_state_name(),
                  esp_get_free_heap_size());
+#else
+        ESP_LOGI(TAG, "Heartbeat - WiFi: %s, heap: %lu",
+                 wifi_mgr_get_state_name(),
+                 esp_get_free_heap_size());
+#endif
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }

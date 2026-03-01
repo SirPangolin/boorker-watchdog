@@ -29,6 +29,9 @@ typedef enum {
     WIFI_MGR_STATE_RECONNECTING,
 } wifi_mgr_state_t;
 
+// Max device name length (mDNS hostname limit)
+#define WIFI_MGR_MAX_DEVICE_NAME_LEN 32
+
 // Internal state
 static struct {
     wifi_mgr_state_t state;
@@ -36,7 +39,7 @@ static struct {
     EventGroupHandle_t event_group;
     wifi_mgr_callback_t callback;
     void *callback_ctx;
-    const char *device_name;
+    char device_name[WIFI_MGR_MAX_DEVICE_NAME_LEN]; // Owned copy, avoids lifetime hazard
     esp_netif_t *sta_netif;
     esp_timer_handle_t reconnect_timer;
     uint32_t reconnect_delay_ms;
@@ -112,14 +115,18 @@ esp_err_t wifi_mgr_init(const wifi_mgr_config_t *config)
         return ESP_ERR_NO_MEM;
     }
 
-    // Store config
+    // Store config - copy device_name to avoid lifetime hazard with caller's string
     if (config) {
         s_wifi_mgr.callback = config->callback;
         s_wifi_mgr.callback_ctx = config->callback_ctx;
-        s_wifi_mgr.device_name = config->device_name ? config->device_name
-                                                     : CONFIG_WIFI_MGR_DEVICE_NAME;
+        const char *name = config->device_name ? config->device_name
+                                               : CONFIG_WIFI_MGR_DEVICE_NAME;
+        strncpy(s_wifi_mgr.device_name, name, sizeof(s_wifi_mgr.device_name) - 1);
+        s_wifi_mgr.device_name[sizeof(s_wifi_mgr.device_name) - 1] = '\0';
     } else {
-        s_wifi_mgr.device_name = CONFIG_WIFI_MGR_DEVICE_NAME;
+        strncpy(s_wifi_mgr.device_name, CONFIG_WIFI_MGR_DEVICE_NAME,
+                sizeof(s_wifi_mgr.device_name) - 1);
+        s_wifi_mgr.device_name[sizeof(s_wifi_mgr.device_name) - 1] = '\0';
     }
 
     // Initialize TCP/IP stack

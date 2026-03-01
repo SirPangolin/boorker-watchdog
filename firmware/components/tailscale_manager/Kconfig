@@ -1,42 +1,57 @@
 menu "Tailscale Manager"
 
+    config TS_MGR_ENABLED
+        bool "Enable Tailscale VPN"
+        default y
+        help
+            Enable Tailscale VPN connectivity via MicroLink.
+            Disable this to run without Tailscale while still
+            having local WiFi access to the device.
+
     config TS_MGR_DEVICE_NAME
+        depends on TS_MGR_ENABLED
         string "Default Tailscale device name"
         default "boorker"
         help
             Device name shown in Tailscale admin console.
 
     config TS_MGR_UPDATE_INTERVAL_MS
+        depends on TS_MGR_ENABLED
         int "MicroLink update interval (ms)"
         default 100
         help
             How often to call microlink_update().
 
     config TS_MGR_RECONNECT_INITIAL_MS
+        depends on TS_MGR_ENABLED
         int "Initial reconnection delay (ms)"
         default 5000
         help
             First retry delay after disconnect.
 
     config TS_MGR_RECONNECT_MAX_MS
+        depends on TS_MGR_ENABLED
         int "Maximum reconnection delay (ms)"
         default 300000
         help
             Exponential backoff caps at this value (default 5 minutes).
 
     config TS_MGR_RECONNECT_MAX_ATTEMPTS
+        depends on TS_MGR_ENABLED
         int "Maximum reconnection attempts (0 = infinite)"
         default 0
         help
             Set to 0 for infinite retries (default behavior).
 
     config TS_MGR_TASK_STACK_SIZE
+        depends on TS_MGR_ENABLED
         int "Update task stack size"
         default 8192
         help
             Stack size for the MicroLink update task.
 
     config TS_MGR_TASK_PRIORITY
+        depends on TS_MGR_ENABLED
         int "Update task priority"
         default 5
         help

@@ -7,3 +7,6 @@ set(EXTRA_COMPONENT_DIRS
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 project(boorker-watchdog)
+
+# Create LittleFS image from www directory
+littlefs_create_partition_image(storage ../www/dist FLASH_IN_PROJECT)
