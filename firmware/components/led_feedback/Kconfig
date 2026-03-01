@@ -23,11 +23,11 @@ menu "LED Feedback"
 
     config LED_FEEDBACK_GPIO
         int "LED GPIO pin"
-        default 48 if IDF_TARGET_ESP32S3
+        default 38 if IDF_TARGET_ESP32S3
         default 35
         help
             GPIO pin connected to LED.
-            DevKitC: 48 (WS2812), Heltec V3: 35 (white)
+            DevKitC v1.1: 38 (WS2812), v1.0: 48, Heltec V3: 35 (white)
 
     config LED_FEEDBACK_DEFAULT_BRIGHTNESS
         int "Default brightness (0-100)"
