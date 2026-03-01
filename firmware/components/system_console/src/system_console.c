@@ -28,6 +28,17 @@ static uint64_t s_reboot_delay_us = 0;        // Total delay in microseconds
 
 static void reboot_timer_callback(void *arg)
 {
+    // Check if reboot was cancelled (race condition protection)
+    if (s_reboot_mutex != NULL) {
+        xSemaphoreTake(s_reboot_mutex, portMAX_DELAY);
+        if (s_reboot_timer == NULL) {
+            // Reboot was cancelled between timer firing and callback execution
+            xSemaphoreGive(s_reboot_mutex);
+            ESP_LOGI(TAG, "Reboot callback aborted - cancel was requested");
+            return;
+        }
+        xSemaphoreGive(s_reboot_mutex);
+    }
     printf("Restarting now.\n");
     esp_restart();
 }
@@ -308,18 +319,16 @@ static int cmd_status(int argc, char **argv)
 
     // WiFi status
     char ip[16] = {0};
-    wifi_mgr_get_ip(ip, sizeof(ip));
     printf("WiFi: %s", wifi_mgr_get_state_name());
-    if (ip[0] != '\0') {
+    if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK && ip[0] != '\0') {
         printf(" (%s)", ip);
     }
     printf("\n");
 
     // Tailscale status
     char ts_ip[16] = {0};
-    ts_mgr_get_ip(ts_ip, sizeof(ts_ip));
     printf("Tailscale: %s", ts_mgr_get_state_name());
-    if (ts_ip[0] != '\0') {
+    if (ts_mgr_get_ip(ts_ip, sizeof(ts_ip)) == ESP_OK && ts_ip[0] != '\0') {
         printf(" (%s)", ts_ip);
     }
     printf("\n");
@@ -330,6 +339,7 @@ static int cmd_status(int argc, char **argv)
 esp_err_t system_console_register(void)
 {
     esp_err_t ret;
+    esp_err_t first_error = ESP_OK;
 
     // Create mutex for thread-safe reboot state access
     s_reboot_mutex = xSemaphoreCreateMutex();
@@ -338,9 +348,14 @@ esp_err_t system_console_register(void)
         return ESP_ERR_NO_MEM;
     }
 
-    // Reboot command
+    // Reboot command - allocate argtable
     reboot_args.action = arg_str0(NULL, NULL, "[now|seconds|cancel]", "Reboot action");
     reboot_args.end = arg_end(1);
+
+    if (reboot_args.action == NULL || reboot_args.end == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate argtable for reboot command");
+        return ESP_ERR_NO_MEM;
+    }
 
     const esp_console_cmd_t reboot_cmd = {
         .command = "reboot",
@@ -352,6 +367,7 @@ esp_err_t system_console_register(void)
     ret = esp_console_cmd_register(&reboot_cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register 'reboot' command: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     // Version command
@@ -364,6 +380,7 @@ esp_err_t system_console_register(void)
     ret = esp_console_cmd_register(&version_cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register 'version' command: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     // Free command
@@ -376,6 +393,7 @@ esp_err_t system_console_register(void)
     ret = esp_console_cmd_register(&free_cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register 'free' command: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     // Uptime command
@@ -388,6 +406,7 @@ esp_err_t system_console_register(void)
     ret = esp_console_cmd_register(&uptime_cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register 'uptime' command: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     // Status command
@@ -400,6 +419,12 @@ esp_err_t system_console_register(void)
     ret = esp_console_cmd_register(&status_cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register 'status' command: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    if (first_error != ESP_OK) {
+        ESP_LOGW(TAG, "Some commands failed to register");
+        return first_error;
     }
 
     ESP_LOGI(TAG, "Registered commands: reboot, version, free, uptime, status");

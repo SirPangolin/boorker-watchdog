@@ -326,48 +326,62 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Generate new salt and hash
-    esp_fill_random(s_password_salt, SALT_LEN);
-    if (hash_password(new_password, s_password_salt, s_password_hash) != ESP_OK) {
+    // Generate new salt and hash into temporary buffers
+    // (don't modify global state until NVS write succeeds)
+    uint8_t new_salt[SALT_LEN];
+    uint8_t new_hash[HASH_LEN];
+    esp_fill_random(new_salt, SALT_LEN);
+    if (hash_password(new_password, new_salt, new_hash) != ESP_OK) {
         ESP_LOGE(TAG, "Failed to hash new password");
         return ESP_ERR_NO_MEM;
     }
 
-    // Store
+    // Store to NVS first
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS for password change: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    ret = nvs_set_blob(handle, NVS_KEY_PASS_HASH, s_password_hash, HASH_LEN);
+    ret = nvs_set_blob(handle, NVS_KEY_PASS_HASH, new_hash, HASH_LEN);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write new password hash: %s", esp_err_to_name(ret));
         nvs_close(handle);
         return ret;
     }
 
-    ret = nvs_set_blob(handle, NVS_KEY_PASS_SALT, s_password_salt, SALT_LEN);
+    ret = nvs_set_blob(handle, NVS_KEY_PASS_SALT, new_salt, SALT_LEN);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write new password salt: %s", esp_err_to_name(ret));
         nvs_close(handle);
         return ret;
     }
 
     ret = nvs_set_u8(handle, NVS_KEY_PASS_CHANGED, 1);
     if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to write password changed flag: %s", esp_err_to_name(ret));
         nvs_close(handle);
         return ret;
     }
 
     ret = nvs_commit(handle);
     nvs_close(handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit password change: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
+    // NVS succeeded - now update in-memory state
+    memcpy(s_password_hash, new_hash, HASH_LEN);
+    memcpy(s_password_salt, new_salt, SALT_LEN);
     s_password_changed = true;
 
     // Invalidate all sessions (force re-login)
     memset(s_sessions, 0, sizeof(s_sessions));
 
     ESP_LOGI(TAG, "Password changed");
-    return ret;
+    return ESP_OK;
 }
 
 bool web_auth_check_request(httpd_req_t *req)

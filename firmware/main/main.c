@@ -86,6 +86,7 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 
 static void init_console(void)
 {
+    esp_err_t ret;
     esp_console_repl_t *repl = NULL;
     esp_console_repl_config_t repl_config = ESP_CONSOLE_REPL_CONFIG_DEFAULT();
     repl_config.prompt = "boorker>";
@@ -99,7 +100,12 @@ static void init_console(void)
     ts_console_register();
 
     // Register system console commands
-    system_console_register();
+    ret = system_console_register();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "System console init failed: %s (commands may be unavailable)",
+                 esp_err_to_name(ret));
+        // Non-fatal - continue without system commands
+    }
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");

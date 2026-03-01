@@ -41,10 +41,14 @@ static void generate_random_digits(char *buf, size_t len)
     buf[len] = '\0';
 }
 
-static void derive_node_name(void)
+static esp_err_t derive_node_name(void)
 {
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    esp_err_t ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to read MAC address: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
     // Node suffix from last 2 bytes of MAC
     snprintf(s_identity.node_suffix, sizeof(s_identity.node_suffix),
@@ -53,6 +57,8 @@ static void derive_node_name(void)
     // Full node name
     snprintf(s_identity.node_name, sizeof(s_identity.node_name),
              "%s-%s", CONFIG_DEVICE_ID_NAME_PREFIX, s_identity.node_suffix);
+
+    return ESP_OK;
 }
 
 static esp_err_t load_or_generate_credentials(void)
@@ -157,10 +163,13 @@ esp_err_t device_identity_init(void)
     }
 
     // Derive node name from MAC (always deterministic)
-    derive_node_name();
+    esp_err_t ret = derive_node_name();
+    if (ret != ESP_OK) {
+        return ret;
+    }
 
     // Load or generate credentials
-    esp_err_t ret = load_or_generate_credentials();
+    ret = load_or_generate_credentials();
     if (ret != ESP_OK) {
         return ret;
     }

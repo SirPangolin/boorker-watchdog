@@ -296,11 +296,16 @@ static esp_err_t api_system_info(httpd_req_t *req)
     cJSON_AddNumberToObject(json, "cores", chip_info.cores);
 
     uint8_t mac[6];
-    esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    char mac_str[18];
-    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    cJSON_AddStringToObject(json, "mac", mac_str);
+    esp_err_t mac_ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    if (mac_ret == ESP_OK) {
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        cJSON_AddStringToObject(json, "mac", mac_str);
+    } else {
+        ESP_LOGW(TAG, "Failed to read MAC address: %s", esp_err_to_name(mac_ret));
+        cJSON_AddStringToObject(json, "mac", "unknown");
+    }
 
     char *resp = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
@@ -366,6 +371,9 @@ esp_err_t web_server_start(void)
         return ret;
     }
 
+    // Track registration failures
+    esp_err_t first_error = ESP_OK;
+
     // Register API endpoints
     httpd_uri_t uri_login = {
         .uri = "/api/v1/auth/login",
@@ -375,6 +383,7 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_login);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/auth/login: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     httpd_uri_t uri_logout = {
@@ -385,6 +394,7 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_logout);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/auth/logout: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     httpd_uri_t uri_status = {
@@ -395,6 +405,7 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_status);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/system/status: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     httpd_uri_t uri_info = {
@@ -405,6 +416,7 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_info);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/system/info: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
     }
 
     // File handler (must be last - wildcard)
@@ -416,10 +428,16 @@ esp_err_t web_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_files);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register file handler: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    if (first_error != ESP_OK) {
+        ESP_LOGW(TAG, "Web server started with errors - some endpoints may be unavailable");
+        // Server is running but degraded - return success but log warning
     }
 
     ESP_LOGI(TAG, "Web server started on port %d", CONFIG_WEB_SERVER_PORT);
-    return ESP_OK;
+    return ESP_OK;  // Server is running, even if some handlers failed
 }
 
 esp_err_t web_server_stop(void)
