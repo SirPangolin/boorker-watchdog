@@ -1,0 +1,12 @@
+menu "Web Server"
+
+    config WEB_SERVER_PORT
+        int "HTTP port"
+        default 80
+        range 1 65535
+
+    config WEB_SERVER_MAX_URI_LEN
+        int "Max URI length"
+        default 128
+
+endmenu
