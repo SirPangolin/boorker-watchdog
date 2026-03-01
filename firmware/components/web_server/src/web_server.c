@@ -27,6 +27,20 @@ static const char* get_mime_type(const char *path)
     return "application/octet-stream";
 }
 
+// Check for path traversal attempts
+static bool is_safe_path(const char *uri)
+{
+    // Reject path traversal attempts
+    if (strstr(uri, "..") != NULL) {
+        return false;
+    }
+    // Also check URL-encoded variants
+    if (strstr(uri, "%2e%2e") != NULL || strstr(uri, "%2E%2E") != NULL) {
+        return false;
+    }
+    return true;
+}
+
 // Serve static files from LittleFS with gzip support
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wformat-truncation"
@@ -46,6 +60,13 @@ static esp_err_t file_handler(httpd_req_t *req)
     strncpy(uri_buf, req->uri, sizeof(uri_buf) - 1);
     uri_buf[sizeof(uri_buf) - 1] = '\0';
     uri = uri_buf;
+
+    // Check for path traversal attempts
+    if (!is_safe_path(uri)) {
+        ESP_LOGW(TAG, "Path traversal attempt blocked: %s", uri);
+        httpd_resp_send_err(req, HTTPD_403_FORBIDDEN, "Invalid path");
+        return ESP_FAIL;
+    }
 
     // Default to index.html for root
     if (strcmp(uri, "/") == 0) {
@@ -143,8 +164,8 @@ static esp_err_t api_auth_login(httpd_req_t *req)
 
     if (err == ESP_OK) {
         // Set session cookie
-        char cookie[80];
-        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly", token);
+        char cookie[128];
+        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
         httpd_resp_set_hdr(req, "Set-Cookie", cookie);
         httpd_resp_sendstr(req, "{\"success\":true}");
     } else {
@@ -161,8 +182,12 @@ static esp_err_t api_auth_login(httpd_req_t *req)
 // POST /api/v1/auth/logout
 static esp_err_t api_auth_logout(httpd_req_t *req)
 {
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK; // Auth failed, response already sent
+    }
+
     // Clear cookie
-    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0");
+    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"success\":true}");
     return ESP_OK;
@@ -192,6 +217,11 @@ static esp_err_t api_system_status(httpd_req_t *req)
 
     char *resp = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
+
+    if (!resp) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, resp);
@@ -223,6 +253,11 @@ static esp_err_t api_system_info(httpd_req_t *req)
 
     char *resp = cJSON_PrintUnformatted(json);
     cJSON_Delete(json);
+
+    if (!resp) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, resp);
