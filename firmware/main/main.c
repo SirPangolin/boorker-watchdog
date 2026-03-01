@@ -102,7 +102,12 @@ static void init_console(void)
 
 #if CONFIG_TS_MGR_ENABLED
     // Register Tailscale console commands
-    ts_console_register();
+    ret = ts_console_register();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Tailscale console init failed: %s (commands may be unavailable)",
+                 esp_err_to_name(ret));
+        // Non-fatal - continue without tailscale commands
+    }
 #endif
 
     // Register system console commands

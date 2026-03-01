@@ -13,8 +13,12 @@
 #include "cJSON.h"
 #include <string.h>
 #include <sys/stat.h>
+#include <ctype.h>
 
 static const char *TAG = "web_server";
+
+// LittleFS mount point for static web content
+#define WEB_FS_BASE_PATH "/littlefs"
 
 static httpd_handle_t s_server = NULL;
 
@@ -30,6 +34,30 @@ static const char* get_mime_type(const char *path)
     return "application/octet-stream";
 }
 
+// Case-insensitive substring search for URL-encoded path traversal
+static bool contains_encoded_dot(const char *uri, const char *pattern)
+{
+    size_t pattern_len = strlen(pattern);
+    for (const char *p = uri; *p; p++) {
+        bool match = true;
+        for (size_t i = 0; i < pattern_len && match; i++) {
+            char c = p[i];
+            char pat = pattern[i];
+            if (c == '\0') {
+                match = false;
+            } else if (pat == '%' || pat == '.' || (pat >= '0' && pat <= '9')) {
+                // Exact match for %, ., and digits
+                match = (c == pat);
+            } else {
+                // Case-insensitive for hex letters (e, E)
+                match = (tolower((unsigned char)c) == tolower((unsigned char)pat));
+            }
+        }
+        if (match) return true;
+    }
+    return false;
+}
+
 // Check for path traversal attempts
 static bool is_safe_path(const char *uri)
 {
@@ -37,15 +65,11 @@ static bool is_safe_path(const char *uri)
     if (strstr(uri, "..") != NULL) {
         return false;
     }
-    // URL-encoded variants (case insensitive)
-    // %2e = '.', so check all combinations: %2e%2e, %2e., .%2e
-    if (strstr(uri, "%2e%2e") != NULL || strstr(uri, "%2E%2E") != NULL) {
-        return false;
-    }
-    if (strstr(uri, "%2e.") != NULL || strstr(uri, "%2E.") != NULL) {
-        return false;
-    }
-    if (strstr(uri, ".%2e") != NULL || strstr(uri, ".%2E") != NULL) {
+    // URL-encoded variants (case insensitive for hex digits)
+    // %2e = '.', check: %2e%2e, %2e., .%2e (all case combinations)
+    if (contains_encoded_dot(uri, "%2e%2e") ||
+        contains_encoded_dot(uri, "%2e.") ||
+        contains_encoded_dot(uri, ".%2e")) {
         return false;
     }
     return true;
@@ -56,8 +80,8 @@ static bool is_safe_path(const char *uri)
 #pragma GCC diagnostic ignored "-Wformat-truncation"
 static esp_err_t file_handler(httpd_req_t *req)
 {
-    // /littlefs + uri + .gz + null = max path
-    char filepath[CONFIG_WEB_SERVER_MAX_URI_LEN + 16];
+    // WEB_FS_BASE_PATH + uri + .gz + null = max path
+    char filepath[CONFIG_WEB_SERVER_MAX_URI_LEN + sizeof(WEB_FS_BASE_PATH) + 4];
     char uri_buf[CONFIG_WEB_SERVER_MAX_URI_LEN + 1];
     const char *uri;
 
@@ -84,7 +108,7 @@ static esp_err_t file_handler(httpd_req_t *req)
     }
 
     // Try gzipped version first
-    snprintf(filepath, sizeof(filepath), "/littlefs%s.gz", uri);
+    snprintf(filepath, sizeof(filepath), WEB_FS_BASE_PATH "%s.gz", uri);
 
     struct stat st;
     bool gzipped = false;
@@ -93,14 +117,14 @@ static esp_err_t file_handler(httpd_req_t *req)
         gzipped = true;
     } else {
         // Try non-gzipped
-        snprintf(filepath, sizeof(filepath), "/littlefs%s", uri);
+        snprintf(filepath, sizeof(filepath), WEB_FS_BASE_PATH "%s", uri);
         if (stat(filepath, &st) != 0) {
             // SPA fallback: serve index.html for unknown paths
-            snprintf(filepath, sizeof(filepath), "/littlefs/index.html.gz");
+            snprintf(filepath, sizeof(filepath), WEB_FS_BASE_PATH "/index.html.gz");
             if (stat(filepath, &st) == 0) {
                 gzipped = true;
             } else {
-                snprintf(filepath, sizeof(filepath), "/littlefs/index.html");
+                snprintf(filepath, sizeof(filepath), WEB_FS_BASE_PATH "/index.html");
                 if (stat(filepath, &st) != 0) {
                     httpd_resp_send_404(req);
                     return ESP_OK;
@@ -130,6 +154,7 @@ static esp_err_t file_handler(httpd_req_t *req)
     bool read_error = false;
     while ((read_bytes = fread(buf, 1, sizeof(buf), f)) > 0) {
         if (httpd_resp_send_chunk(req, buf, read_bytes) != ESP_OK) {
+            ESP_LOGD(TAG, "Chunk send failed for %s (client disconnected?)", filepath);
             fclose(f);
             return ESP_FAIL;
         }
@@ -338,19 +363,28 @@ static esp_err_t api_system_reboot(httpd_req_t *req)
 
     // Check for body with delay
     int content_len = req->content_len;
-    if (content_len > 0 && content_len < 64) {
+    if (content_len > 0) {
+        if (content_len >= 64) {
+            httpd_resp_set_status(req, "400 Bad Request");
+            httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Request body too large\"}");
+            return ESP_OK;
+        }
         char buf[64];
         int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
         if (ret > 0) {
             buf[ret] = '\0';
             cJSON *json = cJSON_Parse(buf);
-            if (json) {
-                cJSON *delay_json = cJSON_GetObjectItem(json, "delay");
-                if (cJSON_IsNumber(delay_json)) {
-                    delay = (uint32_t)delay_json->valueint;
-                }
-                cJSON_Delete(json);
+            if (!json) {
+                ESP_LOGW(TAG, "Malformed JSON in reboot request: %s", buf);
+                httpd_resp_set_status(req, "400 Bad Request");
+                httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Invalid JSON\"}");
+                return ESP_OK;
             }
+            cJSON *delay_json = cJSON_GetObjectItem(json, "delay");
+            if (cJSON_IsNumber(delay_json)) {
+                delay = (uint32_t)delay_json->valueint;
+            }
+            cJSON_Delete(json);
         }
     }
 
@@ -404,6 +438,9 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    // Invalidate all sessions before reboot
+    web_auth_invalidate_all_sessions();
+
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
 
     // Clear session cookie
@@ -411,7 +448,11 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Factory reset complete, rebooting...\"}");
 
     // Schedule reboot after response sent
-    system_reboot_schedule(2);
+    err = system_reboot_schedule(2);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to schedule reboot: %s", esp_err_to_name(err));
+        // Response already sent, just log the error
+    }
 
     return ESP_OK;
 }
@@ -538,7 +579,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
 static esp_err_t mount_littlefs(void)
 {
     esp_vfs_littlefs_conf_t conf = {
-        .base_path = "/littlefs",
+        .base_path = WEB_FS_BASE_PATH,
         .partition_label = "storage",
         .format_if_mount_failed = false,
         .dont_mount = false,
@@ -551,8 +592,12 @@ static esp_err_t mount_littlefs(void)
     }
 
     size_t total = 0, used = 0;
-    esp_littlefs_info("storage", &total, &used);
-    ESP_LOGI(TAG, "LittleFS: %d/%d bytes used", (int)used, (int)total);
+    ret = esp_littlefs_info("storage", &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to get LittleFS info: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "LittleFS: %d/%d bytes used", (int)used, (int)total);
+    }
 
     return ESP_OK;
 }
@@ -725,13 +770,16 @@ esp_err_t web_server_stop(void)
         return ESP_OK;
     }
 
-    httpd_stop(s_server);
+    esp_err_t ret = httpd_stop(s_server);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "httpd_stop failed: %s", esp_err_to_name(ret));
+    }
     s_server = NULL;
 
     esp_vfs_littlefs_unregister("storage");
     ESP_LOGI(TAG, "Web server stopped");
 
-    return ESP_OK;
+    return ret;
 }
 
 bool web_server_is_running(void)
