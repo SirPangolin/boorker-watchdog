@@ -1,4 +1,15 @@
-# Placeholder CMakeLists.txt to enable component manager dependency resolution
-# Full implementation will be added in Task 2
-
-idf_component_register()
+idf_component_register(
+    SRCS
+        "src/led_feedback.c"
+        "src/led_patterns.c"
+        "src/led_console.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        led_indicator
+        nvs_flash
+        esp_console
+        freertos
+    PRIV_REQUIRES
+        esp_log
+)
