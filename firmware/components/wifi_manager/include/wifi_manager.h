@@ -21,6 +21,7 @@ typedef enum {
     WIFI_MGR_EVENT_PROVISIONING,        // Entered provisioning mode
     WIFI_MGR_EVENT_PROVISIONED,         // Credentials received via BLE
     WIFI_MGR_EVENT_RECONNECT_EXHAUSTED, // Max reconnection attempts reached
+    WIFI_MGR_EVENT_COUNT                // Sentinel for bounds checking
 } wifi_mgr_event_t;
 
 // Callback signature

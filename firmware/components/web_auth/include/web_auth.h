@@ -15,8 +15,9 @@ extern "C" {
  * Initialize web authentication
  * Uses device_identity for default password
  *
- * @note Thread Safety: All functions must be called from single task or
- *       externally synchronized.
+ * @note Thread Safety: Session operations are protected by internal mutex
+ *       and safe to call from multiple HTTP handler tasks concurrently.
+ *       Password operations modify shared state and should be serialized.
  *
  * @return ESP_OK on success
  */
@@ -44,8 +45,11 @@ bool web_auth_validate_session(const char *token);
 
 /**
  * Invalidate session token (logout)
+ *
+ * @param token Session token to invalidate
+ * @return true if session was found and invalidated, false otherwise
  */
-void web_auth_logout(const char *token);
+bool web_auth_logout(const char *token);
 
 /**
  * Change password

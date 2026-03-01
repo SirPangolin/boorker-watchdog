@@ -21,13 +21,15 @@ static bool s_first_boot = false;
 
 // Characters for password generation (alphanumeric + some symbols)
 static const char PASS_CHARS[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789#$@!";
-static const int PASS_CHARS_LEN = sizeof(PASS_CHARS) - 1;
+static const uint32_t PASS_CHARS_LEN = sizeof(PASS_CHARS) - 1;
 
 static void generate_random_string(char *buf, size_t len)
 {
     for (size_t i = 0; i < len; i++) {
-        uint32_t rand = esp_random();
-        buf[i] = PASS_CHARS[rand % PASS_CHARS_LEN];
+        // Use multiply-and-shift to avoid modulo bias
+        // index = (rand * PASS_CHARS_LEN) >> 32, uniformly distributed in [0, PASS_CHARS_LEN)
+        uint32_t index = (uint32_t)(((uint64_t)esp_random() * PASS_CHARS_LEN) >> 32);
+        buf[i] = PASS_CHARS[index];
     }
     buf[len] = '\0';
 }
@@ -35,8 +37,9 @@ static void generate_random_string(char *buf, size_t len)
 static void generate_random_digits(char *buf, size_t len)
 {
     for (size_t i = 0; i < len; i++) {
-        uint32_t rand = esp_random();
-        buf[i] = '0' + (rand % 10);
+        // Use multiply-and-shift for uniform distribution in [0, 10)
+        uint32_t digit = (uint32_t)(((uint64_t)esp_random() * 10) >> 32);
+        buf[i] = '0' + digit;
     }
     buf[len] = '\0';
 }
@@ -140,13 +143,44 @@ static esp_err_t load_or_generate_credentials(void)
             return ret;
         }
 
+        // Validate loaded credentials - check for reasonable values
+        bool valid = true;
+        if (strlen(s_identity.web_password) < 8) {
+            ESP_LOGW(TAG, "Loaded web_password too short (%d chars)", (int)strlen(s_identity.web_password));
+            valid = false;
+        }
+        if (strlen(s_identity.ap_password) < 8) {
+            ESP_LOGW(TAG, "Loaded ap_password too short (%d chars)", (int)strlen(s_identity.ap_password));
+            valid = false;
+        }
+        if (strlen(s_identity.ble_pop) != 6) {
+            ESP_LOGW(TAG, "Loaded ble_pop invalid length (%d chars, expected 6)",
+                     (int)strlen(s_identity.ble_pop));
+            valid = false;
+        }
+        // Check ble_pop contains only digits
+        for (size_t i = 0; i < strlen(s_identity.ble_pop) && valid; i++) {
+            if (s_identity.ble_pop[i] < '0' || s_identity.ble_pop[i] > '9') {
+                ESP_LOGW(TAG, "Loaded ble_pop contains non-digit character");
+                valid = false;
+            }
+        }
+
+        if (!valid) {
+            ESP_LOGE(TAG, "Credential validation failed - regenerating");
+            nvs_close(handle);
+            // Clear invalid data and regenerate
+            s_initialized = false;
+            return device_identity_regenerate();
+        }
+
         // Check if first boot was acknowledged
         uint8_t fb = 0;
         if (nvs_get_u8(handle, NVS_KEY_FIRST_BOOT, &fb) == ESP_OK && fb == 1) {
             s_first_boot = true;
         }
 
-        ESP_LOGI(TAG, "Credentials loaded for %s", s_identity.node_name);
+        ESP_LOGI(TAG, "Credentials loaded and validated for %s", s_identity.node_name);
         ret = ESP_OK;  // Ensure success return
     } else {
         ESP_LOGE(TAG, "Failed to read NVS: %s", esp_err_to_name(ret));

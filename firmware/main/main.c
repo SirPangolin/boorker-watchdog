@@ -85,6 +85,10 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
         case WIFI_MGR_EVENT_RECONNECT_EXHAUSTED:
             ESP_LOGW(TAG, "WiFi reconnection attempts exhausted");
             break;
+
+        case WIFI_MGR_EVENT_COUNT:
+            // Sentinel value for bounds checking - should never occur
+            break;
     }
 }
 
@@ -198,23 +202,24 @@ void app_main(void)
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }
 
-    // Initialize web auth
+    // Initialize web auth (required for secure web server operation)
     ret = web_auth_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Web auth init failed: %s", esp_err_to_name(ret));
-        // Continue - web server can still work without auth in degraded mode
-    }
-
-    // Start web server
-    ret = web_server_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
-        // Continue without web server
+        ESP_LOGE(TAG, "Web auth init failed: %s - web server disabled for security",
+                 esp_err_to_name(ret));
+        // Don't start web server without authentication - security risk
     } else {
-        if (ip[0] != '\0') {
-            ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+        // Start web server only if auth is available
+        ret = web_server_start();
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
+            // Continue without web server
         } else {
-            ESP_LOGI(TAG, "Web server started");
+            if (ip[0] != '\0') {
+                ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+            } else {
+                ESP_LOGI(TAG, "Web server started");
+            }
         }
     }
 

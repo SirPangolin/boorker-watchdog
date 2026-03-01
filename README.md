@@ -103,33 +103,43 @@ All require authentication.
 #### GET /api/v1/system/status
 ```json
 {
-  "uptime_seconds": 3661,
+  "uptime": 3661,
   "heap_free": 123456,
   "psram_free": 8388608,
-  "wifi": {"connected": true, "ip": "192.168.1.100"},
-  "power": {"source": "unknown", "battery_percent": null}
+  "node_name": "boorker-A1B2",
+  "power": {"source": "unknown", "ac_present": true}
 }
 ```
 
 #### GET /api/v1/system/info
 ```json
 {
-  "node_name": "boorker-A1B2",
   "version": "0.2.0",
   "idf_version": "v5.5-...",
-  "chip": "ESP32-S3",
+  "chip_revision": 0,
   "cores": 2,
-  "revision": 0
+  "mac": "AA:BB:CC:DD:EE:FF"
 }
 ```
 
 #### POST /api/v1/system/reboot
+Schedule a device reboot.
 ```json
 // Optional request body
 {"delay": 5}
 
 // Response
-{"success": true, "message": "Rebooting in 5 seconds..."}
+{"success": true, "delay": 5}
+```
+
+#### DELETE /api/v1/system/reboot
+Cancel a pending reboot.
+```json
+// Response (success)
+{"success": true, "message": "Reboot cancelled"}
+
+// Response (no reboot pending)
+{"error": true, "message": "No reboot pending"}
 ```
 
 #### POST /api/v1/system/factory-reset
@@ -139,13 +149,15 @@ Resets device credentials and reboots.
 ```
 
 #### GET /api/v1/system/qr
-Returns QR code JSON for device setup (first boot credentials).
+Returns QR code JSON for device setup. **Only available during first boot** (returns 403 after credentials are acknowledged).
 ```json
 {
-  "node_name": "boorker-A1B2",
-  "web_password": "...",
-  "ap_password": "...",
-  "ble_pop": "123456"
+  "name": "boorker-A1B2",
+  "web_pass": "...",
+  "ap_pass": "...",
+  "ble_pop": "123456",
+  "ble_name": "PROV_A1B2",
+  "setup_url": "http://192.168.4.1"
 }
 ```
 

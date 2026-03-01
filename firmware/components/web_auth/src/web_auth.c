@@ -6,6 +6,8 @@
 #include "nvs.h"
 #include "mbedtls/sha256.h"
 #include "mbedtls/constant_time.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
@@ -16,17 +18,34 @@ static const char *TAG = "web_auth";
 #define NVS_KEY_PASS_HASH "pass_hash"
 #define NVS_KEY_PASS_SALT "pass_salt"
 #define NVS_KEY_PASS_CHANGED "pass_chgd"
+#define NVS_KEY_LOCKOUT_UNTIL "lockout"
+#define NVS_KEY_FAILED_ATTEMPTS "fail_cnt"
 
 #define SALT_LEN 16
 #define HASH_LEN 32
-#define MAX_FAILED_ATTEMPTS 5
-#define LOCKOUT_SECONDS 300
+
+// Use Kconfig values with sensible defaults
+#ifndef CONFIG_WEB_AUTH_DEFAULT_USERNAME
+#define CONFIG_WEB_AUTH_DEFAULT_USERNAME "admin"
+#endif
+#ifndef CONFIG_WEB_AUTH_MAX_FAILED_ATTEMPTS
+#define CONFIG_WEB_AUTH_MAX_FAILED_ATTEMPTS 5
+#endif
+#ifndef CONFIG_WEB_AUTH_LOCKOUT_SECONDS
+#define CONFIG_WEB_AUTH_LOCKOUT_SECONDS 300
+#endif
+#ifndef CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS
+#define CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS 3600
+#endif
 
 typedef struct {
     char token[WEB_AUTH_SESSION_TOKEN_LEN + 1];
     time_t created;
     bool valid;
 } session_t;
+
+// Mutex protects s_sessions array - HTTP handlers run concurrently
+static SemaphoreHandle_t s_session_mutex = NULL;
 
 static session_t s_sessions[WEB_AUTH_MAX_SESSIONS];
 static uint8_t s_password_hash[HASH_LEN];
@@ -73,16 +92,44 @@ static esp_err_t hash_password(const char *password, const uint8_t *salt, uint8_
     return ESP_OK;
 }
 
+// Check if token already exists in sessions (collision check)
+// Note: Must be called with s_session_mutex held
+static bool token_exists_in_sessions(const char *token)
+{
+    for (int i = 0; i < WEB_AUTH_MAX_SESSIONS; i++) {
+        if (s_sessions[i].valid &&
+            memcmp(s_sessions[i].token, token, WEB_AUTH_SESSION_TOKEN_LEN) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Generate unique session token (checks for collisions)
+// Note: Must be called with s_session_mutex held
 static void generate_token(char *token_out)
 {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const uint32_t charset_len = sizeof(chars) - 1; // 62 characters
-    for (int i = 0; i < WEB_AUTH_SESSION_TOKEN_LEN; i++) {
-        // Use multiply-and-shift to avoid modulo bias
-        uint32_t index = (uint32_t)(((uint64_t)esp_random() * charset_len) >> 32);
-        token_out[i] = chars[index];
+    const int max_attempts = 3;  // Collision extremely unlikely with 32-char token
+
+    for (int attempt = 0; attempt < max_attempts; attempt++) {
+        for (int i = 0; i < WEB_AUTH_SESSION_TOKEN_LEN; i++) {
+            // Use multiply-and-shift to avoid modulo bias
+            uint32_t index = (uint32_t)(((uint64_t)esp_random() * charset_len) >> 32);
+            token_out[i] = chars[index];
+        }
+        token_out[WEB_AUTH_SESSION_TOKEN_LEN] = '\0';
+
+        // Check for uniqueness (extremely rare collision, but defense in depth)
+        if (!token_exists_in_sessions(token_out)) {
+            return;
+        }
+        ESP_LOGW(TAG, "Token collision detected (attempt %d/%d), regenerating",
+                 attempt + 1, max_attempts);
     }
-    token_out[WEB_AUTH_SESSION_TOKEN_LEN] = '\0';
+    // If we get here, something is very wrong (3 collisions in a row)
+    ESP_LOGE(TAG, "Failed to generate unique token after %d attempts", max_attempts);
 }
 
 static esp_err_t load_or_create_password(void)
@@ -174,10 +221,68 @@ static esp_err_t load_or_create_password(void)
     return ESP_OK;
 }
 
+static esp_err_t load_lockout_state(void)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
+    if (ret != ESP_OK) {
+        // NVS not available or namespace doesn't exist - use defaults
+        return ESP_OK;
+    }
+
+    uint32_t lockout_time = 0;
+    ret = nvs_get_u32(handle, NVS_KEY_LOCKOUT_UNTIL, &lockout_time);
+    if (ret == ESP_OK) {
+        s_lockout_until = (time_t)lockout_time;
+    }
+
+    uint8_t attempts = 0;
+    ret = nvs_get_u8(handle, NVS_KEY_FAILED_ATTEMPTS, &attempts);
+    if (ret == ESP_OK) {
+        s_failed_attempts = (int)attempts;
+    }
+
+    nvs_close(handle);
+    return ESP_OK;
+}
+
+static esp_err_t save_lockout_state(void)
+{
+    nvs_handle_t handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open NVS for lockout state: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_set_u32(handle, NVS_KEY_LOCKOUT_UNTIL, (uint32_t)s_lockout_until);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save lockout_until: %s", esp_err_to_name(ret));
+    }
+
+    ret = nvs_set_u8(handle, NVS_KEY_FAILED_ATTEMPTS, (uint8_t)s_failed_attempts);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to save failed_attempts: %s", esp_err_to_name(ret));
+    }
+
+    nvs_commit(handle);
+    nvs_close(handle);
+    return ESP_OK;
+}
+
 esp_err_t web_auth_init(void)
 {
     if (s_initialized) {
         return ESP_OK;
+    }
+
+    // Create session mutex
+    if (s_session_mutex == NULL) {
+        s_session_mutex = xSemaphoreCreateMutex();
+        if (s_session_mutex == NULL) {
+            ESP_LOGE(TAG, "Failed to create session mutex");
+            return ESP_ERR_NO_MEM;
+        }
     }
 
     // Clear sessions
@@ -189,8 +294,12 @@ esp_err_t web_auth_init(void)
         return ret;
     }
 
+    // Load persisted lockout state (survives reboot)
+    load_lockout_state();
+
     s_initialized = true;
-    ESP_LOGI(TAG, "Web auth initialized (password_changed=%d)", s_password_changed);
+    ESP_LOGI(TAG, "Web auth initialized (password_changed=%d, failed_attempts=%d)",
+             s_password_changed, s_failed_attempts);
     return ESP_OK;
 }
 
@@ -212,8 +321,8 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Only admin user supported
-    if (strcmp(username, "admin") != 0) {
+    // Only configured admin user supported
+    if (strcmp(username, CONFIG_WEB_AUTH_DEFAULT_USERNAME) != 0) {
         s_failed_attempts++;
         return ESP_ERR_INVALID_ARG;
     }
@@ -227,17 +336,27 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
 
     if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
         s_failed_attempts++;
-        ESP_LOGW(TAG, "Failed login attempt (%d/%d)", s_failed_attempts, MAX_FAILED_ATTEMPTS);
+        ESP_LOGW(TAG, "Failed login attempt (%d/%d)", s_failed_attempts, CONFIG_WEB_AUTH_MAX_FAILED_ATTEMPTS);
 
-        if (s_failed_attempts >= MAX_FAILED_ATTEMPTS) {
-            s_lockout_until = now + LOCKOUT_SECONDS;
-            ESP_LOGW(TAG, "Account locked for %d seconds", LOCKOUT_SECONDS);
+        if (s_failed_attempts >= CONFIG_WEB_AUTH_MAX_FAILED_ATTEMPTS) {
+            s_lockout_until = now + CONFIG_WEB_AUTH_LOCKOUT_SECONDS;
+            ESP_LOGW(TAG, "Account locked for %d seconds", CONFIG_WEB_AUTH_LOCKOUT_SECONDS);
         }
+        // Persist lockout state so it survives reboot
+        save_lockout_state();
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Success - reset failed attempts
+    // Success - reset failed attempts and persist
     s_failed_attempts = 0;
+    s_lockout_until = 0;
+    save_lockout_state();
+
+    // Lock mutex before accessing s_sessions
+    if (xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire session mutex");
+        return ESP_ERR_TIMEOUT;
+    }
 
     // Find free session slot
     int slot = -1;
@@ -265,6 +384,9 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
 
     strncpy(token_out, s_sessions[slot].token, WEB_AUTH_SESSION_TOKEN_LEN);
     token_out[WEB_AUTH_SESSION_TOKEN_LEN] = '\0';
+
+    xSemaphoreGive(s_session_mutex);
+
     ESP_LOGI(TAG, "Login successful, session created");
     return ESP_OK;
 }
@@ -272,32 +394,61 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
 bool web_auth_validate_session(const char *token)
 {
     if (!s_initialized || token == NULL) {
+        ESP_LOGD(TAG, "Session validation failed: not initialized or null token");
         return false;
     }
 
-    // Use constant-time comparison to prevent timing attacks
+    if (s_session_mutex == NULL) {
+        ESP_LOGE(TAG, "Session mutex not initialized");
+        return false;
+    }
+
+    if (xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "Failed to acquire session mutex for validation");
+        return false;
+    }
+
+    bool result = false;
     size_t token_len = strlen(token);
+
     for (int i = 0; i < WEB_AUTH_MAX_SESSIONS; i++) {
         if (s_sessions[i].valid) {
             // Constant-time comparison prevents timing attacks
             if (token_len == WEB_AUTH_SESSION_TOKEN_LEN &&
                 mbedtls_ct_memcmp(s_sessions[i].token, token, WEB_AUTH_SESSION_TOKEN_LEN) == 0) {
-                // Check expiry (1 hour)
-                if (time(NULL) - s_sessions[i].created > 3600) {
+                // Check expiry (configurable, default 1 hour)
+                if (time(NULL) - s_sessions[i].created > CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS) {
                     s_sessions[i].valid = false;
-                    return false;
+                    ESP_LOGD(TAG, "Session expired");
+                } else {
+                    result = true;
                 }
-                return true;
+                break;
             }
         }
     }
-    return false;
+
+    xSemaphoreGive(s_session_mutex);
+
+    if (!result && token_len > 0) {
+        ESP_LOGD(TAG, "Session validation failed: token not found or expired");
+    }
+    return result;
 }
 
-void web_auth_logout(const char *token)
+bool web_auth_logout(const char *token)
 {
-    if (token == NULL) return;
+    if (token == NULL) {
+        return false;
+    }
 
+    if (s_session_mutex == NULL ||
+        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "Failed to acquire session mutex for logout");
+        return false;
+    }
+
+    bool found = false;
     size_t token_len = strlen(token);
     for (int i = 0; i < WEB_AUTH_MAX_SESSIONS; i++) {
         if (s_sessions[i].valid) {
@@ -305,17 +456,32 @@ void web_auth_logout(const char *token)
             if (token_len == WEB_AUTH_SESSION_TOKEN_LEN &&
                 mbedtls_ct_memcmp(s_sessions[i].token, token, WEB_AUTH_SESSION_TOKEN_LEN) == 0) {
                 s_sessions[i].valid = false;
+                found = true;
                 ESP_LOGI(TAG, "Session invalidated");
-                return;
+                break;
             }
         }
     }
+
+    xSemaphoreGive(s_session_mutex);
+
+    if (!found) {
+        ESP_LOGW(TAG, "Logout requested but session not found");
+    }
+    return found;
 }
 
 esp_err_t web_auth_change_password(const char *current_password, const char *new_password)
 {
     if (!s_initialized || current_password == NULL || new_password == NULL) {
         return ESP_ERR_INVALID_STATE;
+    }
+
+    // Defense-in-depth: validate password length in core function too
+    size_t new_len = strlen(new_password);
+    if (new_len < 8 || new_len > 64) {
+        ESP_LOGW(TAG, "Password change rejected: length %zu not in range 8-64", new_len);
+        return ESP_ERR_INVALID_SIZE;
     }
 
     // Verify current password
@@ -326,6 +492,7 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     }
 
     if (mbedtls_ct_memcmp(hash, s_password_hash, HASH_LEN) != 0) {
+        ESP_LOGW(TAG, "Password change rejected: current password incorrect");
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -380,8 +547,15 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     memcpy(s_password_salt, new_salt, SALT_LEN);
     s_password_changed = true;
 
-    // Invalidate all sessions (force re-login)
-    memset(s_sessions, 0, sizeof(s_sessions));
+    // Invalidate all sessions (force re-login) with mutex
+    if (s_session_mutex != NULL &&
+        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        memset(s_sessions, 0, sizeof(s_sessions));
+        xSemaphoreGive(s_session_mutex);
+    } else {
+        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation");
+        memset(s_sessions, 0, sizeof(s_sessions));  // Still clear, just not atomic
+    }
 
     ESP_LOGI(TAG, "Password changed");
     return ESP_OK;
@@ -389,7 +563,14 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
 
 void web_auth_invalidate_all_sessions(void)
 {
-    memset(s_sessions, 0, sizeof(s_sessions));
+    if (s_session_mutex != NULL &&
+        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        memset(s_sessions, 0, sizeof(s_sessions));
+        xSemaphoreGive(s_session_mutex);
+    } else {
+        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation");
+        memset(s_sessions, 0, sizeof(s_sessions));  // Still clear
+    }
     ESP_LOGI(TAG, "All sessions invalidated");
 }
 
@@ -443,7 +624,7 @@ int web_auth_get_attempts_remaining(void)
     if (s_lockout_until > now) {
         return 0;
     }
-    return MAX_FAILED_ATTEMPTS - s_failed_attempts;
+    return CONFIG_WEB_AUTH_MAX_FAILED_ATTEMPTS - s_failed_attempts;
 }
 
 esp_err_t web_auth_reset_password(void)
