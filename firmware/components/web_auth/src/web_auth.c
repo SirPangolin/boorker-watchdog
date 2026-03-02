@@ -13,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <ctype.h>
 
 static const char *TAG = "web_auth";
 
@@ -38,6 +39,15 @@ static const char *TAG = "web_auth";
 #endif
 #ifndef CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS
 #define CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS 3600
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH
+#define CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH 8
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH
+#define CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH 64
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL
+#define CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL " !@#$%^&*()_+-=[]{}|;:',.<>?/~`"
 #endif
 
 typedef struct {
@@ -91,6 +101,45 @@ static esp_err_t hash_password(const char *password, const uint8_t *salt, uint8_
     }
 
     mbedtls_sha256_free(&ctx);
+    return ESP_OK;
+}
+
+/**
+ * @brief Check if character is valid for passwords
+ * @return true if character is alphanumeric or in allowed special chars
+ */
+static bool is_valid_password_char(char c)
+{
+    if (isalnum((unsigned char)c)) {
+        return true;
+    }
+    return strchr(CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL, c) != NULL;
+}
+
+/**
+ * @brief Validate password meets requirements
+ * @return ESP_OK if valid, ESP_ERR_INVALID_SIZE if length wrong, ESP_ERR_INVALID_ARG if bad chars
+ */
+static esp_err_t validate_password(const char *password)
+{
+    if (password == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t len = strlen(password);
+    if (len < CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH || len > CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH) {
+        ESP_LOGW(TAG, "Password rejected: length %zu not in range %d-%d",
+                 len, CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH, CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        if (!is_valid_password_char(password[i])) {
+            ESP_LOGW(TAG, "Password rejected: invalid character at position %zu", i);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
     return ESP_OK;
 }
 
@@ -479,11 +528,10 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Defense-in-depth: validate password length in core function too
-    size_t new_len = strlen(new_password);
-    if (new_len < 8 || new_len > 64) {
-        ESP_LOGW(TAG, "Password change rejected: length %zu not in range 8-64", new_len);
-        return ESP_ERR_INVALID_SIZE;
+    // Validate new password (length and character whitelist)
+    esp_err_t validate_ret = validate_password(new_password);
+    if (validate_ret != ESP_OK) {
+        return validate_ret;
     }
 
     // Verify current password
@@ -615,14 +663,22 @@ bool web_auth_check_request(httpd_req_t *req)
 
 esp_err_t web_auth_require(httpd_req_t *req)
 {
-    if (web_auth_check_request(req)) {
-        return ESP_OK;
+    if (!web_auth_check_request(req)) {
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"unauthorized\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
     }
 
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"error\":true,\"code\":\"UNAUTHORIZED\"}", HTTPD_RESP_USE_STRLEN);
-    return ESP_FAIL;
+    // Check if password change is required (device unclaimed)
+    if (!device_state_is_claimed()) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"password_change_required\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 int web_auth_get_attempts_remaining(void)

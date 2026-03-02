@@ -1,6 +1,7 @@
 #include "web_server.h"
 #include "web_auth.h"
 #include "device_identity.h"
+#include "device_state.h"
 #include "system_console.h"
 #include "version.h"
 #include "esp_log.h"
@@ -221,7 +222,13 @@ static esp_err_t api_auth_login(httpd_req_t *req)
         char cookie[128];
         snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
         httpd_resp_set_hdr(req, "Set-Cookie", cookie);
-        httpd_resp_sendstr(req, "{\"success\":true}");
+
+        // Check if password change is required (device unclaimed)
+        if (!device_state_is_claimed()) {
+            httpd_resp_sendstr(req, "{\"success\":true,\"password_change_required\":true}");
+        } else {
+            httpd_resp_sendstr(req, "{\"success\":true}");
+        }
     } else {
         httpd_resp_set_status(req, "401 Unauthorized");
         int remaining = web_auth_get_attempts_remaining();

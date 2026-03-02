@@ -30,4 +30,25 @@ menu "Web Authentication"
             Duration of account lockout after max failed attempts.
             Default is 300 (5 minutes).
 
+    config WEB_AUTH_PASSWORD_MIN_LENGTH
+        int "Minimum password length"
+        default 8
+        range 4 64
+        help
+            Minimum length for user passwords.
+
+    config WEB_AUTH_PASSWORD_MAX_LENGTH
+        int "Maximum password length"
+        default 64
+        range 8 128
+        help
+            Maximum length for user passwords.
+
+    config WEB_AUTH_PASSWORD_ALLOWED_SPECIAL
+        string "Allowed special characters"
+        default " !@#$%^&*()_+-=[]{}|;:',.<>?/~`"
+        help
+            Special characters allowed in passwords (in addition to A-Z, a-z, 0-9).
+            NOTE: If changed, update www/src/password-change.html to match.
+
 endmenu
