@@ -1,17 +1,17 @@
 /**
  * @file led_feedback.h
- * @brief LED status feedback component
+ * @brief LED status feedback component (ANDON channel subscriber)
  *
- * Provides visual status indication via onboard LED. Uses priority-based
- * state management - higher priority states preempt lower priority states.
+ * Provides visual status indication via onboard (and optional external) LED.
+ * Subscribes to andon_service for state notifications and renders appropriate
+ * LED patterns based on the current ANDON state.
  *
  * @note Thread Safety: All public functions are thread-safe and may be
- *       called from multiple tasks (e.g., WiFi callbacks, main task).
- *       Internal mutex protects state transitions.
+ *       called from multiple tasks.
  *
- * @note Priority: States are prioritized by enum order. Lower enum value
- *       = higher priority. Use clear_state() to allow lower priority
- *       states to resume.
+ * @note ANDON Integration: State changes come from andon_service callbacks.
+ *       Domains should use andon_set_state()/andon_clear_state() rather than
+ *       calling led_feedback directly.
  */
 
 #pragma once
@@ -25,11 +25,13 @@ extern "C" {
 #endif
 
 /**
- * @brief LED feedback states (priority order - lower value = higher priority)
+ * @brief Internal LED pattern states (used for led_indicator pattern indexing)
+ *
+ * @note These are internal pattern identifiers, not a public API. ANDON states
+ *       are mapped to these patterns in the ANDON callback handler.
  *
  * @note Enum values use LED_FB_ prefix to avoid conflict with led_indicator's
- *       LED_STATE_OFF/LED_STATE_ON brightness values. The typedef remains
- *       led_state_t for consistency with existing ESP-IDF component patterns.
+ *       LED_STATE_OFF/LED_STATE_ON brightness values.
  */
 typedef enum {
     // Priority 0 (highest) - Immediate attention
@@ -58,7 +60,7 @@ typedef enum {
  * @brief Initialize LED feedback component
  *
  * Creates internal mutex, loads config from NVS (or uses Kconfig defaults),
- * and initializes the LED indicator driver.
+ * initializes the LED indicator driver(s), and registers as an ANDON channel.
  *
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if already initialized
@@ -70,7 +72,7 @@ esp_err_t led_feedback_init(void);
 /**
  * @brief Deinitialize LED feedback component
  *
- * Stops any active patterns, destroys LED indicator, and frees resources.
+ * Stops any active patterns, destroys LED indicator(s), and frees resources.
  *
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if not initialized
@@ -78,40 +80,9 @@ esp_err_t led_feedback_init(void);
 esp_err_t led_feedback_deinit(void);
 
 /**
- * @brief Set LED state (activates pattern)
- *
- * If this state has higher priority than current, it takes over immediately.
- * If lower priority, it becomes pending and activates when higher clears.
- *
- * @param state State to activate
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_ARG if state >= LED_FB_MAX
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex acquisition fails
- */
-esp_err_t led_feedback_set_state(led_state_t state);
-
-/**
- * @brief Clear LED state (deactivates pattern)
- *
- * Removes this state from active set. If it was showing, LED state falls
- * back to OFF.
- *
- * @note This implementation does not track pending states. Callers must
- *       re-set any states they want displayed after clearing.
- *
- * @param state State to clear
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_ARG if state >= LED_FB_MAX
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex acquisition fails
- */
-esp_err_t led_feedback_clear_state(led_state_t state);
-
-/**
  * @brief Get currently displayed state
  *
- * @return Current state, or LED_FB_OFF if not initialized
+ * @return Current pattern state, or LED_FB_OFF if not initialized
  */
 led_state_t led_feedback_get_state(void);
 

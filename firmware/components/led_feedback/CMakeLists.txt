@@ -10,6 +10,7 @@ idf_component_register(
         nvs_flash
         console
         freertos
+        andon_service
     PRIV_REQUIRES
         log
 )

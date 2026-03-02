@@ -1,12 +1,14 @@
 /**
  * @file led_feedback.c
- * @brief LED status feedback core implementation
+ * @brief LED status feedback core implementation (ANDON channel subscriber)
  *
- * Provides visual status indication via onboard LED using the led_indicator
- * component. Supports priority-based state management with thread-safe access.
+ * Provides visual status indication via onboard LED (and optional external LED)
+ * using the led_indicator component. Subscribes to andon_service for state
+ * notifications and renders appropriate LED patterns.
  */
 
 #include "led_feedback.h"
+#include "andon_service.h"
 #include "led_indicator.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -16,6 +18,11 @@
 #include "sdkconfig.h"
 
 #if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#include "led_strips.h"
+#include "driver/rmt_types.h"
+#endif
+
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED && CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_WS2812
 #include "led_strips.h"
 #include "driver/rmt_types.h"
 #endif
@@ -65,9 +72,12 @@ static struct {
     bool enabled;
     uint8_t brightness;
     bool alerts_only;
-    uint16_t active_states;      // Bitmask of active states
+    uint16_t active_states;      // Bitmask of active states (kept for alerts_only filtering)
     led_state_t displayed_state; // Currently displayed state (for stopping pattern)
     led_indicator_handle_t handle;
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    led_indicator_handle_t external_handle;
+#endif
     SemaphoreHandle_t mutex;
 } s_led = {
     .initialized = false,
@@ -77,26 +87,11 @@ static struct {
     .active_states = 0,
     .displayed_state = LED_FB_OFF,
     .handle = NULL,
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    .external_handle = NULL,
+#endif
     .mutex = NULL,
 };
-
-/**
- * @brief Get highest priority active state (lowest bit set)
- * @return Highest priority active state, or LED_FB_OFF if none active
- */
-static led_state_t get_highest_priority_state(void)
-{
-    if (s_led.active_states == 0) {
-        return LED_FB_OFF;
-    }
-    // Find lowest set bit (highest priority state)
-    for (int i = 0; i < LED_FB_MAX; i++) {
-        if (s_led.active_states & (1 << i)) {
-            return (led_state_t)i;
-        }
-    }
-    return LED_FB_OFF;
-}
 
 // --------------------------------------------------------------------------
 // NVS Functions
@@ -250,41 +245,52 @@ static bool should_show_state(led_state_t state)
 }
 
 /**
- * @brief Apply the highest priority active state to the LED
+ * @brief Apply a pattern to the LED(s)
  *
- * Must be called with mutex held. Determines which state should be displayed
- * based on active_states bitmask and updates the LED accordingly.
+ * Must be called with mutex held. Updates the LED indicator(s) to display
+ * the specified pattern.
  *
+ * @param state The LED pattern state to apply
  * @return ESP_OK on success, or error from led_indicator functions
  */
-static esp_err_t apply_current_state(void)
+static esp_err_t apply_pattern(led_state_t state)
 {
     if (s_led.handle == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t ret = ESP_OK;
-    led_state_t new_state = get_highest_priority_state();
 
     // Skip if no change needed
-    if (new_state == s_led.displayed_state) {
+    if (state == s_led.displayed_state) {
         return ESP_OK;
     }
 
-    // Stop currently displayed pattern
+    // Stop currently displayed pattern on primary LED
     ret = led_indicator_stop(s_led.handle, (int)s_led.displayed_state);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to stop pattern %s: %s",
                  state_names[s_led.displayed_state], esp_err_to_name(ret));
     }
 
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    // Stop currently displayed pattern on external LED
+    if (s_led.external_handle != NULL) {
+        esp_err_t ext_ret = led_indicator_stop(s_led.external_handle, (int)s_led.displayed_state);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to stop external pattern %s: %s",
+                     state_names[s_led.displayed_state], esp_err_to_name(ext_ret));
+        }
+    }
+#endif
+
     // Determine what to show
-    led_state_t show_state = new_state;
-    if (!should_show_state(new_state)) {
+    led_state_t show_state = state;
+    if (!should_show_state(state)) {
         show_state = LED_FB_OFF;
     }
 
-    // Start new pattern
+    // Start new pattern on primary LED
     ret = led_indicator_start(s_led.handle, (int)show_state);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to start pattern %s: %s",
@@ -292,11 +298,188 @@ static esp_err_t apply_current_state(void)
         return ret;
     }
 
-    s_led.displayed_state = new_state;
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    // Start new pattern on external LED
+    if (s_led.external_handle != NULL) {
+        esp_err_t ext_ret = led_indicator_start(s_led.external_handle, (int)show_state);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start external pattern %s: %s",
+                     state_names[show_state], esp_err_to_name(ext_ret));
+        }
+    }
+#endif
+
+    s_led.displayed_state = state;
     ESP_LOGD(TAG, "Displaying: %s", state_names[show_state]);
 
     return ESP_OK;
 }
+
+/**
+ * @brief Map ANDON state to internal LED pattern
+ *
+ * @param andon_state ANDON state from callback
+ * @return Corresponding led_state_t pattern
+ */
+static led_state_t map_andon_to_led_state(andon_state_t andon_state)
+{
+    switch (andon_state) {
+        case ANDON_FIRST_BOOT:           return LED_FB_FIRST_BOOT;
+        case ANDON_ERROR:                return LED_FB_ALERT_CRITICAL;
+        case ANDON_WIFI_PROVISIONING:    return LED_FB_WIFI_PROVISIONING;
+        case ANDON_WIFI_RECONNECTING:    return LED_FB_WIFI_RECONNECTING;
+        case ANDON_WIFI_CONNECTING:      return LED_FB_WIFI_CONNECTING;
+        case ANDON_TAILSCALE_CONNECTING: return LED_FB_TAILSCALE_CONNECTING;
+        case ANDON_CONNECTED:            return LED_FB_CONNECTED;
+        case ANDON_OFF:                  return LED_FB_OFF;
+        case ANDON_ALERT_CRITICAL:       return LED_FB_ALERT_CRITICAL;
+        case ANDON_ALERT_ACTIVE:         return LED_FB_ALERT_ACTIVE;
+        case ANDON_SENSOR_WARNING:       return LED_FB_ALERT_ACTIVE;  // Use same pattern
+        default:                         return LED_FB_OFF;
+    }
+}
+
+/**
+ * @brief ANDON channel callback - maps ANDON state to LED pattern
+ *
+ * Called by andon_service when the active state changes. Maps the ANDON
+ * state to an internal LED pattern and applies it.
+ *
+ * @param state New active ANDON state
+ * @param ctx User context (unused)
+ */
+static void andon_callback(andon_state_t state, void *ctx)
+{
+    (void)ctx;  // Unused
+
+    if (!s_led.initialized) {
+        return;
+    }
+
+    if (xSemaphoreTake(s_led.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in ANDON callback");
+        return;
+    }
+
+    // Map ANDON state to internal LED pattern
+    led_state_t led_state = map_andon_to_led_state(state);
+
+    ESP_LOGI(TAG, "ANDON state: %s -> LED pattern: %s",
+             andon_state_name(state), state_names[led_state]);
+
+    // Apply the pattern
+    apply_pattern(led_state);
+
+    xSemaphoreGive(s_led.mutex);
+}
+
+// --------------------------------------------------------------------------
+// External LED Initialization
+// --------------------------------------------------------------------------
+
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+/**
+ * @brief Initialize external LED indicator
+ *
+ * @return ESP_OK on success, or error from led_indicator_create
+ */
+static esp_err_t init_external_led(void)
+{
+#if CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_WS2812
+    // Configure external LED with WS2812 RGB strip mode
+    led_indicator_strips_config_t strips_config = {
+        .led_strip_cfg = {
+            .strip_gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+            .max_leds = 1,
+            .led_model = LED_MODEL_WS2812,
+            .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+            .flags.invert_out = false,
+        },
+        .led_strip_driver = LED_STRIP_RMT,
+        .led_strip_rmt_cfg = {
+            .clk_src = RMT_CLK_SRC_DEFAULT,
+            .resolution_hz = 10000000,  // 10 MHz
+            .mem_block_symbols = 0,     // Use default
+            .flags.with_dma = true,
+        },
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_STRIPS_MODE,
+        .led_indicator_strips_config = &strips_config,
+        .blink_lists = led_patterns,
+        .blink_list_num = LED_FB_MAX,
+    };
+
+#elif CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_LEDC
+    // Configure external LED with LEDC (PWM) mode - use channel 1 to avoid conflict
+    led_indicator_ledc_config_t ledc_config = {
+        .is_active_level_high = true,
+        .timer_inited = true,  // Primary LED already initialized timer
+        .timer_num = LEDC_TIMER_0,
+        .gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+        .channel = LEDC_CHANNEL_1,
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_LEDC_MODE,
+        .led_indicator_ledc_config = &ledc_config,
+        .blink_lists = led_patterns,
+        .blink_list_num = LED_FB_MAX,
+    };
+
+#elif CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+    // Configure external LED with RGB LEDC (3-channel PWM)
+    // Note: This requires led_indicator RGB LEDC support
+    led_indicator_ledc_config_t ledc_config_r = {
+        .is_active_level_high = true,
+        .timer_inited = true,
+        .timer_num = LEDC_TIMER_0,
+        .gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+        .channel = LEDC_CHANNEL_1,
+    };
+
+    // For RGB_LEDC, we use single LEDC channel for simplicity
+    // Full RGB would require led_indicator RGB mode support
+    led_indicator_config_t config = {
+        .mode = LED_LEDC_MODE,
+        .led_indicator_ledc_config = &ledc_config_r,
+        .blink_lists = led_patterns,
+        .blink_list_num = LED_FB_MAX,
+    };
+    ESP_LOGW(TAG, "RGB_LEDC uses single channel only (full RGB not yet implemented)");
+
+#elif CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_GPIO
+    // Configure external LED with simple GPIO mode
+    led_indicator_gpio_config_t gpio_config = {
+        .is_active_level_high = true,
+        .gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_GPIO_MODE,
+        .led_indicator_gpio_config = &gpio_config,
+        .blink_lists = led_patterns,
+        .blink_list_num = LED_FB_MAX,
+    };
+#endif
+
+    s_led.external_handle = led_indicator_create(&config);
+    if (s_led.external_handle == NULL) {
+        ESP_LOGE(TAG, "Failed to create external LED indicator");
+        return ESP_FAIL;
+    }
+
+    // Set brightness on external LED
+    esp_err_t ret = led_indicator_set_brightness(s_led.external_handle, s_led.brightness);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set external LED brightness: %s", esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(TAG, "External LED initialized on GPIO %d", CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA);
+    return ESP_OK;
+}
+#endif
 
 // --------------------------------------------------------------------------
 // Core API Implementation
@@ -376,6 +559,14 @@ esp_err_t led_feedback_init(void)
         ESP_LOGW(TAG, "Failed to set initial brightness: %s", esp_err_to_name(brightness_ret));
     }
 
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    // Initialize external LED (non-fatal if it fails)
+    esp_err_t ext_ret = init_external_led();
+    if (ext_ret != ESP_OK) {
+        ESP_LOGW(TAG, "External LED initialization failed, continuing without it");
+    }
+#endif
+
     s_led.initialized = true;
     s_led.active_states = 0;
     s_led.displayed_state = LED_FB_OFF;
@@ -387,6 +578,15 @@ esp_err_t led_feedback_init(void)
     ESP_LOGI(TAG, "Initialized LEDC on GPIO %d (brightness=%d%%)",
              CONFIG_LED_FEEDBACK_GPIO, s_led.brightness);
 #endif
+
+    // Register as ANDON channel
+    esp_err_t ret = andon_register_channel("led", andon_callback, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register ANDON channel: %s", esp_err_to_name(ret));
+        // Non-fatal - LED will still work, just won't receive ANDON notifications
+    } else {
+        ESP_LOGI(TAG, "Registered as ANDON channel");
+    }
 
     return ESP_OK;
 }
@@ -403,7 +603,7 @@ esp_err_t led_feedback_deinit(void)
         return ESP_ERR_TIMEOUT;
     }
 
-    // Stop any active pattern
+    // Stop any active pattern on primary LED
     if (s_led.handle != NULL) {
         esp_err_t ret = led_indicator_stop(s_led.handle, (int)s_led.displayed_state);
         if (ret != ESP_OK) {
@@ -412,6 +612,18 @@ esp_err_t led_feedback_deinit(void)
         led_indicator_delete(s_led.handle);
         s_led.handle = NULL;
     }
+
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    // Stop any active pattern on external LED
+    if (s_led.external_handle != NULL) {
+        esp_err_t ret = led_indicator_stop(s_led.external_handle, (int)s_led.displayed_state);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to stop external pattern during deinit: %s", esp_err_to_name(ret));
+        }
+        led_indicator_delete(s_led.external_handle);
+        s_led.external_handle = NULL;
+    }
+#endif
 
     s_led.initialized = false;
     s_led.active_states = 0;
@@ -424,64 +636,6 @@ esp_err_t led_feedback_deinit(void)
 
     ESP_LOGI(TAG, "Deinitialized");
     return ESP_OK;
-}
-
-esp_err_t led_feedback_set_state(led_state_t state)
-{
-    if (state >= LED_FB_MAX) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (!s_led.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (xSemaphoreTake(s_led.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "Mutex timeout in set_state");
-        return ESP_ERR_TIMEOUT;
-    }
-
-    // Set bit in active states bitmask
-    uint16_t old_states = s_led.active_states;
-    s_led.active_states |= (1 << state);
-
-    esp_err_t ret = ESP_OK;
-    if (s_led.active_states != old_states) {
-        ESP_LOGI(TAG, "State + %s (active: 0x%04x)", state_names[state], s_led.active_states);
-        ret = apply_current_state();
-    }
-
-    xSemaphoreGive(s_led.mutex);
-    return ret;
-}
-
-esp_err_t led_feedback_clear_state(led_state_t state)
-{
-    if (state >= LED_FB_MAX) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    if (!s_led.initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    if (xSemaphoreTake(s_led.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "Mutex timeout in clear_state");
-        return ESP_ERR_TIMEOUT;
-    }
-
-    // Clear bit in active states bitmask
-    uint16_t old_states = s_led.active_states;
-    s_led.active_states &= ~(1 << state);
-
-    esp_err_t ret = ESP_OK;
-    if (s_led.active_states != old_states) {
-        ESP_LOGI(TAG, "State - %s (active: 0x%04x)", state_names[state], s_led.active_states);
-        ret = apply_current_state();  // Will show next highest priority
-    }
-
-    xSemaphoreGive(s_led.mutex);
-    return ret;
 }
 
 led_state_t led_feedback_get_state(void)
@@ -520,10 +674,15 @@ esp_err_t led_feedback_set_enabled(bool enabled)
                 ESP_LOGW(TAG, "Failed to stop pattern %d: %s", i, esp_err_to_name(stop_ret));
                 ret = stop_ret;  // Report last error
             }
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+            if (s_led.external_handle != NULL) {
+                led_indicator_stop(s_led.external_handle, i);
+            }
+#endif
         }
     } else {
         // Re-apply current state when re-enabled
-        ret = apply_current_state();
+        ret = apply_pattern(s_led.displayed_state);
     }
 
     xSemaphoreGive(s_led.mutex);
@@ -555,6 +714,15 @@ esp_err_t led_feedback_set_brightness(uint8_t percent)
         }
     }
 
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
+    if (s_led.external_handle != NULL) {
+        esp_err_t ext_ret = led_indicator_set_brightness(s_led.external_handle, percent);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set external brightness: %s", esp_err_to_name(ext_ret));
+        }
+    }
+#endif
+
     xSemaphoreGive(s_led.mutex);
     return ret;
 }
@@ -571,7 +739,7 @@ esp_err_t led_feedback_set_alerts_only(bool alerts_only)
 
     s_led.alerts_only = alerts_only;
     ESP_LOGI(TAG, "Alerts-only mode %s", alerts_only ? "enabled" : "disabled");
-    esp_err_t ret = apply_current_state();  // Re-evaluate what should be shown
+    esp_err_t ret = apply_pattern(s_led.displayed_state);  // Re-evaluate what should be shown
 
     xSemaphoreGive(s_led.mutex);
     return ret;

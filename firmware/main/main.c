@@ -13,6 +13,8 @@
 #include "tailscale_manager.h"
 #endif
 #include "device_identity.h"
+#include "device_state.h"
+#include "andon_service.h"
 #include "web_auth.h"
 #include "web_server.h"
 #include "system_console.h"
@@ -26,7 +28,7 @@ static void tailscale_callback(ts_mgr_event_t event, void *ctx)
     char ip[16];
     switch (event) {
         case TS_MGR_EVENT_CONNECTED:
-            led_feedback_clear_state(LED_FB_TAILSCALE_CONNECTING);
+            andon_clear_state(ANDON_TAILSCALE_CONNECTING);
             if (ts_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
                 ESP_LOGI(TAG, "Tailscale connected: %s", ip);
             } else {
@@ -35,7 +37,7 @@ static void tailscale_callback(ts_mgr_event_t event, void *ctx)
             break;
 
         case TS_MGR_EVENT_DISCONNECTED:
-            led_feedback_set_state(LED_FB_TAILSCALE_CONNECTING);
+            andon_set_state(ANDON_TAILSCALE_CONNECTING);
             ESP_LOGW(TAG, "Tailscale disconnected - reconnecting...");
             break;
 
@@ -52,7 +54,7 @@ static void tailscale_callback(ts_mgr_event_t event, void *ctx)
             break;
 
         case TS_MGR_EVENT_KEY_UPDATED:
-            led_feedback_set_state(LED_FB_TAILSCALE_CONNECTING);
+            andon_set_state(ANDON_TAILSCALE_CONNECTING);
             ESP_LOGI(TAG, "Tailscale auth key updated");
             break;
     }
@@ -65,23 +67,23 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
         case WIFI_MGR_EVENT_CONNECTED:
             // Only clear WiFi-related states - wifi_manager doesn't own FIRST_BOOT
             // FIRST_BOOT is cleared by web_auth when password is changed
-            led_feedback_clear_state(LED_FB_WIFI_CONNECTING);
-            led_feedback_clear_state(LED_FB_WIFI_RECONNECTING);
-            led_feedback_clear_state(LED_FB_WIFI_PROVISIONING);
-            led_feedback_set_state(LED_FB_CONNECTED);
+            andon_clear_state(ANDON_WIFI_CONNECTING);
+            andon_clear_state(ANDON_WIFI_RECONNECTING);
+            andon_clear_state(ANDON_WIFI_PROVISIONING);
+            andon_set_state(ANDON_CONNECTED);
             // Tailscale init happens in main task after xEventGroupWaitBits returns
             // Don't init here - callback runs on sys_evt task with limited stack
             ESP_LOGI(TAG, "WiFi connected");
             break;
 
         case WIFI_MGR_EVENT_DISCONNECTED:
-            led_feedback_clear_state(LED_FB_CONNECTED);
-            led_feedback_set_state(LED_FB_WIFI_RECONNECTING);
+            andon_clear_state(ANDON_CONNECTED);
+            andon_set_state(ANDON_WIFI_RECONNECTING);
             ESP_LOGW(TAG, "WiFi disconnected - services paused");
             break;
 
         case WIFI_MGR_EVENT_PROVISIONING:
-            led_feedback_set_state(LED_FB_WIFI_PROVISIONING);
+            andon_set_state(ANDON_WIFI_PROVISIONING);
             ESP_LOGI(TAG, "========================================");
             ESP_LOGI(TAG, "WiFi Provisioning Mode");
             ESP_LOGI(TAG, "1. Install 'ESP BLE Prov' app (iOS/Android)");
@@ -92,8 +94,8 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
             break;
 
         case WIFI_MGR_EVENT_PROVISIONED:
-            led_feedback_clear_state(LED_FB_WIFI_PROVISIONING);
-            led_feedback_set_state(LED_FB_WIFI_CONNECTING);
+            andon_clear_state(ANDON_WIFI_PROVISIONING);
+            andon_set_state(ANDON_WIFI_CONNECTING);
             ESP_LOGI(TAG, "Credentials saved - connecting...");
             break;
 
@@ -170,12 +172,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-    // Initialize LED feedback early (shows boot state)
-    ret = led_feedback_init();
+    // Initialize device state early (others depend on claimed status)
+    ret = device_state_init();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "LED feedback init failed: %s (continuing without LED)",
-                 esp_err_to_name(ret));
-        // Non-fatal - continue without LED feedback
+        ESP_LOGE(TAG, "Device state init failed: %s", esp_err_to_name(ret));
+        return;
     }
 
     // Initialize device identity (generates credentials on first boot)
@@ -192,9 +193,24 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
+    // Initialize ANDON service before publishers
+    ret = andon_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ANDON service init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
+    // Initialize LED feedback (registers with ANDON)
+    ret = led_feedback_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "LED feedback init failed: %s (continuing without LED)",
+                 esp_err_to_name(ret));
+        // Non-fatal - continue without LED feedback
+    }
+
     // Show credentials on first boot (until OLED is implemented)
-    if (device_identity_is_first_boot()) {
-        led_feedback_set_state(LED_FB_FIRST_BOOT);
+    if (!device_state_is_claimed()) {
+        andon_set_state(ANDON_FIRST_BOOT);
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "FIRST BOOT - SAVE THESE CREDENTIALS:");
         ESP_LOGI(TAG, "  Web Password: %s", identity->web_password);
@@ -221,7 +237,7 @@ void app_main(void)
     }
 
     // Show connecting state while waiting for WiFi
-    led_feedback_set_state(LED_FB_WIFI_CONNECTING);
+    andon_set_state(ANDON_WIFI_CONNECTING);
 
     // Wait for WiFi connection
     ESP_LOGI(TAG, "Waiting for WiFi connection...");
