@@ -1,0 +1,11 @@
+menu "ANDON Service"
+
+    config ANDON_MAX_CHANNELS
+        int "Maximum number of notification channels"
+        default 4
+        range 1 8
+        help
+            Maximum number of channels (LED, buzzer, etc.) that can register
+            for ANDON state change notifications.
+
+endmenu
