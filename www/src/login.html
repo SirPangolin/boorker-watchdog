@@ -57,7 +57,12 @@
                     errorEl.classList.remove('hidden');
                 }
             } catch (err) {
-                errorEl.textContent = 'Connection error';
+                if (err instanceof TypeError) {
+                    errorEl.textContent = 'Server returned invalid response';
+                } else {
+                    errorEl.textContent = 'Connection error - check network';
+                }
+                console.error('Login error:', err);
                 errorEl.classList.remove('hidden');
             }
 

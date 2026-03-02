@@ -214,6 +214,7 @@ esp_err_t device_state_deinit(void)
 bool device_state_is_claimed(void)
 {
     if (!s_state.initialized) {
+        ESP_LOGW(TAG, "device_state_is_claimed() called before init - returning false");
         return false;
     }
     // Reading a single bool is atomic on ESP32

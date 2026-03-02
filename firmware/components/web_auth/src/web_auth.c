@@ -158,7 +158,8 @@ static bool token_exists_in_sessions(const char *token)
 
 // Generate unique session token (checks for collisions)
 // Note: Must be called with s_session_mutex held
-static void generate_token(char *token_out)
+// Returns ESP_OK on success, ESP_FAIL if unique token cannot be generated
+static esp_err_t generate_token(char *token_out)
 {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const uint32_t charset_len = sizeof(chars) - 1; // 62 characters
@@ -174,13 +175,15 @@ static void generate_token(char *token_out)
 
         // Check for uniqueness (extremely rare collision, but defense in depth)
         if (!token_exists_in_sessions(token_out)) {
-            return;
+            return ESP_OK;
         }
         ESP_LOGW(TAG, "Token collision detected (attempt %d/%d), regenerating",
                  attempt + 1, max_attempts);
     }
     // If we get here, something is very wrong (3 collisions in a row)
-    ESP_LOGE(TAG, "Failed to generate unique token after %d attempts", max_attempts);
+    ESP_LOGE(TAG, "Failed to generate unique token after %d attempts - possible session corruption", max_attempts);
+    token_out[0] = '\0';  // Clear token to prevent use of non-unique value
+    return ESP_FAIL;
 }
 
 static esp_err_t load_or_create_password(void)
@@ -277,7 +280,10 @@ static esp_err_t load_lockout_state(void)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
     if (ret != ESP_OK) {
-        // NVS not available or namespace doesn't exist - use defaults
+        // NVS not available or namespace doesn't exist - use defaults (expected on first boot)
+        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to open NVS for lockout state: %s", esp_err_to_name(ret));
+        }
         return ESP_OK;
     }
 
@@ -285,12 +291,16 @@ static esp_err_t load_lockout_state(void)
     ret = nvs_get_u32(handle, NVS_KEY_LOCKOUT_UNTIL, &lockout_time);
     if (ret == ESP_OK) {
         s_lockout_until = (time_t)lockout_time;
+    } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Unexpected error loading lockout_until: %s", esp_err_to_name(ret));
     }
 
     uint8_t attempts = 0;
     ret = nvs_get_u8(handle, NVS_KEY_FAILED_ATTEMPTS, &attempts);
     if (ret == ESP_OK) {
         s_failed_attempts = (int)attempts;
+    } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Unexpected error loading failed_attempts: %s", esp_err_to_name(ret));
     }
 
     nvs_close(handle);
@@ -316,9 +326,13 @@ static esp_err_t save_lockout_state(void)
         ESP_LOGW(TAG, "Failed to save failed_attempts: %s", esp_err_to_name(ret));
     }
 
-    nvs_commit(handle);
+    esp_err_t commit_ret = nvs_commit(handle);
+    if (commit_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit lockout state: %s - lockout may not survive reboot",
+                 esp_err_to_name(commit_ret));
+    }
     nvs_close(handle);
-    return ESP_OK;
+    return commit_ret;
 }
 
 esp_err_t web_auth_init(void)
@@ -429,7 +443,12 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
     }
 
     // Create session
-    generate_token(s_sessions[slot].token);
+    esp_err_t token_ret = generate_token(s_sessions[slot].token);
+    if (token_ret != ESP_OK) {
+        xSemaphoreGive(s_session_mutex);
+        ESP_LOGE(TAG, "Failed to generate session token");
+        return ESP_FAIL;
+    }
     s_sessions[slot].created = now;
     s_sessions[slot].valid = true;
 
@@ -598,21 +617,28 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     s_password_changed = true;
 
     // Invalidate all sessions (force re-login) with mutex
+    // Note: Don't clear sessions without mutex to avoid race conditions
     if (s_session_mutex != NULL &&
-        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         memset(s_sessions, 0, sizeof(s_sessions));
         xSemaphoreGive(s_session_mutex);
     } else {
-        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation");
-        memset(s_sessions, 0, sizeof(s_sessions));  // Still clear, just not atomic
+        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation - sessions will expire naturally");
     }
 
     // Mark device as claimed
-    device_state_set_claimed(true);
-    andon_clear_state(ANDON_FIRST_BOOT);
-    ESP_LOGI(TAG, "Device claimed - password changed");
+    esp_err_t claim_ret = device_state_set_claimed(true);
+    if (claim_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mark device as claimed: %s - user may be prompted again",
+                 esp_err_to_name(claim_ret));
+    }
 
-    ESP_LOGI(TAG, "Password changed");
+    esp_err_t andon_ret = andon_clear_state(ANDON_FIRST_BOOT);
+    if (andon_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear first boot LED state: %s", esp_err_to_name(andon_ret));
+    }
+
+    ESP_LOGI(TAG, "Password changed, device claimed");
     return ESP_OK;
 }
 

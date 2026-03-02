@@ -14,6 +14,7 @@
 #include "sdkconfig.h"
 
 #include <string.h>
+#include <inttypes.h>
 
 static const char *TAG = "andon_service";
 
@@ -84,6 +85,9 @@ static andon_state_t get_highest_priority_state(void)
         }
     }
 
+    // Should be unreachable if active_states != 0
+    ESP_LOGE(TAG, "BUG: active_states=0x%08" PRIx32 " but no bit found in range 0-%d",
+             s_ctx.active_states, ANDON_MAX - 1);
     return ANDON_OFF;
 }
 
