@@ -1,0 +1,10 @@
+menu "Device State"
+
+    config DEVICE_STATE_NVS_NAMESPACE
+        string "NVS namespace for device state"
+        default "dev_state"
+        help
+            NVS namespace used to persist device lifecycle state
+            (claimed status, factory reset, OTA state).
+
+endmenu
