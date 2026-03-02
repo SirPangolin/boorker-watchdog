@@ -34,22 +34,17 @@ extern "C" {
  *       LED_STATE_OFF/LED_STATE_ON brightness values.
  */
 typedef enum {
-    // Priority 0 (highest) - Immediate attention
-    LED_FB_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
+    // Pattern identifiers for LED visual feedback
+    // Note: Priority is handled by ANDON service, not by this enum's ordering.
+    // These simply define the visual patterns to display.
 
-    // Priority 1 - Setup required
+    LED_FB_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
     LED_FB_FIRST_BOOT,           ///< Slow breathe (purple on RGB)
     LED_FB_WIFI_PROVISIONING,    ///< Slow blink (blue on RGB)
-
-    // Priority 2 - Problems
     LED_FB_WIFI_RECONNECTING,    ///< Medium blink (yellow on RGB)
     LED_FB_ALERT_ACTIVE,         ///< Double-pulse slow (orange on RGB)
-
-    // Priority 3 - Transitional
     LED_FB_WIFI_CONNECTING,      ///< Fast blink (cyan on RGB)
     LED_FB_TAILSCALE_CONNECTING, ///< Fast blink (cyan on RGB)
-
-    // Priority 4 (lowest) - Normal operation
     LED_FB_CONNECTED,            ///< Solid on (green on RGB)
     LED_FB_OFF,                  ///< Off
 

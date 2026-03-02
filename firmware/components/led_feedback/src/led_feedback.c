@@ -72,7 +72,6 @@ static struct {
     bool enabled;
     uint8_t brightness;
     bool alerts_only;
-    uint16_t active_states;      // Bitmask of active states (kept for alerts_only filtering)
     led_state_t displayed_state; // Currently displayed state (for stopping pattern)
     led_indicator_handle_t handle;
 #if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
@@ -84,7 +83,6 @@ static struct {
     .enabled = true,
     .brightness = CONFIG_LED_FEEDBACK_DEFAULT_BRIGHTNESS,
     .alerts_only = false,
-    .active_states = 0,
     .displayed_state = LED_FB_OFF,
     .handle = NULL,
 #if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED
@@ -568,7 +566,6 @@ esp_err_t led_feedback_init(void)
 #endif
 
     s_led.initialized = true;
-    s_led.active_states = 0;
     s_led.displayed_state = LED_FB_OFF;
 
 #if CONFIG_LED_FEEDBACK_TYPE_WS2812
@@ -582,8 +579,9 @@ esp_err_t led_feedback_init(void)
     // Register as ANDON channel
     esp_err_t ret = andon_register_channel("led", andon_callback, NULL);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register ANDON channel: %s", esp_err_to_name(ret));
-        // Non-fatal - LED will still work, just won't receive ANDON notifications
+        ESP_LOGE(TAG, "Failed to register ANDON channel: %s - LED will NOT show system status!",
+                 esp_err_to_name(ret));
+        // Non-fatal for init, but LED won't respond to WiFi/error/alert states
     } else {
         ESP_LOGI(TAG, "Registered as ANDON channel");
     }
@@ -626,7 +624,6 @@ esp_err_t led_feedback_deinit(void)
 #endif
 
     s_led.initialized = false;
-    s_led.active_states = 0;
     s_led.displayed_state = LED_FB_OFF;
 
     // Give back mutex before deleting

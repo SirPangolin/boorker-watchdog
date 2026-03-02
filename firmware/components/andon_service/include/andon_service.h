@@ -27,8 +27,8 @@ extern "C" {
 /**
  * @brief ANDON states in priority order (lower value = higher priority)
  *
- * System states (0-7) are always active.
- * Business states (8+) are gated when device is unclaimed.
+ * System states (0-7): Always processed regardless of device claim status.
+ * Business states (8+): Gated when device is unclaimed (andon_set_state returns error).
  */
 typedef enum {
     // System states (always active) - priority order
