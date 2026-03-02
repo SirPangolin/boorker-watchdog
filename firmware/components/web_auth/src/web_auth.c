@@ -1,5 +1,7 @@
 #include "web_auth.h"
 #include "device_identity.h"
+#include "device_state.h"
+#include "andon_service.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "nvs_flash.h"
@@ -556,6 +558,11 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
         ESP_LOGW(TAG, "Could not acquire mutex for session invalidation");
         memset(s_sessions, 0, sizeof(s_sessions));  // Still clear, just not atomic
     }
+
+    // Mark device as claimed
+    device_state_set_claimed(true);
+    andon_clear_state(ANDON_FIRST_BOOT);
+    ESP_LOGI(TAG, "Device claimed - password changed");
 
     ESP_LOGI(TAG, "Password changed");
     return ESP_OK;
