@@ -64,4 +64,45 @@ menu "LED Feedback"
         help
             Full fade-in + fade-out cycle time.
 
+    config LED_FEEDBACK_EXTERNAL_ENABLED
+        bool "Enable external LED"
+        default n
+        help
+            Enable a second LED output in addition to the onboard LED.
+
+    choice LED_FEEDBACK_EXTERNAL_TYPE
+        prompt "External LED type"
+        depends on LED_FEEDBACK_EXTERNAL_ENABLED
+        default LED_FEEDBACK_EXTERNAL_TYPE_WS2812
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_GPIO
+            bool "Simple GPIO (on/off only)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_LEDC
+            bool "LEDC PWM (single channel)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+            bool "RGB LEDC PWM (3-channel)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_WS2812
+            bool "WS2812 RGB (addressable)"
+    endchoice
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_DATA
+        int "External LED data/red GPIO"
+        depends on LED_FEEDBACK_EXTERNAL_ENABLED
+        default 9
+        help
+            GPIO for external LED. For RGB_LEDC, this is the red channel.
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_GREEN
+        int "External LED green GPIO (RGB_LEDC only)"
+        depends on LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+        default 8
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_BLUE
+        int "External LED blue GPIO (RGB_LEDC only)"
+        depends on LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+        default 7
+
 endmenu
