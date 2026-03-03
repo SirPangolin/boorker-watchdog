@@ -489,7 +489,11 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     }
 
     // Set FIRST_BOOT LED state
-    andon_set_state(ANDON_FIRST_BOOT);
+    esp_err_t andon_ret = andon_set_state(ANDON_FIRST_BOOT);
+    if (andon_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set FIRST_BOOT LED state: %s", esp_err_to_name(andon_ret));
+        // Non-fatal - continue with factory reset
+    }
 
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
 

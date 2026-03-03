@@ -360,7 +360,12 @@ esp_err_t web_auth_init(void)
     }
 
     // Load persisted lockout state (survives reboot)
-    load_lockout_state();
+    esp_err_t lockout_ret = load_lockout_state();
+    if (lockout_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load lockout state: %s - brute force protection may reset on reboot",
+                 esp_err_to_name(lockout_ret));
+        // Non-fatal - continue with default lockout state
+    }
 
     s_initialized = true;
     ESP_LOGI(TAG, "Web auth initialized (password_changed=%d, failed_attempts=%d)",

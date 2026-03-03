@@ -71,6 +71,7 @@ esp_err_t led_feedback_init(void);
  *
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
 esp_err_t led_feedback_deinit(void);
 
