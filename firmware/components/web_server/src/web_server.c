@@ -2,6 +2,8 @@
 #include "web_auth.h"
 #include "device_identity.h"
 #include "device_state.h"
+#include "wifi_manager.h"
+#include "andon_service.h"
 #include "system_console.h"
 #include "version.h"
 #include "esp_log.h"
@@ -454,24 +456,40 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
 
-    // Reset web auth password to default
-    esp_err_t err = web_auth_reset_password();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Regenerate device identity (new credentials)
-    err = device_identity_regenerate();
+    // Regenerate device identity FIRST (new credentials)
+    // Must happen before web_auth_reset so it uses the new password
+    esp_err_t err = device_identity_regenerate();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to regenerate identity: %s", esp_err_to_name(err));
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
+    // Reset web auth password to default (uses new device_identity credentials)
+    err = web_auth_reset_password();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     // Invalidate all sessions before reboot
     web_auth_invalidate_all_sessions();
+
+    // Clear WiFi credentials (forces reprovisioning)
+    err = wifi_mgr_clear_credentials();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
+    }
+
+    // Reset device claimed state (returns to first boot)
+    err = device_state_set_claimed(false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to reset claimed state: %s", esp_err_to_name(err));
+    }
+
+    // Set FIRST_BOOT LED state
+    andon_set_state(ANDON_FIRST_BOOT);
 
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
 
