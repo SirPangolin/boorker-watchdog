@@ -255,6 +255,7 @@ esp_err_t device_state_set_claimed(bool claimed)
 device_factory_reset_t device_state_get_factory_reset(void)
 {
     if (!s_state.initialized) {
+        ESP_LOGW(TAG, "device_state_get_factory_reset() called before init - returning NONE");
         return DEVICE_FACTORY_RESET_NONE;
     }
     // Reading a single enum (backed by int) is atomic on ESP32
@@ -348,6 +349,7 @@ esp_err_t device_state_clear_factory_reset(void)
 device_ota_state_t device_state_get_ota(void)
 {
     if (!s_state.initialized) {
+        ESP_LOGW(TAG, "device_state_get_ota() called before init - returning IDLE");
         return DEVICE_OTA_IDLE;
     }
     // Reading a single enum (backed by int) is atomic on ESP32

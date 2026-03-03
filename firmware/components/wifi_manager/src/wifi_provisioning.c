@@ -69,13 +69,23 @@ esp_err_t wifi_prov_start(const char *device_name)
     }
 
     // Register provisioning event handler
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+    ret = esp_event_handler_instance_register(
         WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &prov_event_handler, NULL,
-        &s_prov_event_instance));
+        &s_prov_event_instance);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register event handler: %s", esp_err_to_name(ret));
+        wifi_prov_mgr_deinit();
+        return ret;
+    }
 
     // Check if already provisioned
     bool provisioned = false;
-    wifi_prov_mgr_is_provisioned(&provisioned);
+    ret = wifi_prov_mgr_is_provisioned(&provisioned);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to check provisioned status: %s - assuming unprovisioned",
+                 esp_err_to_name(ret));
+        // Continue with provisioned = false (already initialized)
+    }
     if (provisioned) {
         ESP_LOGI(TAG, "Already provisioned, clearing for re-provisioning");
         // Continue anyway to allow re-provisioning

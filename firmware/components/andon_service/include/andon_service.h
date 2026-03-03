@@ -27,8 +27,11 @@ extern "C" {
 /**
  * @brief ANDON states in priority order (lower value = higher priority)
  *
- * System states (0-7): Always processed regardless of device claim status.
- * Business states (8+): Gated when device is unclaimed (andon_set_state returns error).
+ * System states: Always processed regardless of device claim status.
+ * Business states: Gated when device is unclaimed (andon_set_state returns error).
+ *
+ * Use andon_is_business_state() to check if a state is business or system.
+ * Do NOT rely on enum values - the boundary may change as states are added.
  */
 typedef enum {
     // System states (always active) - priority order
@@ -41,7 +44,7 @@ typedef enum {
     ANDON_CONNECTED,                /**< All systems connected and operational */
     ANDON_OFF,                      /**< No active notification (lowest system priority) */
 
-    // Business states (gated when unclaimed) - priority order
+    // --- Business state boundary (gated when unclaimed) ---
     ANDON_ALERT_CRITICAL,           /**< Critical alert requiring immediate attention */
     ANDON_ALERT_ACTIVE,             /**< Active alert condition */
     ANDON_SENSOR_WARNING,           /**< Sensor warning threshold exceeded */
@@ -54,6 +57,11 @@ typedef enum {
  *
  * Called when the active ANDON state changes. Channels should update their
  * output (LED pattern, buzzer tone, etc.) based on the new state.
+ *
+ * @note Initial callback during registration is called WITHOUT ANDON mutex held.
+ *       Subsequent state change callbacks MAY be called with ANDON mutex held.
+ *       Callbacks MUST NOT call back into ANDON service (deadlock risk).
+ *       Callbacks should be fast and non-blocking.
  *
  * @param new_state The new active ANDON state
  * @param ctx User context pointer passed during registration

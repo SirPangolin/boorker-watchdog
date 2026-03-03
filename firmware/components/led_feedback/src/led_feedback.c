@@ -366,7 +366,11 @@ static void andon_callback(andon_state_t state, void *ctx)
              andon_state_name(state), state_names[led_state]);
 
     // Apply the pattern
-    apply_pattern(led_state);
+    esp_err_t ret = apply_pattern(led_state);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to apply pattern %s: %s",
+                 state_names[led_state], esp_err_to_name(ret));
+    }
 
     xSemaphoreGive(s_led.mutex);
 }
@@ -561,7 +565,9 @@ esp_err_t led_feedback_init(void)
     // Initialize external LED (non-fatal if it fails)
     esp_err_t ext_ret = init_external_led();
     if (ext_ret != ESP_OK) {
-        ESP_LOGW(TAG, "External LED initialization failed, continuing without it");
+        ESP_LOGE(TAG, "External LED init failed: %s - external LED disabled",
+                 esp_err_to_name(ext_ret));
+        // Continue without external LED - onboard LED still works
     }
 #endif
 
