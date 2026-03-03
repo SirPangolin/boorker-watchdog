@@ -158,7 +158,21 @@ void app_main(void)
     esp_log_level_set("microlink_coord", ESP_LOG_WARN);
 #endif
 
-    ESP_LOGI(TAG, "Boorker v%s starting...", BOORKER_VERSION_STRING);
+    // Boot banner (ASCII-only for serial compatibility)
+    printf("\n");
+    printf("  +====================================================================+\n");
+    printf("  |                                                                    |\n");
+    printf("  |   ____   ___   ___  ____  _  _______ ____                          |\n");
+    printf("  |  | __ ) / _ \\ / _ \\|  _ \\| |/ / ____|  _ \\                         |\n");
+    printf("  |  |  _ \\| | | | | | | |_) | ' /|  _| | |_) |                        |\n");
+    printf("  |  | |_) | |_| | |_| |  _ <| . \\| |___|  _ <                         |\n");
+    printf("  |  |____/ \\___/ \\___/|_| \\_\\_|\\_\\_____|_| \\_\\   WATCHDOG            |\n");
+    printf("  |                                                                    |\n");
+    printf("  |  IoT Sensor Mesh Platform                              v%-8s  |\n", BOORKER_VERSION_STRING);
+    printf("  |  %-64s  |\n", BOORKER_GITHUB_URL);
+    printf("  |                                                                    |\n");
+    printf("  +====================================================================+\n");
+    printf("\n");
 
     // Initialize NVS (required for WiFi and Tailscale credential storage)
     esp_err_t ret = nvs_flash_init();
