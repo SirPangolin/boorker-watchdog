@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/led_feedback.c"
+        "src/led_patterns.c"
+        "src/led_console.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        led_indicator
+        nvs_flash
+        console
+        freertos
+        andon_service
+    PRIV_REQUIRES
+        log
+)

@@ -45,7 +45,11 @@
                 const data = await resp.json();
 
                 if (resp.ok) {
-                    window.location.href = '/';
+                    if (data.password_change_required) {
+                        window.location.href = '/password-change.html';
+                    } else {
+                        window.location.href = '/';
+                    }
                 } else {
                     errorEl.textContent = data.attempts_remaining !== undefined
                         ? `Invalid password. ${data.attempts_remaining} attempts remaining.`
@@ -53,7 +57,12 @@
                     errorEl.classList.remove('hidden');
                 }
             } catch (err) {
-                errorEl.textContent = 'Connection error';
+                if (err instanceof TypeError) {
+                    errorEl.textContent = 'Server returned invalid response';
+                } else {
+                    errorEl.textContent = 'Connection error - check network';
+                }
+                console.error('Login error:', err);
                 errorEl.classList.remove('hidden');
             }
 

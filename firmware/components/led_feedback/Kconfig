@@ -1,0 +1,108 @@
+menu "LED Feedback"
+
+    config LED_FEEDBACK_ENABLED
+        bool "Enable LED status feedback"
+        default y
+        help
+            Master enable for LED status indication.
+            Can be overridden at runtime via NVS.
+
+    choice LED_FEEDBACK_TYPE
+        prompt "LED hardware type"
+        default LED_FEEDBACK_TYPE_LEDC
+
+        config LED_FEEDBACK_TYPE_GPIO
+            bool "Simple GPIO (on/off only)"
+
+        config LED_FEEDBACK_TYPE_LEDC
+            bool "LEDC PWM (brightness + breathing)"
+
+        config LED_FEEDBACK_TYPE_WS2812
+            bool "WS2812 RGB (addressable)"
+    endchoice
+
+    config LED_FEEDBACK_GPIO
+        int "LED GPIO pin"
+        default 38 if IDF_TARGET_ESP32S3
+        default 35
+        help
+            GPIO pin connected to LED.
+            DevKitC v1.1: 38 (WS2812), v1.0: 48, Heltec V3: 35 (white)
+
+    config LED_FEEDBACK_DEFAULT_BRIGHTNESS
+        int "Default brightness (0-100)"
+        default 30
+        range 0 100
+        depends on !LED_FEEDBACK_TYPE_GPIO
+        help
+            Default brightness percentage.
+            30% recommended to avoid blinding users.
+
+    config LED_FEEDBACK_ACTIVE_LOW
+        bool "LED is active-low"
+        default n
+        help
+            Enable if LED turns on when GPIO is LOW.
+
+    config LED_FEEDBACK_BLINK_FAST_MS
+        int "Fast blink period (ms)"
+        default 400
+        help
+            Total period for fast blink (half on, half off).
+
+    config LED_FEEDBACK_BLINK_MEDIUM_MS
+        int "Medium blink period (ms)"
+        default 1000
+
+    config LED_FEEDBACK_BLINK_SLOW_MS
+        int "Slow blink period (ms)"
+        default 2000
+
+    config LED_FEEDBACK_BREATHE_PERIOD_MS
+        int "Breathing cycle period (ms)"
+        default 2000
+        help
+            Full fade-in + fade-out cycle time.
+
+    config LED_FEEDBACK_EXTERNAL_ENABLED
+        bool "Enable external LED"
+        default n
+        help
+            Enable a second LED output in addition to the onboard LED.
+
+    choice LED_FEEDBACK_EXTERNAL_TYPE
+        prompt "External LED type"
+        depends on LED_FEEDBACK_EXTERNAL_ENABLED
+        default LED_FEEDBACK_EXTERNAL_TYPE_WS2812
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_GPIO
+            bool "Simple GPIO (on/off only)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_LEDC
+            bool "LEDC PWM (single channel)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+            bool "RGB LEDC PWM (3-channel)"
+
+        config LED_FEEDBACK_EXTERNAL_TYPE_WS2812
+            bool "WS2812 RGB (addressable)"
+    endchoice
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_DATA
+        int "External LED data/red GPIO"
+        depends on LED_FEEDBACK_EXTERNAL_ENABLED
+        default 9
+        help
+            GPIO for external LED. For RGB_LEDC, this is the red channel.
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_GREEN
+        int "External LED green GPIO (RGB_LEDC only)"
+        depends on LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+        default 8
+
+    config LED_FEEDBACK_EXTERNAL_GPIO_BLUE
+        int "External LED blue GPIO (RGB_LEDC only)"
+        depends on LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+        default 7
+
+endmenu
