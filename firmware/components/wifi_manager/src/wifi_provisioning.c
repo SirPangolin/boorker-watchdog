@@ -4,9 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
-
-// Security: Default PoP PIN that should be changed for production
-#define DEFAULT_POP_PIN "boorker123"
+#include "device_identity.h"
 #include "esp_wifi.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
@@ -71,29 +69,38 @@ esp_err_t wifi_prov_start(const char *device_name)
     }
 
     // Register provisioning event handler
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(
+    ret = esp_event_handler_instance_register(
         WIFI_PROV_EVENT, ESP_EVENT_ANY_ID, &prov_event_handler, NULL,
-        &s_prov_event_instance));
+        &s_prov_event_instance);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register event handler: %s", esp_err_to_name(ret));
+        wifi_prov_mgr_deinit();
+        return ret;
+    }
 
     // Check if already provisioned
     bool provisioned = false;
-    wifi_prov_mgr_is_provisioned(&provisioned);
+    ret = wifi_prov_mgr_is_provisioned(&provisioned);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to check provisioned status: %s - assuming unprovisioned",
+                 esp_err_to_name(ret));
+        // Continue with provisioned = false (already initialized)
+    }
     if (provisioned) {
         ESP_LOGI(TAG, "Already provisioned, clearing for re-provisioning");
         // Continue anyway to allow re-provisioning
     }
 
-    // Configure security (with Proof-of-Possession)
+    // Configure security (with Proof-of-Possession from device_identity)
     wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-    const char *pop = CONFIG_WIFI_MGR_PROV_POP;
-
-    // Security warning if using default PIN
-    if (strcmp(pop, DEFAULT_POP_PIN) == 0) {
-        ESP_LOGW(TAG, "========================================");
-        ESP_LOGW(TAG, "WARNING: Using default Proof-of-Possession PIN!");
-        ESP_LOGW(TAG, "Change CONFIG_WIFI_MGR_PROV_POP for production.");
-        ESP_LOGW(TAG, "========================================");
+    const device_identity_t *identity = device_identity_get();
+    if (identity == NULL) {
+        ESP_LOGE(TAG, "device_identity not initialized");
+        wifi_prov_mgr_deinit();
+        return ESP_ERR_INVALID_STATE;
     }
+    const char *pop = identity->ble_pop;
+    ESP_LOGI(TAG, "Using BLE PoP from device_identity");
 
     // BLE service UUID (generated: b00e4e8c-7c9a-4e5d-8a2f-1d3c5f7a9b0e)
     // Use a unique UUID to avoid conflicts with other BLE devices
@@ -113,7 +120,6 @@ esp_err_t wifi_prov_start(const char *device_name)
 
     s_prov_active = true;
     ESP_LOGI(TAG, "BLE provisioning active. Use ESP BLE Prov app to configure.");
-    // Note: PoP PIN is configured via menuconfig (CONFIG_WIFI_MGR_PROV_POP)
 
     return ESP_OK;
 }

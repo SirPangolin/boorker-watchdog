@@ -1,5 +1,7 @@
 #include "web_auth.h"
 #include "device_identity.h"
+#include "device_state.h"
+#include "andon_service.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "nvs_flash.h"
@@ -11,6 +13,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <time.h>
+#include <ctype.h>
 
 static const char *TAG = "web_auth";
 
@@ -36,6 +39,15 @@ static const char *TAG = "web_auth";
 #endif
 #ifndef CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS
 #define CONFIG_WEB_AUTH_SESSION_EXPIRY_SECONDS 3600
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH
+#define CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH 8
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH
+#define CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH 64
+#endif
+#ifndef CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL
+#define CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL " !@#$%^&*()_+-=[]{}|;:',.<>?/~`"
 #endif
 
 typedef struct {
@@ -92,6 +104,45 @@ static esp_err_t hash_password(const char *password, const uint8_t *salt, uint8_
     return ESP_OK;
 }
 
+/**
+ * @brief Check if character is valid for passwords
+ * @return true if character is alphanumeric or in allowed special chars
+ */
+static bool is_valid_password_char(char c)
+{
+    if (isalnum((unsigned char)c)) {
+        return true;
+    }
+    return strchr(CONFIG_WEB_AUTH_PASSWORD_ALLOWED_SPECIAL, c) != NULL;
+}
+
+/**
+ * @brief Validate password meets requirements
+ * @return ESP_OK if valid, ESP_ERR_INVALID_SIZE if length wrong, ESP_ERR_INVALID_ARG if bad chars
+ */
+static esp_err_t validate_password(const char *password)
+{
+    if (password == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    size_t len = strlen(password);
+    if (len < CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH || len > CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH) {
+        ESP_LOGW(TAG, "Password rejected: length %zu not in range %d-%d",
+                 len, CONFIG_WEB_AUTH_PASSWORD_MIN_LENGTH, CONFIG_WEB_AUTH_PASSWORD_MAX_LENGTH);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
+    for (size_t i = 0; i < len; i++) {
+        if (!is_valid_password_char(password[i])) {
+            ESP_LOGW(TAG, "Password rejected: invalid character at position %zu", i);
+            return ESP_ERR_INVALID_ARG;
+        }
+    }
+
+    return ESP_OK;
+}
+
 // Check if token already exists in sessions (collision check)
 // Note: Must be called with s_session_mutex held
 static bool token_exists_in_sessions(const char *token)
@@ -107,7 +158,8 @@ static bool token_exists_in_sessions(const char *token)
 
 // Generate unique session token (checks for collisions)
 // Note: Must be called with s_session_mutex held
-static void generate_token(char *token_out)
+// Returns ESP_OK on success, ESP_FAIL if unique token cannot be generated
+static esp_err_t generate_token(char *token_out)
 {
     static const char chars[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     const uint32_t charset_len = sizeof(chars) - 1; // 62 characters
@@ -123,13 +175,15 @@ static void generate_token(char *token_out)
 
         // Check for uniqueness (extremely rare collision, but defense in depth)
         if (!token_exists_in_sessions(token_out)) {
-            return;
+            return ESP_OK;
         }
         ESP_LOGW(TAG, "Token collision detected (attempt %d/%d), regenerating",
                  attempt + 1, max_attempts);
     }
     // If we get here, something is very wrong (3 collisions in a row)
-    ESP_LOGE(TAG, "Failed to generate unique token after %d attempts", max_attempts);
+    ESP_LOGE(TAG, "Failed to generate unique token after %d attempts - possible session corruption", max_attempts);
+    token_out[0] = '\0';  // Clear token to prevent use of non-unique value
+    return ESP_FAIL;
 }
 
 static esp_err_t load_or_create_password(void)
@@ -226,7 +280,10 @@ static esp_err_t load_lockout_state(void)
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
     if (ret != ESP_OK) {
-        // NVS not available or namespace doesn't exist - use defaults
+        // NVS not available or namespace doesn't exist - use defaults (expected on first boot)
+        if (ret != ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "Failed to open NVS for lockout state: %s", esp_err_to_name(ret));
+        }
         return ESP_OK;
     }
 
@@ -234,12 +291,16 @@ static esp_err_t load_lockout_state(void)
     ret = nvs_get_u32(handle, NVS_KEY_LOCKOUT_UNTIL, &lockout_time);
     if (ret == ESP_OK) {
         s_lockout_until = (time_t)lockout_time;
+    } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Unexpected error loading lockout_until: %s", esp_err_to_name(ret));
     }
 
     uint8_t attempts = 0;
     ret = nvs_get_u8(handle, NVS_KEY_FAILED_ATTEMPTS, &attempts);
     if (ret == ESP_OK) {
         s_failed_attempts = (int)attempts;
+    } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Unexpected error loading failed_attempts: %s", esp_err_to_name(ret));
     }
 
     nvs_close(handle);
@@ -265,9 +326,13 @@ static esp_err_t save_lockout_state(void)
         ESP_LOGW(TAG, "Failed to save failed_attempts: %s", esp_err_to_name(ret));
     }
 
-    nvs_commit(handle);
+    esp_err_t commit_ret = nvs_commit(handle);
+    if (commit_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit lockout state: %s - lockout may not survive reboot",
+                 esp_err_to_name(commit_ret));
+    }
     nvs_close(handle);
-    return ESP_OK;
+    return commit_ret;
 }
 
 esp_err_t web_auth_init(void)
@@ -295,7 +360,12 @@ esp_err_t web_auth_init(void)
     }
 
     // Load persisted lockout state (survives reboot)
-    load_lockout_state();
+    esp_err_t lockout_ret = load_lockout_state();
+    if (lockout_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to load lockout state: %s - brute force protection may reset on reboot",
+                 esp_err_to_name(lockout_ret));
+        // Non-fatal - continue with default lockout state
+    }
 
     s_initialized = true;
     ESP_LOGI(TAG, "Web auth initialized (password_changed=%d, failed_attempts=%d)",
@@ -378,7 +448,12 @@ esp_err_t web_auth_login(const char *username, const char *password, char *token
     }
 
     // Create session
-    generate_token(s_sessions[slot].token);
+    esp_err_t token_ret = generate_token(s_sessions[slot].token);
+    if (token_ret != ESP_OK) {
+        xSemaphoreGive(s_session_mutex);
+        ESP_LOGE(TAG, "Failed to generate session token");
+        return ESP_FAIL;
+    }
     s_sessions[slot].created = now;
     s_sessions[slot].valid = true;
 
@@ -477,11 +552,10 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Defense-in-depth: validate password length in core function too
-    size_t new_len = strlen(new_password);
-    if (new_len < 8 || new_len > 64) {
-        ESP_LOGW(TAG, "Password change rejected: length %zu not in range 8-64", new_len);
-        return ESP_ERR_INVALID_SIZE;
+    // Validate new password (length and character whitelist)
+    esp_err_t validate_ret = validate_password(new_password);
+    if (validate_ret != ESP_OK) {
+        return validate_ret;
     }
 
     // Verify current password
@@ -548,16 +622,28 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     s_password_changed = true;
 
     // Invalidate all sessions (force re-login) with mutex
+    // Note: Don't clear sessions without mutex to avoid race conditions
     if (s_session_mutex != NULL &&
-        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        xSemaphoreTake(s_session_mutex, pdMS_TO_TICKS(500)) == pdTRUE) {
         memset(s_sessions, 0, sizeof(s_sessions));
         xSemaphoreGive(s_session_mutex);
     } else {
-        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation");
-        memset(s_sessions, 0, sizeof(s_sessions));  // Still clear, just not atomic
+        ESP_LOGW(TAG, "Could not acquire mutex for session invalidation - sessions will expire naturally");
     }
 
-    ESP_LOGI(TAG, "Password changed");
+    // Mark device as claimed
+    esp_err_t claim_ret = device_state_set_claimed(true);
+    if (claim_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to mark device as claimed: %s - user may be prompted again",
+                 esp_err_to_name(claim_ret));
+    }
+
+    esp_err_t andon_ret = andon_clear_state(ANDON_FIRST_BOOT);
+    if (andon_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear first boot LED state: %s", esp_err_to_name(andon_ret));
+    }
+
+    ESP_LOGI(TAG, "Password changed, device claimed");
     return ESP_OK;
 }
 
@@ -608,14 +694,22 @@ bool web_auth_check_request(httpd_req_t *req)
 
 esp_err_t web_auth_require(httpd_req_t *req)
 {
-    if (web_auth_check_request(req)) {
-        return ESP_OK;
+    if (!web_auth_check_request(req)) {
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"unauthorized\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
     }
 
-    httpd_resp_set_status(req, "401 Unauthorized");
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, "{\"error\":true,\"code\":\"UNAUTHORIZED\"}", HTTPD_RESP_USE_STRLEN);
-    return ESP_FAIL;
+    // Check if password change is required (device unclaimed)
+    if (!device_state_is_claimed()) {
+        httpd_resp_set_status(req, "403 Forbidden");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"password_change_required\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_FAIL;
+    }
+
+    return ESP_OK;
 }
 
 int web_auth_get_attempts_remaining(void)

@@ -30,6 +30,7 @@ fs.writeFileSync(path.join(DIST, 'css', 'app.css'), css.trim());
 console.log('Copying HTML...');
 fs.copyFileSync(path.join(SRC, 'index.html'), path.join(DIST, 'index.html'));
 fs.copyFileSync(path.join(SRC, 'login.html'), path.join(DIST, 'login.html'));
+fs.copyFileSync(path.join(SRC, 'password-change.html'), path.join(DIST, 'password-change.html'));
 
 // Gzip all files
 console.log('Gzipping...');
@@ -46,6 +47,7 @@ function gzipFile(filepath) {
 
 gzipFile(path.join(DIST, 'index.html'));
 gzipFile(path.join(DIST, 'login.html'));
+gzipFile(path.join(DIST, 'password-change.html'));
 gzipFile(path.join(DIST, 'css', 'app.css'));
 gzipFile(path.join(DIST, 'js', 'app.js'));
 

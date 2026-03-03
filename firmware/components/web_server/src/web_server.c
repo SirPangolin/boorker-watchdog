@@ -1,6 +1,9 @@
 #include "web_server.h"
 #include "web_auth.h"
 #include "device_identity.h"
+#include "device_state.h"
+#include "wifi_manager.h"
+#include "andon_service.h"
 #include "system_console.h"
 #include "version.h"
 #include "esp_log.h"
@@ -221,7 +224,13 @@ static esp_err_t api_auth_login(httpd_req_t *req)
         char cookie[128];
         snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
         httpd_resp_set_hdr(req, "Set-Cookie", cookie);
-        httpd_resp_sendstr(req, "{\"success\":true}");
+
+        // Check if password change is required (device unclaimed)
+        if (!device_state_is_claimed()) {
+            httpd_resp_sendstr(req, "{\"success\":true,\"password_change_required\":true}");
+        } else {
+            httpd_resp_sendstr(req, "{\"success\":true}");
+        }
     } else {
         httpd_resp_set_status(req, "401 Unauthorized");
         int remaining = web_auth_get_attempts_remaining();
@@ -292,10 +301,16 @@ static esp_err_t api_auth_status(httpd_req_t *req)
 }
 
 // PUT /api/v1/auth/password
+// NOTE: Uses web_auth_check_request() instead of web_auth_require() because
+// this endpoint is needed to claim the device (transition from unclaimed).
+// The 403 gate must not block password change.
 static esp_err_t api_auth_password(httpd_req_t *req)
 {
-    if (web_auth_require(req) != ESP_OK) {
-        return ESP_OK; // Auth failed, response already sent
+    if (!web_auth_check_request(req)) {
+        httpd_resp_set_status(req, "401 Unauthorized");
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, "{\"error\":\"unauthorized\"}", HTTPD_RESP_USE_STRLEN);
+        return ESP_OK;
     }
 
     char buf[256];
@@ -441,24 +456,44 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
 
-    // Reset web auth password to default
-    esp_err_t err = web_auth_reset_password();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Regenerate device identity (new credentials)
-    err = device_identity_regenerate();
+    // Regenerate device identity FIRST (new credentials)
+    // Must happen before web_auth_reset so it uses the new password
+    esp_err_t err = device_identity_regenerate();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to regenerate identity: %s", esp_err_to_name(err));
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
+    // Reset web auth password to default (uses new device_identity credentials)
+    err = web_auth_reset_password();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
     // Invalidate all sessions before reboot
     web_auth_invalidate_all_sessions();
+
+    // Clear WiFi credentials (forces reprovisioning)
+    err = wifi_mgr_clear_credentials();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
+    }
+
+    // Reset device claimed state (returns to first boot)
+    err = device_state_set_claimed(false);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to reset claimed state: %s", esp_err_to_name(err));
+    }
+
+    // Set FIRST_BOOT LED state
+    esp_err_t andon_ret = andon_set_state(ANDON_FIRST_BOOT);
+    if (andon_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set FIRST_BOOT LED state: %s", esp_err_to_name(andon_ret));
+        // Non-fatal - continue with factory reset
+    }
 
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
 
@@ -469,8 +504,11 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     // Schedule reboot after response sent
     err = system_reboot_schedule(2);
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to schedule reboot: %s", esp_err_to_name(err));
-        // Response already sent, just log the error
+        ESP_LOGE(TAG, "CRITICAL: Failed to schedule reboot after factory reset: %s - device in inconsistent state!",
+                 esp_err_to_name(err));
+        // Response already sent - try direct restart as fallback
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Give response time to send
+        esp_restart();
     }
 
     return ESP_OK;
