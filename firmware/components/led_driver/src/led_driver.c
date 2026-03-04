@@ -36,9 +36,148 @@ typedef struct {
     uint8_t brightness;                      /**< Current brightness (0-100) */
     SemaphoreHandle_t mutex;                 /**< Mutex for thread safety */
     bool initialized;                        /**< Initialization state */
+    blink_step_t const **patterns;           /**< Registered blink patterns */
+    size_t num_patterns;                     /**< Number of patterns */
+    bool patterns_registered;                /**< Whether patterns have been registered */
 } led_driver_ctx_t;
 
 static led_driver_ctx_t s_ctx = {0};
+
+/**
+ * @brief Recreate LED indicator handles with pattern support
+ *
+ * Called by led_driver_register_patterns() to rebuild indicators with blink lists.
+ */
+static esp_err_t recreate_indicators_with_patterns(void)
+{
+    // Delete existing handles
+    if (s_ctx.onboard_handle) {
+        led_indicator_delete(s_ctx.onboard_handle);
+        s_ctx.onboard_handle = NULL;
+    }
+    if (s_ctx.external_handle) {
+        led_indicator_delete(s_ctx.external_handle);
+        s_ctx.external_handle = NULL;
+    }
+
+    // Recreate onboard LED with patterns
+#if CONFIG_LED_DRIVER_ONBOARD_WS2812
+    led_indicator_strips_config_t strips_config = {
+        .led_strip_cfg = {
+            .strip_gpio_num = CONFIG_LED_DRIVER_ONBOARD_GPIO_NUM,
+            .max_leds = 1,
+            .led_model = LED_MODEL_WS2812,
+            .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+            .flags = { .invert_out = false },
+        },
+        .led_strip_driver = LED_STRIP_RMT,
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_STRIPS_MODE,
+        .led_indicator_strips_config = &strips_config,
+        .blink_lists = s_ctx.patterns,
+        .blink_list_num = s_ctx.num_patterns,
+    };
+
+    s_ctx.onboard_handle = led_indicator_create(&config);
+    if (!s_ctx.onboard_handle) {
+        ESP_LOGE(TAG, "Failed to recreate onboard WS2812 with patterns");
+        return ESP_FAIL;
+    }
+#elif CONFIG_LED_DRIVER_ONBOARD_GPIO
+    led_indicator_gpio_config_t gpio_config = {
+        .gpio_num = CONFIG_LED_DRIVER_ONBOARD_GPIO_NUM,
+        .is_active_level_high = true,
+    };
+
+    led_indicator_config_t config = {
+        .mode = LED_GPIO_MODE,
+        .led_indicator_gpio_config = &gpio_config,
+        .blink_lists = s_ctx.patterns,
+        .blink_list_num = s_ctx.num_patterns,
+    };
+
+    s_ctx.onboard_handle = led_indicator_create(&config);
+    if (!s_ctx.onboard_handle) {
+        ESP_LOGE(TAG, "Failed to recreate onboard GPIO with patterns");
+        return ESP_FAIL;
+    }
+#endif
+
+    // Recreate external LED with patterns
+#if CONFIG_LED_DRIVER_EXTERNAL_ENABLED
+
+#if CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+    led_indicator_rgb_config_t rgb_config = {
+        .is_active_level_high = true,
+        .timer_inited = false,
+        .timer_num = LEDC_TIMER_1,
+        .red_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+        .green_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_G,
+        .blue_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_B,
+        .red_channel = LEDC_CHANNEL_1,
+        .green_channel = LEDC_CHANNEL_2,
+        .blue_channel = LEDC_CHANNEL_3,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_RGB_MODE,
+        .led_indicator_rgb_config = &rgb_config,
+        .blink_lists = s_ctx.patterns,
+        .blink_list_num = s_ctx.num_patterns,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (!s_ctx.external_handle) {
+        ESP_LOGW(TAG, "Failed to recreate external RGB LEDC with patterns");
+    }
+
+#elif CONFIG_LED_DRIVER_EXTERNAL_MONO_LEDC
+    led_indicator_ledc_config_t ledc_config = {
+        .is_active_level_high = true,
+        .timer_inited = false,
+        .timer_num = LEDC_TIMER_1,
+        .gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+        .channel = LEDC_CHANNEL_1,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_LEDC_MODE,
+        .led_indicator_ledc_config = &ledc_config,
+        .blink_lists = s_ctx.patterns,
+        .blink_list_num = s_ctx.num_patterns,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (!s_ctx.external_handle) {
+        ESP_LOGW(TAG, "Failed to recreate external MONO LEDC with patterns");
+    }
+
+#elif CONFIG_LED_DRIVER_EXTERNAL_GPIO
+    led_indicator_gpio_config_t ext_gpio_config = {
+        .is_active_level_high = true,
+        .gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_GPIO_MODE,
+        .led_indicator_gpio_config = &ext_gpio_config,
+        .blink_lists = s_ctx.patterns,
+        .blink_list_num = s_ctx.num_patterns,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (!s_ctx.external_handle) {
+        ESP_LOGW(TAG, "Failed to recreate external GPIO with patterns");
+    }
+#endif
+
+#endif // CONFIG_LED_DRIVER_EXTERNAL_ENABLED
+
+    ESP_LOGI(TAG, "LED indicators recreated with %zu patterns", s_ctx.num_patterns);
+    return ESP_OK;
+}
 
 esp_err_t led_driver_init(void)
 {
@@ -55,6 +194,11 @@ esp_err_t led_driver_init(void)
         ESP_LOGE(TAG, "Failed to create mutex");
         return ESP_ERR_NO_MEM;
     }
+
+    // Initialize pattern state
+    s_ctx.patterns = NULL;
+    s_ctx.num_patterns = 0;
+    s_ctx.patterns_registered = false;
 
     // Set default brightness
     s_ctx.brightness = 100;
@@ -367,6 +511,11 @@ esp_err_t led_driver_deinit(void)
         s_ctx.external_handle = NULL;
     }
 
+    // Reset pattern state
+    s_ctx.patterns = NULL;
+    s_ctx.num_patterns = 0;
+    s_ctx.patterns_registered = false;
+
     s_ctx.initialized = false;
 
     xSemaphoreGive(s_ctx.mutex);
@@ -377,4 +526,102 @@ esp_err_t led_driver_deinit(void)
 
     ESP_LOGI(TAG, "LED driver deinitialized");
     return ESP_OK;
+}
+
+esp_err_t led_driver_register_patterns(blink_step_t const **patterns, size_t num_patterns)
+{
+    if (!s_ctx.initialized) {
+        ESP_LOGW(TAG, "Not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (patterns == NULL || num_patterns == 0) {
+        ESP_LOGE(TAG, "Invalid patterns argument");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+
+    s_ctx.patterns = patterns;
+    s_ctx.num_patterns = num_patterns;
+
+    // Recreate LED indicators with pattern support
+    esp_err_t ret = recreate_indicators_with_patterns();
+    if (ret == ESP_OK) {
+        s_ctx.patterns_registered = true;
+        ESP_LOGI(TAG, "Registered %zu patterns", num_patterns);
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ret;
+}
+
+esp_err_t led_driver_start_pattern(int pattern_id)
+{
+    if (!s_ctx.initialized) {
+        ESP_LOGW(TAG, "Not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (!s_ctx.patterns_registered) {
+        ESP_LOGE(TAG, "Patterns not registered - call led_driver_register_patterns first");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (pattern_id < 0 || (size_t)pattern_id >= s_ctx.num_patterns) {
+        ESP_LOGE(TAG, "Pattern ID %d out of range (0-%zu)", pattern_id, s_ctx.num_patterns - 1);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+
+    esp_err_t ret = ESP_OK;
+
+    if (s_ctx.onboard_handle) {
+        ret = led_indicator_start(s_ctx.onboard_handle, pattern_id);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
+        }
+    }
+
+    if (s_ctx.external_handle) {
+        esp_err_t ext_ret = led_indicator_start(s_ctx.external_handle, pattern_id);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start external pattern %d: %s", pattern_id, esp_err_to_name(ext_ret));
+            if (ret == ESP_OK) ret = ext_ret;
+        }
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ret;
+}
+
+esp_err_t led_driver_stop_pattern(int pattern_id)
+{
+    if (!s_ctx.initialized) {
+        ESP_LOGW(TAG, "Not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
+
+    esp_err_t ret = ESP_OK;
+
+    if (s_ctx.onboard_handle) {
+        ret = led_indicator_stop(s_ctx.onboard_handle, pattern_id);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to stop onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
+        }
+    }
+
+    if (s_ctx.external_handle) {
+        esp_err_t ext_ret = led_indicator_stop(s_ctx.external_handle, pattern_id);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to stop external pattern %d: %s", pattern_id, esp_err_to_name(ext_ret));
+            if (ret == ESP_OK) ret = ext_ret;
+        }
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ret;
 }
