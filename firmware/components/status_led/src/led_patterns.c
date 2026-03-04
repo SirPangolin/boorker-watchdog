@@ -1,14 +1,14 @@
 /**
  * @file led_patterns.c
- * @brief Blink pattern definitions for LED feedback states
+ * @brief Blink pattern definitions for status LED states
  */
 
 #include "led_indicator.h"
-#include "led_feedback.h"
+#include "status_led.h"
 #include "sdkconfig.h"
 
 // Include RGB colors for WS2812 (onboard) or RGB_LEDC (external 3-channel)
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812 || CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+#if CONFIG_STATUS_LED_TYPE_WS2812 || CONFIG_STATUS_LED_EXTERNAL_TYPE_RGB_LEDC
 #include "led_convert.h"
 
 // RGB colors (from design doc)
@@ -26,14 +26,14 @@
 #endif
 
 // Helper macros for timing from Kconfig
-#define FAST_ON     (CONFIG_LED_FEEDBACK_BLINK_FAST_MS / 2)
-#define FAST_OFF    (CONFIG_LED_FEEDBACK_BLINK_FAST_MS / 2)
-#define MEDIUM_ON   (CONFIG_LED_FEEDBACK_BLINK_MEDIUM_MS / 2)
-#define MEDIUM_OFF  (CONFIG_LED_FEEDBACK_BLINK_MEDIUM_MS / 2)
-#define SLOW_ON     (CONFIG_LED_FEEDBACK_BLINK_SLOW_MS / 2)
-#define SLOW_OFF    (CONFIG_LED_FEEDBACK_BLINK_SLOW_MS / 2)
-#define BREATHE_IN  (CONFIG_LED_FEEDBACK_BREATHE_PERIOD_MS / 2)
-#define BREATHE_OUT (CONFIG_LED_FEEDBACK_BREATHE_PERIOD_MS / 2)
+#define FAST_ON     (CONFIG_STATUS_LED_BLINK_FAST_MS / 2)
+#define FAST_OFF    (CONFIG_STATUS_LED_BLINK_FAST_MS / 2)
+#define MEDIUM_ON   (CONFIG_STATUS_LED_BLINK_MEDIUM_MS / 2)
+#define MEDIUM_OFF  (CONFIG_STATUS_LED_BLINK_MEDIUM_MS / 2)
+#define SLOW_ON     (CONFIG_STATUS_LED_BLINK_SLOW_MS / 2)
+#define SLOW_OFF    (CONFIG_STATUS_LED_BLINK_SLOW_MS / 2)
+#define BREATHE_IN  (CONFIG_STATUS_LED_BREATHE_PERIOD_MS / 2)
+#define BREATHE_OUT (CONFIG_STATUS_LED_BREATHE_PERIOD_MS / 2)
 
 // Pattern: Critical alert - fast double pulse (red)
 static const blink_step_t pattern_alert_critical[] = {
@@ -127,20 +127,20 @@ static const blink_step_t pattern_off[] = {
     {LED_BLINK_STOP, 0,             0},
 };
 
-// Pattern list indexed by led_state_t
-// MUST match led_state_t enum order exactly
+// Pattern list indexed by status_led_state_t
+// MUST match status_led_state_t enum order exactly
 blink_step_t const *led_patterns[] = {
-    [LED_FB_ALERT_CRITICAL]       = pattern_alert_critical,
-    [LED_FB_FIRST_BOOT]           = pattern_first_boot,
-    [LED_FB_WIFI_PROVISIONING]    = pattern_wifi_provisioning,
-    [LED_FB_WIFI_RECONNECTING]    = pattern_wifi_reconnecting,
-    [LED_FB_ALERT_ACTIVE]         = pattern_alert_active,
-    [LED_FB_WIFI_CONNECTING]      = pattern_wifi_connecting,
-    [LED_FB_TAILSCALE_CONNECTING] = pattern_tailscale_connecting,
-    [LED_FB_CONNECTED]            = pattern_connected,
-    [LED_FB_OFF]                  = pattern_off,
+    [STATUS_LED_ALERT_CRITICAL]       = pattern_alert_critical,
+    [STATUS_LED_FIRST_BOOT]           = pattern_first_boot,
+    [STATUS_LED_WIFI_PROVISIONING]    = pattern_wifi_provisioning,
+    [STATUS_LED_WIFI_RECONNECTING]    = pattern_wifi_reconnecting,
+    [STATUS_LED_ALERT_ACTIVE]         = pattern_alert_active,
+    [STATUS_LED_WIFI_CONNECTING]      = pattern_wifi_connecting,
+    [STATUS_LED_TAILSCALE_CONNECTING] = pattern_tailscale_connecting,
+    [STATUS_LED_CONNECTED]            = pattern_connected,
+    [STATUS_LED_OFF]                  = pattern_off,
 };
 
 // Verify array size matches enum at compile time
-_Static_assert(sizeof(led_patterns) / sizeof(led_patterns[0]) == LED_FB_MAX,
-               "led_patterns array size must match LED_FB_MAX");
+_Static_assert(sizeof(led_patterns) / sizeof(led_patterns[0]) == STATUS_LED_MAX,
+               "led_patterns array size must match STATUS_LED_MAX");
