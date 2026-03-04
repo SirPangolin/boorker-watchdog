@@ -1,0 +1,4 @@
+version: "1.0.0"
+description: "LED hardware abstraction (WS2812, RGB LEDC, MONO LEDC, GPIO)"
+dependencies:
+  espressif/led_indicator: ">=0.9.0"
