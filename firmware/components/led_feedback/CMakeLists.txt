@@ -11,6 +11,7 @@ idf_component_register(
         console
         freertos
         andon_service
+        led_driver
     PRIV_REQUIRES
         log
 )
