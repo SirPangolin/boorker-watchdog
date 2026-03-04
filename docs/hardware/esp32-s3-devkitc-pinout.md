@@ -10,8 +10,8 @@ Module: **ESP32-S3-WROOM-2** (32MB Flash, 8MB Octal PSRAM)
 | 2 | DHT22 | out | Temperature & humidity sensor data |
 | 5 | SW-420 | DO | Vibration sensor digital output |
 | 6 | Buzzer | I/O | Piezo buzzer signal |
-| 7 | RGB LED | Blue | External RGB LED blue channel |
-| 8 | RGB LED | Green | External RGB LED green channel |
+| 7 | RGB LED | Green | External RGB LED green channel |
+| 8 | RGB LED | Blue | External RGB LED blue channel |
 | 9 | RGB LED | Red | External RGB LED red channel |
 | 4 | Float Switch | - | *(future - not wired)* |
 | 10 | Button | - | *(future - not wired)* |
@@ -28,12 +28,12 @@ Module: **ESP32-S3-WROOM-2** (32MB Flash, 8MB Octal PSRAM)
 | 4 | GPIO4 | Touch4, ADC1_CH3, RTC | *Future: Float Switch* |
 | 5 | GPIO5 | Touch5, ADC1_CH4, RTC | **SW-420 vibration sensor** |
 | 6 | GPIO6 | Touch6, ADC1_CH5, RTC | **Buzzer** |
-| 7 | GPIO7 | Touch7, ADC1_CH6, RTC | **RGB LED Blue** |
+| 7 | GPIO7 | Touch7, ADC1_CH6, RTC | **RGB LED Green** |
 | 8 | GPIO15 | ADC2_CH4, RTC | Available |
 | 9 | GPIO16 | ADC2_CH5, RTC | Available |
 | 10 | GPIO17 | U1TXD, ADC2_CH6, RTC | Available (UART1 TX) |
 | 11 | GPIO18 | U1RXD, ADC2_CH7, RTC | Available (UART1 RX) |
-| 12 | GPIO8 | Touch8, ADC1_CH7, RTC | **RGB LED Green** |
+| 12 | GPIO8 | Touch8, ADC1_CH7, RTC | **RGB LED Blue** |
 | 13 | GPIO3 | Touch3, ADC1_CH2, RTC | Available |
 | 14 | GPIO46 | Strapping | Avoid (boot mode) |
 | 15 | GPIO9 | Touch9, ADC1_CH8, RTC | **RGB LED Red** |
