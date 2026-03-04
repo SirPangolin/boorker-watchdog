@@ -12,6 +12,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
+#include "driver/ledc.h"  // For LEDC_TIMER_*, LEDC_CHANNEL_*
 
 static const char *TAG = "led_driver";
 
@@ -118,6 +119,46 @@ esp_err_t led_driver_init(void)
     s_ctx.onboard_handle = NULL;
 #endif
 
+#if CONFIG_LED_DRIVER_EXTERNAL_ENABLED
+
+#if CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+    ESP_LOGI(TAG, "Configuring external RGB LEDC on R=%d, G=%d, B=%d",
+             CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+             CONFIG_LED_DRIVER_EXTERNAL_GPIO_G,
+             CONFIG_LED_DRIVER_EXTERNAL_GPIO_B);
+
+    led_indicator_rgb_config_t rgb_config = {
+        .is_active_level_high = true,
+        .timer_inited = false,
+        .timer_num = LEDC_TIMER_1,
+        .red_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+        .green_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_G,
+        .blue_gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_B,
+        .red_channel = LEDC_CHANNEL_1,
+        .green_channel = LEDC_CHANNEL_2,
+        .blue_channel = LEDC_CHANNEL_3,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_RGB_MODE,
+        .led_indicator_rgb_config = &rgb_config,
+        .blink_lists = NULL,
+        .blink_list_num = 0,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (s_ctx.external_handle == NULL) {
+        ESP_LOGW(TAG, "Failed to create external RGB LEDC indicator (continuing with onboard only)");
+    } else {
+        // External RGB LEDC supports full RGB and brightness
+        s_ctx.caps.supports_rgb = true;
+        s_ctx.caps.supports_brightness = true;
+        ESP_LOGI(TAG, "External RGB LEDC initialized");
+    }
+#endif // CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+
+#endif // CONFIG_LED_DRIVER_EXTERNAL_ENABLED
+
     s_ctx.initialized = true;
     ESP_LOGI(TAG, "LED driver initialized (RGB: %s, Brightness: %s)",
              s_ctx.caps.supports_rgb ? "yes" : "no",
@@ -172,6 +213,17 @@ esp_err_t led_driver_set_rgb(uint8_t r, uint8_t g, uint8_t b)
             led_indicator_set_on_off(s_ctx.onboard_handle, true);
         } else {
             led_indicator_set_on_off(s_ctx.onboard_handle, false);
+        }
+#endif
+    }
+
+    // External LED
+    if (s_ctx.external_handle) {
+#if CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+        esp_err_t ext_ret = led_indicator_set_rgb(s_ctx.external_handle, SET_IRGB(0, br, bg, bb));
+        if (ext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set external LED RGB: %s", esp_err_to_name(ext_ret));
+            if (ret == ESP_OK) ret = ext_ret;  // Only override if no previous error
         }
 #endif
     }
