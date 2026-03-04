@@ -1,9 +1,9 @@
 /**
  * @file led_console.c
- * @brief Console commands for LED feedback control
+ * @brief Console commands for status LED control
  */
 
-#include "led_feedback.h"
+#include "status_led.h"
 #include "esp_console.h"
 #include "esp_log.h"
 #include "argtable3/argtable3.h"
@@ -15,57 +15,57 @@ static const char *TAG = "led_console";
 
 /**
  * @brief Command handler: led
- * Show LED feedback status
+ * Show status LED status
  */
 static int cmd_led_status(int argc, char **argv)
 {
-    printf("LED Feedback:\n");
-    printf("  Enabled: %s\n", led_feedback_is_enabled() ? "yes" : "no");
-    printf("  Brightness: %d%%\n", led_feedback_get_brightness());
-    printf("  Mode: %s\n", led_feedback_is_alerts_only() ? "alerts only" : "all states");
-    printf("  Current state: %s\n", led_feedback_state_name(led_feedback_get_state()));
+    printf("Status LED:\n");
+    printf("  Enabled: %s\n", status_led_is_enabled() ? "yes" : "no");
+    printf("  Brightness: %d%%\n", status_led_get_brightness());
+    printf("  Mode: %s\n", status_led_is_alerts_only() ? "alerts only" : "all states");
+    printf("  Current state: %s\n", status_led_state_name(status_led_get_state()));
     return 0;
 }
 
 /**
  * @brief Command handler: led_on
- * Enable LED feedback and save to NVS
+ * Enable status LED and save to NVS
  */
 static int cmd_led_on(int argc, char **argv)
 {
-    esp_err_t ret = led_feedback_set_enabled(true);
+    esp_err_t ret = status_led_set_enabled(true);
     if (ret != ESP_OK) {
         printf("Failed to enable LED: %s\n", esp_err_to_name(ret));
         return 1;
     }
 
-    ret = led_feedback_save_config();
+    ret = status_led_save_config();
     if (ret != ESP_OK) {
         printf("Warning: Failed to save config: %s\n", esp_err_to_name(ret));
     }
 
-    printf("LED feedback enabled.\n");
+    printf("Status LED enabled.\n");
     return 0;
 }
 
 /**
  * @brief Command handler: led_off
- * Disable LED feedback and save to NVS
+ * Disable status LED and save to NVS
  */
 static int cmd_led_off(int argc, char **argv)
 {
-    esp_err_t ret = led_feedback_set_enabled(false);
+    esp_err_t ret = status_led_set_enabled(false);
     if (ret != ESP_OK) {
         printf("Failed to disable LED: %s\n", esp_err_to_name(ret));
         return 1;
     }
 
-    ret = led_feedback_save_config();
+    ret = status_led_save_config();
     if (ret != ESP_OK) {
         printf("Warning: Failed to save config: %s\n", esp_err_to_name(ret));
     }
 
-    printf("LED feedback disabled.\n");
+    printf("Status LED disabled.\n");
     return 0;
 }
 
@@ -89,7 +89,7 @@ static int cmd_led_brightness(int argc, char **argv)
 
     if (brightness_args.percent->count == 0) {
         // No argument - show current brightness
-        printf("Brightness: %d%%\n", led_feedback_get_brightness());
+        printf("Brightness: %d%%\n", status_led_get_brightness());
         return 0;
     }
 
@@ -99,13 +99,13 @@ static int cmd_led_brightness(int argc, char **argv)
         return 1;
     }
 
-    esp_err_t ret = led_feedback_set_brightness((uint8_t)percent);
+    esp_err_t ret = status_led_set_brightness((uint8_t)percent);
     if (ret != ESP_OK) {
         printf("Failed to set brightness: %s\n", esp_err_to_name(ret));
         return 1;
     }
 
-    ret = led_feedback_save_config();
+    ret = status_led_save_config();
     if (ret != ESP_OK) {
         printf("Warning: Failed to save config: %s\n", esp_err_to_name(ret));
     }
@@ -120,13 +120,13 @@ static int cmd_led_brightness(int argc, char **argv)
  */
 static int cmd_led_alerts(int argc, char **argv)
 {
-    esp_err_t ret = led_feedback_set_alerts_only(true);
+    esp_err_t ret = status_led_set_alerts_only(true);
     if (ret != ESP_OK) {
         printf("Failed to set alerts-only mode: %s\n", esp_err_to_name(ret));
         return 1;
     }
 
-    ret = led_feedback_save_config();
+    ret = status_led_save_config();
     if (ret != ESP_OK) {
         printf("Warning: Failed to save config: %s\n", esp_err_to_name(ret));
     }
@@ -141,13 +141,13 @@ static int cmd_led_alerts(int argc, char **argv)
  */
 static int cmd_led_all(int argc, char **argv)
 {
-    esp_err_t ret = led_feedback_set_alerts_only(false);
+    esp_err_t ret = status_led_set_alerts_only(false);
     if (ret != ESP_OK) {
         printf("Failed to set all-states mode: %s\n", esp_err_to_name(ret));
         return 1;
     }
 
-    ret = led_feedback_save_config();
+    ret = status_led_save_config();
     if (ret != ESP_OK) {
         printf("Warning: Failed to save config: %s\n", esp_err_to_name(ret));
     }
@@ -156,7 +156,7 @@ static int cmd_led_all(int argc, char **argv)
     return 0;
 }
 
-esp_err_t led_feedback_register_console(void)
+esp_err_t status_led_register_console(void)
 {
     esp_err_t ret;
     esp_err_t first_error = ESP_OK;
@@ -164,7 +164,7 @@ esp_err_t led_feedback_register_console(void)
     // led - status command
     const esp_console_cmd_t led_cmd = {
         .command = "led",
-        .help = "Show LED feedback status",
+        .help = "Show status LED status",
         .hint = NULL,
         .func = &cmd_led_status,
     };
@@ -177,7 +177,7 @@ esp_err_t led_feedback_register_console(void)
     // led_on - enable command
     const esp_console_cmd_t led_on_cmd = {
         .command = "led_on",
-        .help = "Enable LED feedback",
+        .help = "Enable status LED",
         .hint = NULL,
         .func = &cmd_led_on,
     };
@@ -190,7 +190,7 @@ esp_err_t led_feedback_register_console(void)
     // led_off - disable command
     const esp_console_cmd_t led_off_cmd = {
         .command = "led_off",
-        .help = "Disable LED feedback",
+        .help = "Disable status LED",
         .hint = NULL,
         .func = &cmd_led_off,
     };

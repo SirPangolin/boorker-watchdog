@@ -1,13 +1,13 @@
 /**
- * @file led_feedback.c
- * @brief LED status feedback core implementation (ANDON channel subscriber)
+ * @file status_led.c
+ * @brief Status LED core implementation (ANDON channel subscriber)
  *
- * Provides visual status indication via LED using the led_driver component
+ * Maps system states to LED patterns via LED using the led_driver component
  * for hardware abstraction. Subscribes to andon_service for state
  * notifications and renders appropriate LED patterns.
  */
 
-#include "led_feedback.h"
+#include "status_led.h"
 #include "andon_service.h"
 #include "led_driver.h"
 #include "led_indicator.h"  // For blink_step_t type used in led_patterns.c
@@ -20,9 +20,9 @@
 
 #include <string.h>
 
-static const char *TAG = "led_feedback";
+static const char *TAG = "status_led";
 
-// NVS configuration
+// NVS configuration (keep namespace for backward compatibility)
 #define NVS_NAMESPACE "led_cfg"
 #define NVS_KEY_ENABLED "enabled"
 #define NVS_KEY_BRIGHTNESS "brightness"
@@ -37,20 +37,20 @@ extern blink_step_t const *led_patterns[];
 
 // State names for logging
 static const char *state_names[] = {
-    [LED_FB_ALERT_CRITICAL]       = "ALERT_CRITICAL",
-    [LED_FB_FIRST_BOOT]           = "FIRST_BOOT",
-    [LED_FB_WIFI_PROVISIONING]    = "WIFI_PROVISIONING",
-    [LED_FB_WIFI_RECONNECTING]    = "WIFI_RECONNECTING",
-    [LED_FB_ALERT_ACTIVE]         = "ALERT_ACTIVE",
-    [LED_FB_WIFI_CONNECTING]      = "WIFI_CONNECTING",
-    [LED_FB_TAILSCALE_CONNECTING] = "TAILSCALE_CONNECTING",
-    [LED_FB_CONNECTED]            = "CONNECTED",
-    [LED_FB_OFF]                  = "OFF",
+    [STATUS_LED_ALERT_CRITICAL]       = "ALERT_CRITICAL",
+    [STATUS_LED_FIRST_BOOT]           = "FIRST_BOOT",
+    [STATUS_LED_WIFI_PROVISIONING]    = "WIFI_PROVISIONING",
+    [STATUS_LED_WIFI_RECONNECTING]    = "WIFI_RECONNECTING",
+    [STATUS_LED_ALERT_ACTIVE]         = "ALERT_ACTIVE",
+    [STATUS_LED_WIFI_CONNECTING]      = "WIFI_CONNECTING",
+    [STATUS_LED_TAILSCALE_CONNECTING] = "TAILSCALE_CONNECTING",
+    [STATUS_LED_CONNECTED]            = "CONNECTED",
+    [STATUS_LED_OFF]                  = "OFF",
 };
 
 // Verify state_names array matches enum
-_Static_assert(sizeof(state_names) / sizeof(state_names[0]) == LED_FB_MAX,
-               "state_names array size must match LED_FB_MAX");
+_Static_assert(sizeof(state_names) / sizeof(state_names[0]) == STATUS_LED_MAX,
+               "state_names array size must match STATUS_LED_MAX");
 
 // Static state structure
 static struct {
@@ -58,14 +58,14 @@ static struct {
     bool enabled;
     uint8_t brightness;
     bool alerts_only;
-    led_state_t displayed_state;
+    status_led_state_t displayed_state;
     SemaphoreHandle_t mutex;
 } s_led = {
     .initialized = false,
     .enabled = true,
-    .brightness = CONFIG_LED_FEEDBACK_DEFAULT_BRIGHTNESS,
+    .brightness = CONFIG_STATUS_LED_DEFAULT_BRIGHTNESS,
     .alerts_only = false,
-    .displayed_state = LED_FB_OFF,
+    .displayed_state = STATUS_LED_OFF,
     .mutex = NULL,
 };
 
@@ -132,7 +132,7 @@ static void load_config_from_nvs(void)
              s_led.enabled, s_led.brightness, s_led.alerts_only);
 }
 
-esp_err_t led_feedback_save_config(void)
+esp_err_t status_led_save_config(void)
 {
     if (!s_led.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -204,7 +204,7 @@ esp_err_t led_feedback_save_config(void)
  * @param state State to check
  * @return true if state should be shown based on enabled and alerts_only settings
  */
-static bool should_show_state(led_state_t state)
+static bool should_show_state(status_led_state_t state)
 {
     // If disabled, never show anything
     if (!s_led.enabled) {
@@ -213,7 +213,7 @@ static bool should_show_state(led_state_t state)
 
     // If alerts_only mode, only show alert states
     if (s_led.alerts_only) {
-        return (state == LED_FB_ALERT_CRITICAL || state == LED_FB_ALERT_ACTIVE);
+        return (state == STATUS_LED_ALERT_CRITICAL || state == STATUS_LED_ALERT_ACTIVE);
     }
 
     // Show all states when not in alerts_only mode
@@ -229,7 +229,7 @@ static bool should_show_state(led_state_t state)
  * @param state The LED pattern state to apply
  * @return ESP_OK on success, or error from led_driver functions
  */
-static esp_err_t apply_pattern(led_state_t state)
+static esp_err_t apply_pattern(status_led_state_t state)
 {
     esp_err_t ret = ESP_OK;
 
@@ -246,9 +246,9 @@ static esp_err_t apply_pattern(led_state_t state)
     }
 
     // Determine what to show
-    led_state_t show_state = state;
+    status_led_state_t show_state = state;
     if (!should_show_state(state)) {
-        show_state = LED_FB_OFF;
+        show_state = STATUS_LED_OFF;
     }
 
     // Start new pattern
@@ -269,23 +269,23 @@ static esp_err_t apply_pattern(led_state_t state)
  * @brief Map ANDON state to internal LED pattern
  *
  * @param andon_state ANDON state from callback
- * @return Corresponding led_state_t pattern
+ * @return Corresponding status_led_state_t pattern
  */
-static led_state_t map_andon_to_led_state(andon_state_t andon_state)
+static status_led_state_t map_andon_to_led_state(andon_state_t andon_state)
 {
     switch (andon_state) {
-        case ANDON_FIRST_BOOT:           return LED_FB_FIRST_BOOT;
-        case ANDON_ERROR:                return LED_FB_ALERT_CRITICAL;
-        case ANDON_WIFI_PROVISIONING:    return LED_FB_WIFI_PROVISIONING;
-        case ANDON_WIFI_RECONNECTING:    return LED_FB_WIFI_RECONNECTING;
-        case ANDON_WIFI_CONNECTING:      return LED_FB_WIFI_CONNECTING;
-        case ANDON_TAILSCALE_CONNECTING: return LED_FB_TAILSCALE_CONNECTING;
-        case ANDON_CONNECTED:            return LED_FB_CONNECTED;
-        case ANDON_OFF:                  return LED_FB_OFF;
-        case ANDON_ALERT_CRITICAL:       return LED_FB_ALERT_CRITICAL;
-        case ANDON_ALERT_ACTIVE:         return LED_FB_ALERT_ACTIVE;
-        case ANDON_SENSOR_WARNING:       return LED_FB_ALERT_ACTIVE;  // Use same pattern
-        default:                         return LED_FB_OFF;
+        case ANDON_FIRST_BOOT:           return STATUS_LED_FIRST_BOOT;
+        case ANDON_ERROR:                return STATUS_LED_ALERT_CRITICAL;
+        case ANDON_WIFI_PROVISIONING:    return STATUS_LED_WIFI_PROVISIONING;
+        case ANDON_WIFI_RECONNECTING:    return STATUS_LED_WIFI_RECONNECTING;
+        case ANDON_WIFI_CONNECTING:      return STATUS_LED_WIFI_CONNECTING;
+        case ANDON_TAILSCALE_CONNECTING: return STATUS_LED_TAILSCALE_CONNECTING;
+        case ANDON_CONNECTED:            return STATUS_LED_CONNECTED;
+        case ANDON_OFF:                  return STATUS_LED_OFF;
+        case ANDON_ALERT_CRITICAL:       return STATUS_LED_ALERT_CRITICAL;
+        case ANDON_ALERT_ACTIVE:         return STATUS_LED_ALERT_ACTIVE;
+        case ANDON_SENSOR_WARNING:       return STATUS_LED_ALERT_ACTIVE;  // Use same pattern
+        default:                         return STATUS_LED_OFF;
     }
 }
 
@@ -312,7 +312,7 @@ static void andon_callback(andon_state_t state, void *ctx)
     }
 
     // Map ANDON state to internal LED pattern
-    led_state_t led_state = map_andon_to_led_state(state);
+    status_led_state_t led_state = map_andon_to_led_state(state);
 
     ESP_LOGI(TAG, "ANDON state: %s -> LED pattern: %s",
              andon_state_name(state), state_names[led_state]);
@@ -331,7 +331,7 @@ static void andon_callback(andon_state_t state, void *ctx)
 // Core API Implementation
 // --------------------------------------------------------------------------
 
-esp_err_t led_feedback_init(void)
+esp_err_t status_led_init(void)
 {
     if (s_led.initialized) {
         ESP_LOGW(TAG, "Already initialized");
@@ -358,7 +358,7 @@ esp_err_t led_feedback_init(void)
     }
 
     // Register our patterns with the driver
-    ret = led_driver_register_patterns(led_patterns, LED_FB_MAX);
+    ret = led_driver_register_patterns(led_patterns, STATUS_LED_MAX);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register patterns: %s", esp_err_to_name(ret));
         led_driver_deinit();
@@ -374,7 +374,7 @@ esp_err_t led_feedback_init(void)
     }
 
     s_led.initialized = true;
-    s_led.displayed_state = LED_FB_OFF;
+    s_led.displayed_state = STATUS_LED_OFF;
 
     ESP_LOGI(TAG, "Initialized (brightness=%d%%)", s_led.brightness);
 
@@ -389,7 +389,7 @@ esp_err_t led_feedback_init(void)
     return ESP_OK;
 }
 
-esp_err_t led_feedback_deinit(void)
+esp_err_t status_led_deinit(void)
 {
     if (!s_led.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -404,7 +404,7 @@ esp_err_t led_feedback_deinit(void)
     led_driver_stop_pattern((int)s_led.displayed_state);
 
     s_led.initialized = false;
-    s_led.displayed_state = LED_FB_OFF;
+    s_led.displayed_state = STATUS_LED_OFF;
 
     xSemaphoreGive(s_led.mutex);
     vSemaphoreDelete(s_led.mutex);
@@ -417,10 +417,10 @@ esp_err_t led_feedback_deinit(void)
     return ESP_OK;
 }
 
-led_state_t led_feedback_get_state(void)
+status_led_state_t status_led_get_state(void)
 {
     if (!s_led.initialized) {
-        return LED_FB_OFF;
+        return STATUS_LED_OFF;
     }
 
     // Return the currently displayed state
@@ -431,7 +431,7 @@ led_state_t led_feedback_get_state(void)
 // Config API Implementation
 // --------------------------------------------------------------------------
 
-esp_err_t led_feedback_set_enabled(bool enabled)
+esp_err_t status_led_set_enabled(bool enabled)
 {
     if (!s_led.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -442,12 +442,12 @@ esp_err_t led_feedback_set_enabled(bool enabled)
     }
 
     s_led.enabled = enabled;
-    ESP_LOGI(TAG, "LED feedback %s", enabled ? "enabled" : "disabled");
+    ESP_LOGI(TAG, "Status LED %s", enabled ? "enabled" : "disabled");
 
     esp_err_t ret = ESP_OK;
     if (!enabled) {
         // Stop all patterns when disabled
-        for (int i = 0; i < LED_FB_MAX; i++) {
+        for (int i = 0; i < STATUS_LED_MAX; i++) {
             led_driver_stop_pattern(i);
         }
     } else {
@@ -459,7 +459,7 @@ esp_err_t led_feedback_set_enabled(bool enabled)
     return ret;
 }
 
-esp_err_t led_feedback_set_brightness(uint8_t percent)
+esp_err_t status_led_set_brightness(uint8_t percent)
 {
     if (percent > 100) {
         return ESP_ERR_INVALID_ARG;
@@ -485,7 +485,7 @@ esp_err_t led_feedback_set_brightness(uint8_t percent)
     return ret;
 }
 
-esp_err_t led_feedback_set_alerts_only(bool alerts_only)
+esp_err_t status_led_set_alerts_only(bool alerts_only)
 {
     if (!s_led.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -504,19 +504,19 @@ esp_err_t led_feedback_set_alerts_only(bool alerts_only)
 }
 
 // Reading a single bool is atomic on ESP32, no mutex needed
-bool led_feedback_is_enabled(void)
+bool status_led_is_enabled(void)
 {
     return s_led.enabled;
 }
 
 // Reading a single uint8_t is atomic on ESP32, no mutex needed
-uint8_t led_feedback_get_brightness(void)
+uint8_t status_led_get_brightness(void)
 {
     return s_led.brightness;
 }
 
 // Reading a single bool is atomic on ESP32, no mutex needed
-bool led_feedback_is_alerts_only(void)
+bool status_led_is_alerts_only(void)
 {
     return s_led.alerts_only;
 }
@@ -525,9 +525,9 @@ bool led_feedback_is_alerts_only(void)
 // Utility Functions
 // --------------------------------------------------------------------------
 
-const char *led_feedback_state_name(led_state_t state)
+const char *status_led_state_name(status_led_state_t state)
 {
-    if (state >= LED_FB_MAX) {
+    if (state >= STATUS_LED_MAX) {
         return "UNKNOWN";
     }
     return state_names[state];

@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS
-        "src/led_feedback.c"
+        "src/status_led.c"
         "src/led_patterns.c"
         "src/led_console.c"
     INCLUDE_DIRS

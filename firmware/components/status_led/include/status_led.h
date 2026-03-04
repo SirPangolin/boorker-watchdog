@@ -1,8 +1,8 @@
 /**
- * @file led_feedback.h
- * @brief LED status feedback component (ANDON channel subscriber)
+ * @file status_led.h
+ * @brief Status LED component (ANDON channel subscriber)
  *
- * Provides visual status indication via onboard (and optional external) LED.
+ * Maps system states to LED patterns via onboard (and optional external) LED.
  * Subscribes to andon_service for state notifications and renders appropriate
  * LED patterns based on the current ANDON state.
  *
@@ -11,7 +11,7 @@
  *
  * @note ANDON Integration: State changes come from andon_service callbacks.
  *       Domains should use andon_set_state()/andon_clear_state() rather than
- *       calling led_feedback directly.
+ *       calling status_led directly.
  */
 
 #pragma once
@@ -30,7 +30,7 @@ extern "C" {
  * @note These are internal pattern identifiers, not a public API. ANDON states
  *       are mapped to these patterns in the ANDON callback handler.
  *
- * @note Enum values use LED_FB_ prefix to avoid conflict with led_indicator's
+ * @note Enum values use STATUS_LED_ prefix to avoid conflict with led_indicator's
  *       LED_STATE_OFF/LED_STATE_ON brightness values.
  */
 typedef enum {
@@ -38,21 +38,21 @@ typedef enum {
     // Note: Priority is handled by ANDON service, not by this enum's ordering.
     // These simply define the visual patterns to display.
 
-    LED_FB_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
-    LED_FB_FIRST_BOOT,           ///< Slow breathe (purple on RGB)
-    LED_FB_WIFI_PROVISIONING,    ///< Slow blink (blue on RGB)
-    LED_FB_WIFI_RECONNECTING,    ///< Medium blink (yellow on RGB)
-    LED_FB_ALERT_ACTIVE,         ///< Double-pulse slow (orange on RGB)
-    LED_FB_WIFI_CONNECTING,      ///< Fast blink (cyan on RGB)
-    LED_FB_TAILSCALE_CONNECTING, ///< Fast blink (cyan on RGB)
-    LED_FB_CONNECTED,            ///< Solid on (green on RGB)
-    LED_FB_OFF,                  ///< Off
+    STATUS_LED_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
+    STATUS_LED_FIRST_BOOT,           ///< Slow breathe (purple on RGB)
+    STATUS_LED_WIFI_PROVISIONING,    ///< Slow blink (blue on RGB)
+    STATUS_LED_WIFI_RECONNECTING,    ///< Medium blink (yellow on RGB)
+    STATUS_LED_ALERT_ACTIVE,         ///< Double-pulse slow (orange on RGB)
+    STATUS_LED_WIFI_CONNECTING,      ///< Fast blink (cyan on RGB)
+    STATUS_LED_TAILSCALE_CONNECTING, ///< Fast blink (cyan on RGB)
+    STATUS_LED_CONNECTED,            ///< Solid on (green on RGB)
+    STATUS_LED_OFF,                  ///< Off
 
-    LED_FB_MAX                   ///< Sentinel for bounds checking
-} led_state_t;
+    STATUS_LED_MAX                   ///< Sentinel for bounds checking
+} status_led_state_t;
 
 /**
- * @brief Initialize LED feedback component
+ * @brief Initialize status LED component
  *
  * Creates internal mutex, loads config from NVS (or uses Kconfig defaults),
  * initializes the LED indicator driver(s), and registers as an ANDON channel.
@@ -62,10 +62,10 @@ typedef enum {
  * @return ESP_ERR_NO_MEM if mutex creation fails
  * @return ESP_FAIL if LED indicator creation fails
  */
-esp_err_t led_feedback_init(void);
+esp_err_t status_led_init(void);
 
 /**
- * @brief Deinitialize LED feedback component
+ * @brief Deinitialize status LED component
  *
  * Stops any active patterns, destroys LED indicator(s), and frees resources.
  *
@@ -73,17 +73,17 @@ esp_err_t led_feedback_init(void);
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
-esp_err_t led_feedback_deinit(void);
+esp_err_t status_led_deinit(void);
 
 /**
  * @brief Get currently displayed state
  *
- * @return Current pattern state, or LED_FB_OFF if not initialized
+ * @return Current pattern state, or STATUS_LED_OFF if not initialized
  */
-led_state_t led_feedback_get_state(void);
+status_led_state_t status_led_get_state(void);
 
 /**
- * @brief Enable or disable LED feedback
+ * @brief Enable or disable status LED
  *
  * When disabled, LED is turned off regardless of state.
  * State tracking continues so re-enabling shows correct state.
@@ -93,7 +93,7 @@ led_state_t led_feedback_get_state(void);
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
-esp_err_t led_feedback_set_enabled(bool enabled);
+esp_err_t status_led_set_enabled(bool enabled);
 
 /**
  * @brief Set LED brightness
@@ -104,7 +104,7 @@ esp_err_t led_feedback_set_enabled(bool enabled);
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_ARG if percent > 100
  */
-esp_err_t led_feedback_set_brightness(uint8_t percent);
+esp_err_t status_led_set_brightness(uint8_t percent);
 
 /**
  * @brief Set alerts-only mode
@@ -117,7 +117,7 @@ esp_err_t led_feedback_set_brightness(uint8_t percent);
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  */
-esp_err_t led_feedback_set_alerts_only(bool alerts_only);
+esp_err_t status_led_set_alerts_only(bool alerts_only);
 
 /**
  * @brief Save current config to NVS
@@ -129,28 +129,28 @@ esp_err_t led_feedback_set_alerts_only(bool alerts_only);
  * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  * @return ESP_ERR_NVS_* on NVS errors
  */
-esp_err_t led_feedback_save_config(void);
+esp_err_t status_led_save_config(void);
 
 /**
- * @brief Check if LED feedback is enabled
+ * @brief Check if status LED is enabled
  *
  * @return true if enabled
  */
-bool led_feedback_is_enabled(void);
+bool status_led_is_enabled(void);
 
 /**
  * @brief Get current brightness setting
  *
  * @return Brightness 0-100
  */
-uint8_t led_feedback_get_brightness(void);
+uint8_t status_led_get_brightness(void);
 
 /**
  * @brief Check if alerts-only mode is active
  *
  * @return true if alerts-only mode
  */
-bool led_feedback_is_alerts_only(void);
+bool status_led_is_alerts_only(void);
 
 /**
  * @brief Register console commands
@@ -159,7 +159,7 @@ bool led_feedback_is_alerts_only(void);
  *
  * @return ESP_OK on success
  */
-esp_err_t led_feedback_register_console(void);
+esp_err_t status_led_register_console(void);
 
 /**
  * @brief Get state name string for logging
@@ -167,7 +167,7 @@ esp_err_t led_feedback_register_console(void);
  * @param state State to get name for
  * @return State name string (e.g., "CONNECTED", "PROVISIONING")
  */
-const char *led_feedback_state_name(led_state_t state);
+const char *status_led_state_name(status_led_state_t state);
 
 #ifdef __cplusplus
 }
