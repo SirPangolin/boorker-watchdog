@@ -17,6 +17,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include "esp_err.h"
+#include "led_indicator.h"  // For blink_step_t
 
 #ifdef __cplusplus
 extern "C" {
@@ -107,6 +108,42 @@ esp_err_t led_driver_off(void);
  *      - ESP_ERR_INVALID_STATE if not initialized
  */
 esp_err_t led_driver_deinit(void);
+
+/**
+ * @brief Register blink patterns for pattern playback
+ *
+ * Must be called after led_driver_init() but before start_pattern().
+ * Internally recreates LED indicator handles with pattern support.
+ *
+ * @param patterns Array of blink pattern definitions (blink_step_t arrays)
+ * @param num_patterns Number of patterns in the array
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_STATE if not initialized
+ *      - ESP_ERR_INVALID_ARG if patterns is NULL or num_patterns is 0
+ */
+esp_err_t led_driver_register_patterns(blink_step_t const **patterns, size_t num_patterns);
+
+/**
+ * @brief Start a blink pattern
+ *
+ * @param pattern_id Pattern index (0 to num_patterns-1)
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_STATE if not initialized or patterns not registered
+ *      - ESP_ERR_INVALID_ARG if pattern_id out of range
+ */
+esp_err_t led_driver_start_pattern(int pattern_id);
+
+/**
+ * @brief Stop a blink pattern
+ *
+ * @param pattern_id Pattern index to stop
+ * @return
+ *      - ESP_OK on success
+ *      - ESP_ERR_INVALID_STATE if not initialized
+ */
+esp_err_t led_driver_stop_pattern(int pattern_id);
 
 #ifdef __cplusplus
 }
