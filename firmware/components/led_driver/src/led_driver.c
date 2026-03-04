@@ -17,6 +17,16 @@
 static const char *TAG = "led_driver";
 
 /**
+ * @brief Convert RGB to perceived luminance (0-255)
+ * Standard luminance formula: 0.299R + 0.587G + 0.114B
+ * Integer math: (77*R + 150*G + 29*B) / 256
+ */
+static inline uint8_t rgb_to_luminance(uint8_t r, uint8_t g, uint8_t b)
+{
+    return (uint8_t)((77 * r + 150 * g + 29 * b) >> 8);
+}
+
+/**
  * @brief Internal driver context
  */
 typedef struct {
@@ -155,7 +165,57 @@ esp_err_t led_driver_init(void)
         s_ctx.caps.supports_brightness = true;
         ESP_LOGI(TAG, "External RGB LEDC initialized");
     }
-#endif // CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+
+#elif CONFIG_LED_DRIVER_EXTERNAL_MONO_LEDC
+    ESP_LOGI(TAG, "Configuring external MONO LEDC on GPIO %d", CONFIG_LED_DRIVER_EXTERNAL_GPIO_R);
+
+    led_indicator_ledc_config_t ledc_config = {
+        .is_active_level_high = true,
+        .timer_inited = false,
+        .timer_num = LEDC_TIMER_1,
+        .gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+        .channel = LEDC_CHANNEL_1,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_LEDC_MODE,
+        .led_indicator_ledc_config = &ledc_config,
+        .blink_lists = NULL,
+        .blink_list_num = 0,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (s_ctx.external_handle == NULL) {
+        ESP_LOGW(TAG, "Failed to create external MONO LEDC indicator");
+    } else {
+        // MONO LEDC supports brightness but not RGB
+        s_ctx.caps.supports_brightness = true;
+        ESP_LOGI(TAG, "External MONO LEDC initialized");
+    }
+
+#elif CONFIG_LED_DRIVER_EXTERNAL_GPIO
+    ESP_LOGI(TAG, "Configuring external GPIO LED on GPIO %d", CONFIG_LED_DRIVER_EXTERNAL_GPIO_R);
+
+    led_indicator_gpio_config_t ext_gpio_config = {
+        .is_active_level_high = true,
+        .gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
+    };
+
+    led_indicator_config_t ext_config = {
+        .mode = LED_GPIO_MODE,
+        .led_indicator_gpio_config = &ext_gpio_config,
+        .blink_lists = NULL,
+        .blink_list_num = 0,
+    };
+
+    s_ctx.external_handle = led_indicator_create(&ext_config);
+    if (s_ctx.external_handle == NULL) {
+        ESP_LOGW(TAG, "Failed to create external GPIO LED indicator");
+    } else {
+        // GPIO doesn't support RGB or brightness
+        ESP_LOGI(TAG, "External GPIO LED initialized");
+    }
+#endif // External LED type selection
 
 #endif // CONFIG_LED_DRIVER_EXTERNAL_ENABLED
 
@@ -223,7 +283,24 @@ esp_err_t led_driver_set_rgb(uint8_t r, uint8_t g, uint8_t b)
         esp_err_t ext_ret = led_indicator_set_rgb(s_ctx.external_handle, SET_IRGB(0, br, bg, bb));
         if (ext_ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set external LED RGB: %s", esp_err_to_name(ext_ret));
-            if (ret == ESP_OK) ret = ext_ret;  // Only override if no previous error
+            if (ret == ESP_OK) ret = ext_ret;
+        }
+#elif CONFIG_LED_DRIVER_EXTERNAL_MONO_LEDC
+        // Convert to luminance and set brightness
+        uint8_t lum = rgb_to_luminance(br, bg, bb);
+        uint8_t brightness_pct = (lum * 100) / 255;
+        esp_err_t ext_ret = led_indicator_set_brightness(s_ctx.external_handle, brightness_pct);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set external LED brightness: %s", esp_err_to_name(ext_ret));
+            if (ret == ESP_OK) ret = ext_ret;
+        }
+#elif CONFIG_LED_DRIVER_EXTERNAL_GPIO
+        // GPIO: any non-zero = on
+        bool on = (br > 0 || bg > 0 || bb > 0);
+        esp_err_t ext_ret = led_indicator_set_on_off(s_ctx.external_handle, on);
+        if (ext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set external LED on/off: %s", esp_err_to_name(ext_ret));
+            if (ret == ESP_OK) ret = ext_ret;
         }
 #endif
     }
