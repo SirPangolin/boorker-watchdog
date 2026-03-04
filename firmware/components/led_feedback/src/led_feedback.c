@@ -27,6 +27,10 @@
 #include "driver/rmt_types.h"
 #endif
 
+#if CONFIG_LED_FEEDBACK_EXTERNAL_ENABLED && CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+#include "led_rgb.h"
+#endif
+
 #include <string.h>
 
 static const char *TAG = "led_feedback";
@@ -417,8 +421,8 @@ static esp_err_t init_external_led(void)
     // Configure external LED with LEDC (PWM) mode - use channel 1 to avoid conflict
     led_indicator_ledc_config_t ledc_config = {
         .is_active_level_high = true,
-        .timer_inited = true,  // Primary LED already initialized timer
-        .timer_num = LEDC_TIMER_0,
+        .timer_inited = false,  // Let it init its own timer
+        .timer_num = LEDC_TIMER_1,  // Use different timer than onboard LED
         .gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
         .channel = LEDC_CHANNEL_1,
     };
@@ -431,25 +435,31 @@ static esp_err_t init_external_led(void)
     };
 
 #elif CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
-    // Configure external LED with RGB LEDC (3-channel PWM)
-    // Note: This requires led_indicator RGB LEDC support
-    led_indicator_ledc_config_t ledc_config_r = {
+    // Configure external LED with RGB LEDC (3-channel PWM) using LED_RGB_MODE
+    // Uses separate LEDC channels for R, G, B to enable full color mixing
+    // NOTE: timer_inited must be false so led_rgb.c calculates max_duty correctly
+    led_indicator_rgb_config_t rgb_config = {
         .is_active_level_high = true,
-        .timer_inited = true,
-        .timer_num = LEDC_TIMER_0,
-        .gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
-        .channel = LEDC_CHANNEL_1,
+        .timer_inited = false,  // Let it init its own timer (fixes max_duty bug)
+        .timer_num = LEDC_TIMER_1,  // Use different timer than onboard LED
+        .red_gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+        .green_gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_GREEN,
+        .blue_gpio_num = CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_BLUE,
+        .red_channel = LEDC_CHANNEL_1,
+        .green_channel = LEDC_CHANNEL_2,
+        .blue_channel = LEDC_CHANNEL_3,
     };
 
-    // For RGB_LEDC, we use single LEDC channel for simplicity
-    // Full RGB would require led_indicator RGB mode support
     led_indicator_config_t config = {
-        .mode = LED_LEDC_MODE,
-        .led_indicator_ledc_config = &ledc_config_r,
+        .mode = LED_RGB_MODE,
+        .led_indicator_rgb_config = &rgb_config,
         .blink_lists = led_patterns,
         .blink_list_num = LED_FB_MAX,
     };
-    ESP_LOGW(TAG, "RGB_LEDC uses single channel only (full RGB not yet implemented)");
+    ESP_LOGI(TAG, "RGB LED configured on R=%d, G=%d, B=%d",
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_GREEN,
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_BLUE);
 
 #elif CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_GPIO
     // Configure external LED with simple GPIO mode
@@ -478,7 +488,14 @@ static esp_err_t init_external_led(void)
         ESP_LOGW(TAG, "Failed to set external LED brightness: %s", esp_err_to_name(ret));
     }
 
+#if CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
+    ESP_LOGI(TAG, "External RGB LED initialized on R=%d, G=%d, B=%d",
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA,
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_GREEN,
+             CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_BLUE);
+#else
     ESP_LOGI(TAG, "External LED initialized on GPIO %d", CONFIG_LED_FEEDBACK_EXTERNAL_GPIO_DATA);
+#endif
     return ESP_OK;
 }
 #endif
