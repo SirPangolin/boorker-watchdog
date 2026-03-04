@@ -7,10 +7,11 @@
 #include "led_feedback.h"
 #include "sdkconfig.h"
 
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+// Include RGB colors for WS2812 (onboard) or RGB_LEDC (external 3-channel)
+#if CONFIG_LED_FEEDBACK_TYPE_WS2812 || CONFIG_LED_FEEDBACK_EXTERNAL_TYPE_RGB_LEDC
 #include "led_convert.h"
 
-// RGB colors for WS2812 (from design doc)
+// RGB colors (from design doc)
 #define COLOR_RED        SET_RGB(255, 0, 0)      // Critical alert
 #define COLOR_PURPLE     SET_RGB(128, 0, 255)    // First boot
 #define COLOR_BLUE       SET_RGB(0, 0, 255)      // WiFi provisioning
@@ -19,6 +20,9 @@
 #define COLOR_CYAN       SET_RGB(0, 255, 255)    // Connecting states
 #define COLOR_GREEN      SET_RGB(0, 255, 0)      // Connected
 #define COLOR_OFF        SET_RGB(0, 0, 0)        // Off
+
+// Macro to check if any RGB mode is active
+#define LED_HAS_RGB_SUPPORT 1
 #endif
 
 // Helper macros for timing from Kconfig
@@ -33,7 +37,7 @@
 
 // Pattern: Critical alert - fast double pulse (red)
 static const blink_step_t pattern_alert_critical[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB,   COLOR_RED,     0},
 #endif
     {LED_BLINK_HOLD,  LED_STATE_ON,  100},
@@ -45,7 +49,7 @@ static const blink_step_t pattern_alert_critical[] = {
 
 // Pattern: First boot - slow breathe (purple)
 static const blink_step_t pattern_first_boot[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB,     COLOR_PURPLE,  0},
 #endif
     {LED_BLINK_BREATHE, LED_STATE_ON,  BREATHE_IN},
@@ -55,7 +59,7 @@ static const blink_step_t pattern_first_boot[] = {
 
 // Pattern: WiFi provisioning - slow blink (blue)
 static const blink_step_t pattern_wifi_provisioning[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_BLUE,    0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_ON,  SLOW_ON},
@@ -65,7 +69,7 @@ static const blink_step_t pattern_wifi_provisioning[] = {
 
 // Pattern: WiFi reconnecting - medium blink (yellow)
 static const blink_step_t pattern_wifi_reconnecting[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_YELLOW,  0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_ON,  MEDIUM_ON},
@@ -75,7 +79,7 @@ static const blink_step_t pattern_wifi_reconnecting[] = {
 
 // Pattern: Alert active - slow double pulse (orange)
 static const blink_step_t pattern_alert_active[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB,   COLOR_ORANGE,  0},
 #endif
     {LED_BLINK_HOLD,  LED_STATE_ON,  200},
@@ -87,7 +91,7 @@ static const blink_step_t pattern_alert_active[] = {
 
 // Pattern: WiFi connecting - fast blink (cyan)
 static const blink_step_t pattern_wifi_connecting[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_CYAN,    0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_ON,  FAST_ON},
@@ -97,7 +101,7 @@ static const blink_step_t pattern_wifi_connecting[] = {
 
 // Pattern: Tailscale connecting - fast blink (cyan)
 static const blink_step_t pattern_tailscale_connecting[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_CYAN,    0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_ON,  FAST_ON},
@@ -107,7 +111,7 @@ static const blink_step_t pattern_tailscale_connecting[] = {
 
 // Pattern: Connected - solid on (green)
 static const blink_step_t pattern_connected[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_GREEN,   0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_ON, 0},
@@ -116,7 +120,7 @@ static const blink_step_t pattern_connected[] = {
 
 // Pattern: Off - solid off
 static const blink_step_t pattern_off[] = {
-#if CONFIG_LED_FEEDBACK_TYPE_WS2812
+#ifdef LED_HAS_RGB_SUPPORT
     {LED_BLINK_RGB, COLOR_OFF,     0},
 #endif
     {LED_BLINK_HOLD, LED_STATE_OFF, 0},
