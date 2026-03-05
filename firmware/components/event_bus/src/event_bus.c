@@ -1,12 +1,12 @@
 /**
- * @file andon_service.c
- * @brief ANDON notification hub service implementation
+ * @file event_bus.c
+ * @brief Event bus notification hub implementation
  *
- * Implements a centralized notification hub for system and business states.
+ * Implements a centralized pub/sub notification hub for system and business states.
  * Uses bitmask state tracking with priority resolution and channel callbacks.
  */
 
-#include "andon_service.h"
+#include "event_bus.h"
 #include "device_state.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
@@ -16,7 +16,7 @@
 #include <string.h>
 #include <inttypes.h>
 
-static const char *TAG = "andon_service";
+static const char *TAG = "event_bus";
 
 // Mutex timeout
 #define MUTEX_TIMEOUT_MS        100
@@ -24,42 +24,42 @@ static const char *TAG = "andon_service";
 
 // State names for logging
 static const char *state_names[] = {
-    [ANDON_FIRST_BOOT]           = "FIRST_BOOT",
-    [ANDON_ERROR]                = "ERROR",
-    [ANDON_WIFI_PROVISIONING]    = "WIFI_PROVISIONING",
-    [ANDON_WIFI_RECONNECTING]    = "WIFI_RECONNECTING",
-    [ANDON_WIFI_CONNECTING]      = "WIFI_CONNECTING",
-    [ANDON_TAILSCALE_CONNECTING] = "TAILSCALE_CONNECTING",
-    [ANDON_CONNECTED]            = "CONNECTED",
-    [ANDON_OFF]                  = "OFF",
-    [ANDON_ALERT_CRITICAL]       = "ALERT_CRITICAL",
-    [ANDON_ALERT_ACTIVE]         = "ALERT_ACTIVE",
-    [ANDON_SENSOR_WARNING]       = "SENSOR_WARNING",
+    [EVENT_FIRST_BOOT]           = "FIRST_BOOT",
+    [EVENT_ERROR]                = "ERROR",
+    [EVENT_WIFI_PROVISIONING]    = "WIFI_PROVISIONING",
+    [EVENT_WIFI_RECONNECTING]    = "WIFI_RECONNECTING",
+    [EVENT_WIFI_CONNECTING]      = "WIFI_CONNECTING",
+    [EVENT_TAILSCALE_CONNECTING] = "TAILSCALE_CONNECTING",
+    [EVENT_CONNECTED]            = "CONNECTED",
+    [EVENT_OFF]                  = "OFF",
+    [EVENT_ALERT_CRITICAL]       = "ALERT_CRITICAL",
+    [EVENT_ALERT_ACTIVE]         = "ALERT_ACTIVE",
+    [EVENT_SENSOR_WARNING]       = "SENSOR_WARNING",
 };
 
 // Verify state_names array matches enum
-_Static_assert(sizeof(state_names) / sizeof(state_names[0]) == ANDON_MAX,
-               "state_names array size must match ANDON_MAX");
+_Static_assert(sizeof(state_names) / sizeof(state_names[0]) == EVENT_MAX,
+               "state_names array size must match EVENT_MAX");
 
 // Channel registration structure
 typedef struct {
     const char *name;
-    andon_channel_cb_t cb;
+    event_channel_cb_t cb;
     void *ctx;
-} andon_channel_t;
+} event_channel_t;
 
 // Static context structure
 static struct {
     bool initialized;
     uint32_t active_states;              // Bitmask of active states
-    andon_state_t current_active;        // Cached highest priority active state
-    andon_channel_t channels[CONFIG_ANDON_MAX_CHANNELS];
+    event_state_t current_active;        // Cached highest priority active state
+    event_channel_t channels[CONFIG_EVENT_BUS_MAX_CHANNELS];
     size_t channel_count;
     SemaphoreHandle_t mutex;
 } s_ctx = {
     .initialized = false,
     .active_states = 0,
-    .current_active = ANDON_OFF,
+    .current_active = EVENT_OFF,
     .channel_count = 0,
     .mutex = NULL,
 };
@@ -70,25 +70,25 @@ static struct {
 
 /**
  * @brief Get highest priority active state (lowest bit set)
- * @return Highest priority active state, or ANDON_OFF if none active
+ * @return Highest priority active state, or EVENT_OFF if none active
  */
-static andon_state_t get_highest_priority_state(void)
+static event_state_t get_highest_priority_state(void)
 {
     if (s_ctx.active_states == 0) {
-        return ANDON_OFF;
+        return EVENT_OFF;
     }
 
     // Find lowest set bit (highest priority state)
-    for (int i = 0; i < ANDON_MAX; i++) {
+    for (int i = 0; i < EVENT_MAX; i++) {
         if (s_ctx.active_states & (1U << i)) {
-            return (andon_state_t)i;
+            return (event_state_t)i;
         }
     }
 
     // Should be unreachable if active_states != 0
     ESP_LOGE(TAG, "BUG: active_states=0x%08" PRIx32 " but no bit found in range 0-%d",
-             s_ctx.active_states, ANDON_MAX - 1);
-    return ANDON_OFF;
+             s_ctx.active_states, EVENT_MAX - 1);
+    return EVENT_OFF;
 }
 
 /**
@@ -98,7 +98,7 @@ static andon_state_t get_highest_priority_state(void)
  *
  * @param new_state The new active state to notify channels about
  */
-static void notify_channels(andon_state_t new_state)
+static void notify_channels(event_state_t new_state)
 {
     for (size_t i = 0; i < s_ctx.channel_count; i++) {
         if (s_ctx.channels[i].cb != NULL) {
@@ -116,7 +116,7 @@ static void notify_channels(andon_state_t new_state)
  */
 static void update_and_notify(void)
 {
-    andon_state_t new_active = get_highest_priority_state();
+    event_state_t new_active = get_highest_priority_state();
 
     if (new_active != s_ctx.current_active) {
         ESP_LOGI(TAG, "State: %s -> %s",
@@ -130,7 +130,7 @@ static void update_and_notify(void)
 // Core API Implementation
 // --------------------------------------------------------------------------
 
-esp_err_t andon_init(void)
+esp_err_t event_bus_init(void)
 {
     if (s_ctx.initialized) {
         ESP_LOGD(TAG, "Already initialized");
@@ -146,17 +146,17 @@ esp_err_t andon_init(void)
 
     // Initialize state
     s_ctx.active_states = 0;
-    s_ctx.current_active = ANDON_OFF;
+    s_ctx.current_active = EVENT_OFF;
     s_ctx.channel_count = 0;
     memset(s_ctx.channels, 0, sizeof(s_ctx.channels));
 
     s_ctx.initialized = true;
-    ESP_LOGI(TAG, "Initialized (max channels: %d)", CONFIG_ANDON_MAX_CHANNELS);
+    ESP_LOGI(TAG, "Initialized (max channels: %d)", CONFIG_EVENT_BUS_MAX_CHANNELS);
 
     return ESP_OK;
 }
 
-esp_err_t andon_deinit(void)
+esp_err_t event_bus_deinit(void)
 {
     if (!s_ctx.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -170,7 +170,7 @@ esp_err_t andon_deinit(void)
 
     s_ctx.initialized = false;
     s_ctx.active_states = 0;
-    s_ctx.current_active = ANDON_OFF;
+    s_ctx.current_active = EVENT_OFF;
     s_ctx.channel_count = 0;
     memset(s_ctx.channels, 0, sizeof(s_ctx.channels));
 
@@ -183,9 +183,9 @@ esp_err_t andon_deinit(void)
     return ESP_OK;
 }
 
-esp_err_t andon_set_state(andon_state_t state)
+esp_err_t event_bus_set_state(event_state_t state)
 {
-    if (state >= ANDON_MAX) {
+    if (state >= EVENT_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -194,7 +194,7 @@ esp_err_t andon_set_state(andon_state_t state)
     }
 
     // Check business state gate before acquiring mutex
-    if (andon_is_business_state(state) && !device_state_is_claimed()) {
+    if (event_bus_is_business_state(state) && !device_state_is_claimed()) {
         ESP_LOGD(TAG, "Business state %s blocked (device unclaimed)", state_names[state]);
         return ESP_ERR_NOT_ALLOWED;
     }
@@ -218,9 +218,9 @@ esp_err_t andon_set_state(andon_state_t state)
     return ESP_OK;
 }
 
-esp_err_t andon_clear_state(andon_state_t state)
+esp_err_t event_bus_clear_state(event_state_t state)
 {
-    if (state >= ANDON_MAX) {
+    if (state >= EVENT_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -247,17 +247,17 @@ esp_err_t andon_clear_state(andon_state_t state)
     return ESP_OK;
 }
 
-andon_state_t andon_get_active_state(void)
+event_state_t event_bus_get_active_state(void)
 {
     if (!s_ctx.initialized) {
-        return ANDON_OFF;
+        return EVENT_OFF;
     }
 
     // Reading a single enum is atomic on ESP32
     return s_ctx.current_active;
 }
 
-esp_err_t andon_register_channel(const char *name, andon_channel_cb_t cb, void *ctx)
+esp_err_t event_bus_register_channel(const char *name, event_channel_cb_t cb, void *ctx)
 {
     if (name == NULL || cb == NULL) {
         return ESP_ERR_INVALID_ARG;
@@ -273,9 +273,9 @@ esp_err_t andon_register_channel(const char *name, andon_channel_cb_t cb, void *
     }
 
     // Check for available slot
-    if (s_ctx.channel_count >= CONFIG_ANDON_MAX_CHANNELS) {
+    if (s_ctx.channel_count >= CONFIG_EVENT_BUS_MAX_CHANNELS) {
         ESP_LOGE(TAG, "Max channels (%d) reached, cannot register '%s'",
-                 CONFIG_ANDON_MAX_CHANNELS, name);
+                 CONFIG_EVENT_BUS_MAX_CHANNELS, name);
         xSemaphoreGive(s_ctx.mutex);
         return ESP_ERR_NO_MEM;
     }
@@ -288,10 +288,10 @@ esp_err_t andon_register_channel(const char *name, andon_channel_cb_t cb, void *
     s_ctx.channel_count++;
 
     ESP_LOGI(TAG, "Registered channel '%s' (%zu/%d)",
-             name, s_ctx.channel_count, CONFIG_ANDON_MAX_CHANNELS);
+             name, s_ctx.channel_count, CONFIG_EVENT_BUS_MAX_CHANNELS);
 
     // Notify new channel of current state immediately
-    andon_state_t current = s_ctx.current_active;
+    event_state_t current = s_ctx.current_active;
     xSemaphoreGive(s_ctx.mutex);
 
     // Call callback outside mutex to avoid deadlock
@@ -305,16 +305,16 @@ esp_err_t andon_register_channel(const char *name, andon_channel_cb_t cb, void *
 // Utility Functions
 // --------------------------------------------------------------------------
 
-bool andon_is_business_state(andon_state_t state)
+bool event_bus_is_business_state(event_state_t state)
 {
-    return (state == ANDON_ALERT_CRITICAL ||
-            state == ANDON_ALERT_ACTIVE ||
-            state == ANDON_SENSOR_WARNING);
+    return (state == EVENT_ALERT_CRITICAL ||
+            state == EVENT_ALERT_ACTIVE ||
+            state == EVENT_SENSOR_WARNING);
 }
 
-const char *andon_state_name(andon_state_t state)
+const char *event_state_name(event_state_t state)
 {
-    if (state >= ANDON_MAX) {
+    if (state >= EVENT_MAX) {
         return "UNKNOWN";
     }
     return state_names[state];
