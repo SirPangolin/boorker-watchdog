@@ -1,0 +1,36 @@
+menu "Status Buzzer"
+
+    config STATUS_BUZZER_ENABLED
+        bool "Enable status buzzer"
+        default y
+        help
+            Enable audio feedback via piezo buzzer.
+
+    config STATUS_BUZZER_VOLUME_CHIRP
+        int "CHIRP preset volume (%)"
+        default 2
+        range 0 100
+        help
+            Volume for CHIRP preset. Default 2% for ear-safe development.
+
+    config STATUS_BUZZER_VOLUME_DOUBLE_BEEP
+        int "DOUBLE_BEEP preset volume (%)"
+        default 2
+        range 0 100
+
+    config STATUS_BUZZER_VOLUME_TRIPLE_BEEP
+        int "TRIPLE_BEEP preset volume (%)"
+        default 2
+        range 0 100
+
+    config STATUS_BUZZER_VOLUME_ALARM
+        int "ALARM preset volume (%)"
+        default 2
+        range 0 100
+
+    config STATUS_BUZZER_VOLUME_SOLID
+        int "SOLID preset volume (%)"
+        default 2
+        range 0 100
+
+endmenu
