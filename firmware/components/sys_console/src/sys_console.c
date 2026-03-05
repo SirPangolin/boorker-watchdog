@@ -1,4 +1,4 @@
-#include "system_console.h"
+#include "sys_console.h"
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
@@ -48,7 +48,7 @@ static void reboot_timer_callback(void *arg)
 esp_err_t system_reboot_schedule(uint32_t delay_seconds)
 {
     if (s_reboot_mutex == NULL) {
-        ESP_LOGE(TAG, "system_console not initialized");
+        ESP_LOGE(TAG, "sys_console not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -60,10 +60,10 @@ esp_err_t system_reboot_schedule(uint32_t delay_seconds)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (delay_seconds > CONFIG_SYSTEM_CONSOLE_REBOOT_MAX_DELAY) {
+    if (delay_seconds > CONFIG_SYS_CONSOLE_REBOOT_MAX_DELAY) {
         xSemaphoreGive(s_reboot_mutex);
         ESP_LOGW(TAG, "Reboot delay %lu exceeds max %d seconds",
-                 (unsigned long)delay_seconds, CONFIG_SYSTEM_CONSOLE_REBOOT_MAX_DELAY);
+                 (unsigned long)delay_seconds, CONFIG_SYS_CONSOLE_REBOOT_MAX_DELAY);
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -110,7 +110,7 @@ esp_err_t system_reboot_schedule(uint32_t delay_seconds)
 esp_err_t system_reboot_cancel(void)
 {
     if (s_reboot_mutex == NULL) {
-        ESP_LOGE(TAG, "system_console not initialized");
+        ESP_LOGE(TAG, "sys_console not initialized");
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -217,7 +217,7 @@ static int cmd_reboot(int argc, char **argv)
     }
 
     // Determine delay
-    uint32_t delay = CONFIG_SYSTEM_CONSOLE_REBOOT_DEFAULT_DELAY;
+    uint32_t delay = CONFIG_SYS_CONSOLE_REBOOT_DEFAULT_DELAY;
 
     if (action) {
         if (strcmp(action, "now") == 0) {
@@ -226,7 +226,7 @@ static int cmd_reboot(int argc, char **argv)
             // Try to parse as number
             char *endptr;
             long val = strtol(action, &endptr, 10);
-            if (*endptr == '\0' && val >= 0 && val <= CONFIG_SYSTEM_CONSOLE_REBOOT_MAX_DELAY) {
+            if (*endptr == '\0' && val >= 0 && val <= CONFIG_SYS_CONSOLE_REBOOT_MAX_DELAY) {
                 delay = (uint32_t)val;
             } else {
                 printf("Invalid argument. Usage: reboot [now|<seconds>|cancel]\n");
@@ -342,7 +342,7 @@ static int cmd_status(int argc, char **argv)
     return 0;
 }
 
-esp_err_t system_console_register(void)
+esp_err_t sys_console_register(void)
 {
     esp_err_t ret;
     esp_err_t first_error = ESP_OK;

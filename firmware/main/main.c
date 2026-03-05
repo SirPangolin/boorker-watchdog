@@ -16,8 +16,8 @@
 #include "system_state.h"
 #include "event_bus.h"
 #include "web_auth.h"
-#include "web_server.h"
-#include "system_console.h"
+#include "http_server.h"
+#include "sys_console.h"
 #include "status_led.h"
 
 static const char *TAG = "boorker";
@@ -132,7 +132,7 @@ static void init_console(void)
 #endif
 
     // Register system console commands
-    ret = system_console_register();
+    ret = sys_console_register();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "System console init failed: %s (commands may be unavailable)",
                  esp_err_to_name(ret));
@@ -273,7 +273,7 @@ void app_main(void)
         // Don't start web server without authentication - security risk
     } else {
         // Start web server only if auth is available
-        ret = web_server_start();
+        ret = http_server_start();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
             // Continue without web server

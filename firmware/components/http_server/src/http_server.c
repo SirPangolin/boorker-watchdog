@@ -1,10 +1,10 @@
-#include "web_server.h"
+#include "http_server.h"
 #include "web_auth.h"
 #include "credentials.h"
 #include "system_state.h"
 #include "wifi_manager.h"
 #include "event_bus.h"
-#include "system_console.h"
+#include "sys_console.h"
 #include "version.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
@@ -18,7 +18,7 @@
 #include <sys/stat.h>
 #include <ctype.h>
 
-static const char *TAG = "web_server";
+static const char *TAG = "http_server";
 
 // LittleFS mount point for static web content
 #define WEB_FS_BASE_PATH "/littlefs"
@@ -685,7 +685,7 @@ static esp_err_t mount_littlefs(void)
     return ESP_OK;
 }
 
-esp_err_t web_server_start(void)
+esp_err_t http_server_start(void)
 {
     if (s_server) {
         ESP_LOGW(TAG, "Server already running");
@@ -847,7 +847,7 @@ esp_err_t web_server_start(void)
     return ESP_OK;  // Server is running, even if some handlers failed
 }
 
-esp_err_t web_server_stop(void)
+esp_err_t http_server_stop(void)
 {
     if (!s_server) {
         return ESP_OK;
@@ -865,7 +865,7 @@ esp_err_t web_server_stop(void)
     return ret;
 }
 
-bool web_server_is_running(void)
+bool http_server_is_running(void)
 {
     return s_server != NULL;
 }
