@@ -1,7 +1,7 @@
 #include "web_auth.h"
 #include "device_identity.h"
 #include "device_state.h"
-#include "andon_service.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "esp_random.h"
 #include "nvs_flash.h"
@@ -638,9 +638,9 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
                  esp_err_to_name(claim_ret));
     }
 
-    esp_err_t andon_ret = andon_clear_state(ANDON_FIRST_BOOT);
-    if (andon_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to clear first boot LED state: %s", esp_err_to_name(andon_ret));
+    esp_err_t event_ret = event_bus_clear_state(EVENT_FIRST_BOOT);
+    if (event_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to clear first boot LED state: %s", esp_err_to_name(event_ret));
     }
 
     ESP_LOGI(TAG, "Password changed, device claimed");

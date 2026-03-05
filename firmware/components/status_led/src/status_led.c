@@ -1,14 +1,14 @@
 /**
  * @file status_led.c
- * @brief Status LED core implementation (ANDON channel subscriber)
+ * @brief Status LED core implementation (event bus channel subscriber)
  *
  * Maps system states to LED patterns via LED using the led_driver component
- * for hardware abstraction. Subscribes to andon_service for state
+ * for hardware abstraction. Subscribes to event_bus for state
  * notifications and renders appropriate LED patterns.
  */
 
 #include "status_led.h"
-#include "andon_service.h"
+#include "event_bus.h"
 #include "led_driver.h"
 #include "led_indicator.h"  // For blink_step_t type used in led_patterns.c
 #include "esp_log.h"
@@ -266,39 +266,39 @@ static esp_err_t apply_pattern(status_led_state_t state)
 }
 
 /**
- * @brief Map ANDON state to internal LED pattern
+ * @brief Map event bus state to internal LED pattern
  *
- * @param andon_state ANDON state from callback
+ * @param event_state Event bus state from callback
  * @return Corresponding status_led_state_t pattern
  */
-static status_led_state_t map_andon_to_led_state(andon_state_t andon_state)
+static status_led_state_t map_event_to_led_state(event_state_t event_state)
 {
-    switch (andon_state) {
-        case ANDON_FIRST_BOOT:           return STATUS_LED_FIRST_BOOT;
-        case ANDON_ERROR:                return STATUS_LED_ALERT_CRITICAL;
-        case ANDON_WIFI_PROVISIONING:    return STATUS_LED_WIFI_PROVISIONING;
-        case ANDON_WIFI_RECONNECTING:    return STATUS_LED_WIFI_RECONNECTING;
-        case ANDON_WIFI_CONNECTING:      return STATUS_LED_WIFI_CONNECTING;
-        case ANDON_TAILSCALE_CONNECTING: return STATUS_LED_TAILSCALE_CONNECTING;
-        case ANDON_CONNECTED:            return STATUS_LED_CONNECTED;
-        case ANDON_OFF:                  return STATUS_LED_OFF;
-        case ANDON_ALERT_CRITICAL:       return STATUS_LED_ALERT_CRITICAL;
-        case ANDON_ALERT_ACTIVE:         return STATUS_LED_ALERT_ACTIVE;
-        case ANDON_SENSOR_WARNING:       return STATUS_LED_ALERT_ACTIVE;  // Use same pattern
+    switch (event_state) {
+        case EVENT_FIRST_BOOT:           return STATUS_LED_FIRST_BOOT;
+        case EVENT_ERROR:                return STATUS_LED_ALERT_CRITICAL;
+        case EVENT_WIFI_PROVISIONING:    return STATUS_LED_WIFI_PROVISIONING;
+        case EVENT_WIFI_RECONNECTING:    return STATUS_LED_WIFI_RECONNECTING;
+        case EVENT_WIFI_CONNECTING:      return STATUS_LED_WIFI_CONNECTING;
+        case EVENT_TAILSCALE_CONNECTING: return STATUS_LED_TAILSCALE_CONNECTING;
+        case EVENT_CONNECTED:            return STATUS_LED_CONNECTED;
+        case EVENT_OFF:                  return STATUS_LED_OFF;
+        case EVENT_ALERT_CRITICAL:       return STATUS_LED_ALERT_CRITICAL;
+        case EVENT_ALERT_ACTIVE:         return STATUS_LED_ALERT_ACTIVE;
+        case EVENT_SENSOR_WARNING:       return STATUS_LED_ALERT_ACTIVE;  // Use same pattern
         default:                         return STATUS_LED_OFF;
     }
 }
 
 /**
- * @brief ANDON channel callback - maps ANDON state to LED pattern
+ * @brief Event bus channel callback - maps event state to LED pattern
  *
- * Called by andon_service when the active state changes. Maps the ANDON
+ * Called by event_bus when the active state changes. Maps the event
  * state to an internal LED pattern and applies it.
  *
- * @param state New active ANDON state
+ * @param state New active event state
  * @param ctx User context (unused)
  */
-static void andon_callback(andon_state_t state, void *ctx)
+static void event_bus_callback(event_state_t state, void *ctx)
 {
     (void)ctx;  // Unused
 
@@ -307,15 +307,15 @@ static void andon_callback(andon_state_t state, void *ctx)
     }
 
     if (xSemaphoreTake(s_led.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
-        ESP_LOGW(TAG, "Mutex timeout in ANDON callback");
+        ESP_LOGW(TAG, "Mutex timeout in event bus callback");
         return;
     }
 
-    // Map ANDON state to internal LED pattern
-    status_led_state_t led_state = map_andon_to_led_state(state);
+    // Map event state to internal LED pattern
+    status_led_state_t led_state = map_event_to_led_state(state);
 
-    ESP_LOGI(TAG, "ANDON state: %s -> LED pattern: %s",
-             andon_state_name(state), state_names[led_state]);
+    ESP_LOGI(TAG, "Event state: %s -> LED pattern: %s",
+             event_state_name(state), state_names[led_state]);
 
     // Apply the pattern
     esp_err_t ret = apply_pattern(led_state);
@@ -378,12 +378,12 @@ esp_err_t status_led_init(void)
 
     ESP_LOGI(TAG, "Initialized (brightness=%d%%)", s_led.brightness);
 
-    // Register as ANDON channel
-    ret = andon_register_channel("led", andon_callback, NULL);
+    // Register as event bus channel
+    ret = event_bus_register_channel("led", event_bus_callback, NULL);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register ANDON channel: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to register event bus channel: %s", esp_err_to_name(ret));
     } else {
-        ESP_LOGI(TAG, "Registered as ANDON channel");
+        ESP_LOGI(TAG, "Registered as event bus channel");
     }
 
     return ESP_OK;
