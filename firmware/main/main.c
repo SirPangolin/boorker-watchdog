@@ -12,12 +12,12 @@
 #if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
 #endif
-#include "device_identity.h"
-#include "device_state.h"
+#include "credentials.h"
+#include "system_state.h"
 #include "event_bus.h"
 #include "web_auth.h"
-#include "web_server.h"
-#include "system_console.h"
+#include "http_server.h"
+#include "sys_console.h"
 #include "status_led.h"
 
 static const char *TAG = "boorker";
@@ -132,7 +132,7 @@ static void init_console(void)
 #endif
 
     // Register system console commands
-    ret = system_console_register();
+    ret = sys_console_register();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "System console init failed: %s (commands may be unavailable)",
                  esp_err_to_name(ret));
@@ -187,22 +187,22 @@ void app_main(void)
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     // Initialize device state early (others depend on claimed status)
-    ret = device_state_init();
+    ret = system_state_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Device state init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "System state init failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    // Initialize device identity (generates credentials on first boot)
-    ret = device_identity_init();
+    // Initialize credentials (generates secrets on first boot)
+    ret = credentials_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Device identity init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Credentials init failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    const device_identity_t *identity = device_identity_get();
+    const credentials_t *identity = credentials_get();
     if (identity == NULL) {
-        ESP_LOGE(TAG, "Failed to get device identity");
+        ESP_LOGE(TAG, "Failed to get credentials");
         return;
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
@@ -223,7 +223,7 @@ void app_main(void)
     }
 
     // Show credentials on first boot (until OLED is implemented)
-    if (!device_state_is_claimed()) {
+    if (!system_state_is_claimed()) {
         event_bus_set_state(EVENT_FIRST_BOOT);
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "FIRST BOOT - SAVE THESE CREDENTIALS:");
@@ -273,7 +273,7 @@ void app_main(void)
         // Don't start web server without authentication - security risk
     } else {
         // Start web server only if auth is available
-        ret = web_server_start();
+        ret = http_server_start();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Web server start failed: %s", esp_err_to_name(ret));
             // Continue without web server

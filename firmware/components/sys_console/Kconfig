@@ -1,13 +1,13 @@
 menu "System Console"
 
-    config SYSTEM_CONSOLE_REBOOT_DEFAULT_DELAY
+    config SYS_CONSOLE_REBOOT_DEFAULT_DELAY
         int "Default reboot delay (seconds)"
         default 3
         range 0 300
         help
             Default delay before reboot when no argument provided.
 
-    config SYSTEM_CONSOLE_REBOOT_MAX_DELAY
+    config SYS_CONSOLE_REBOOT_MAX_DELAY
         int "Maximum reboot delay (seconds)"
         default 300
         range 10 3600

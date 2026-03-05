@@ -1,6 +1,6 @@
 #include "web_auth.h"
-#include "device_identity.h"
-#include "device_state.h"
+#include "credentials.h"
+#include "system_state.h"
 #include "event_bus.h"
 #include "esp_log.h"
 #include "esp_random.h"
@@ -199,10 +199,10 @@ static esp_err_t load_or_create_password(void)
     ret = nvs_get_blob(handle, NVS_KEY_PASS_HASH, s_password_hash, &len);
 
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
-        // First time - hash the default password from device_identity
-        const device_identity_t *id = device_identity_get();
+        // First time - hash the default password from credentials
+        const credentials_t *id = credentials_get();
         if (id == NULL) {
-            ESP_LOGE(TAG, "device_identity not initialized");
+            ESP_LOGE(TAG, "credentials not initialized");
             nvs_close(handle);
             return ESP_ERR_INVALID_STATE;
         }
@@ -632,7 +632,7 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     }
 
     // Mark device as claimed
-    esp_err_t claim_ret = device_state_set_claimed(true);
+    esp_err_t claim_ret = system_state_set_claimed(true);
     if (claim_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to mark device as claimed: %s - user may be prompted again",
                  esp_err_to_name(claim_ret));
@@ -702,7 +702,7 @@ esp_err_t web_auth_require(httpd_req_t *req)
     }
 
     // Check if password change is required (device unclaimed)
-    if (!device_state_is_claimed()) {
+    if (!system_state_is_claimed()) {
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_set_type(req, "application/json");
         httpd_resp_send(req, "{\"error\":\"password_change_required\"}", HTTPD_RESP_USE_STRLEN);

@@ -9,13 +9,13 @@ extern "C" {
 #endif
 
 /**
- * @brief Register all system console commands
+ * @brief Register all console commands
  *
  * Commands: reboot, version, free, uptime, status
  *
  * @note Thread-safe. Uses internal mutex for state protection.
  */
-esp_err_t system_console_register(void);
+esp_err_t sys_console_register(void);
 
 /**
  * @brief Schedule a system reboot

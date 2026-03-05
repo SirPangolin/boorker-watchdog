@@ -7,7 +7,7 @@
  */
 
 #include "event_bus.h"
-#include "device_state.h"
+#include "system_state.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -194,7 +194,7 @@ esp_err_t event_bus_set_state(event_state_t state)
     }
 
     // Check business state gate before acquiring mutex
-    if (event_bus_is_business_state(state) && !device_state_is_claimed()) {
+    if (event_bus_is_business_state(state) && !system_state_is_claimed()) {
         ESP_LOGD(TAG, "Business state %s blocked (device unclaimed)", state_names[state]);
         return ESP_ERR_NOT_ALLOWED;
     }

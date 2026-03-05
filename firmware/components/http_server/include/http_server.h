@@ -8,26 +8,26 @@ extern "C" {
 #endif
 
 /**
- * Start the web server
+ * Start the HTTP server
  * - Mounts LittleFS
  * - Starts HTTP server on configured port
  * - Registers all API endpoints
  *
- * @note Requires web_auth and device_identity to be initialized first
+ * @note Requires web_auth and credentials to be initialized first
  *
  * @return ESP_OK on success
  */
-esp_err_t web_server_start(void);
+esp_err_t http_server_start(void);
 
 /**
- * Stop the web server
+ * Stop the HTTP server
  */
-esp_err_t web_server_stop(void);
+esp_err_t http_server_stop(void);
 
 /**
  * Check if server is running
  */
-bool web_server_is_running(void);
+bool http_server_is_running(void);
 
 #ifdef __cplusplus
 }

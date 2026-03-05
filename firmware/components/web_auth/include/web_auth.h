@@ -13,7 +13,7 @@ extern "C" {
 
 /**
  * Initialize web authentication
- * Uses device_identity for default password
+ * Uses credentials for default password
  *
  * @note Thread Safety: Session operations are protected by internal mutex
  *       and safe to call from multiple HTTP handler tasks concurrently.
