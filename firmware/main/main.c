@@ -193,16 +193,16 @@ void app_main(void)
         return;
     }
 
-    // Initialize device identity (generates credentials on first boot)
+    // Initialize credentials (generates secrets on first boot)
     ret = credentials_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Device identity init failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Credentials init failed: %s", esp_err_to_name(ret));
         return;
     }
 
     const credentials_t *identity = credentials_get();
     if (identity == NULL) {
-        ESP_LOGE(TAG, "Failed to get device identity");
+        ESP_LOGE(TAG, "Failed to get credentials");
         return;
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);

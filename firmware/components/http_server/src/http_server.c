@@ -84,13 +84,13 @@ static bool is_safe_path(const char *uri)
 static esp_err_t file_handler(httpd_req_t *req)
 {
     // WEB_FS_BASE_PATH + uri + .gz + null = max path
-    char filepath[CONFIG_WEB_SERVER_MAX_URI_LEN + sizeof(WEB_FS_BASE_PATH) + 4];
-    char uri_buf[CONFIG_WEB_SERVER_MAX_URI_LEN + 1];
+    char filepath[CONFIG_HTTP_SERVER_MAX_URI_LEN + sizeof(WEB_FS_BASE_PATH) + 4];
+    char uri_buf[CONFIG_HTTP_SERVER_MAX_URI_LEN + 1];
     const char *uri;
 
     // Validate and copy URI to bounded buffer
     size_t uri_len = strlen(req->uri);
-    if (uri_len > CONFIG_WEB_SERVER_MAX_URI_LEN) {
+    if (uri_len > CONFIG_HTTP_SERVER_MAX_URI_LEN) {
         httpd_resp_send_err(req, HTTPD_414_URI_TOO_LONG, "URI too long");
         return ESP_FAIL;
     }
@@ -700,7 +700,7 @@ esp_err_t http_server_start(void)
 
     // Configure server
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.server_port = CONFIG_WEB_SERVER_PORT;
+    config.server_port = CONFIG_HTTP_SERVER_PORT;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 16;
     config.stack_size = 8192;
@@ -843,7 +843,7 @@ esp_err_t http_server_start(void)
         // Server is running but degraded - return success but log warning
     }
 
-    ESP_LOGI(TAG, "Web server started on port %d", CONFIG_WEB_SERVER_PORT);
+    ESP_LOGI(TAG, "Web server started on port %d", CONFIG_HTTP_SERVER_PORT);
     return ESP_OK;  // Server is running, even if some handlers failed
 }
 
