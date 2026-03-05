@@ -1,0 +1,66 @@
+menu "LED Driver"
+
+    choice LED_DRIVER_ONBOARD_TYPE
+        prompt "Onboard LED type"
+        default LED_DRIVER_ONBOARD_WS2812
+        help
+            Select the onboard LED hardware type.
+
+        config LED_DRIVER_ONBOARD_WS2812
+            bool "WS2812 (addressable RGB)"
+        config LED_DRIVER_ONBOARD_GPIO
+            bool "Simple GPIO"
+        config LED_DRIVER_ONBOARD_NONE
+            bool "No onboard LED"
+    endchoice
+
+    config LED_DRIVER_ONBOARD_GPIO_NUM
+        int "Onboard LED GPIO"
+        default 38
+        depends on !LED_DRIVER_ONBOARD_NONE
+        help
+            GPIO pin for onboard LED. DevKitC v1.1 uses GPIO 38.
+
+    config LED_DRIVER_EXTERNAL_ENABLED
+        bool "Enable external LED"
+        default n
+        help
+            Enable support for an external LED in addition to onboard.
+
+    if LED_DRIVER_EXTERNAL_ENABLED
+
+        choice LED_DRIVER_EXTERNAL_TYPE
+            prompt "External LED type"
+            default LED_DRIVER_EXTERNAL_RGB_LEDC
+
+            config LED_DRIVER_EXTERNAL_RGB_LEDC
+                bool "RGB LED (3-channel LEDC PWM)"
+            config LED_DRIVER_EXTERNAL_MONO_LEDC
+                bool "Single color LED (LEDC PWM)"
+            config LED_DRIVER_EXTERNAL_GPIO
+                bool "Simple GPIO on/off"
+        endchoice
+
+        config LED_DRIVER_EXTERNAL_GPIO_R
+            int "External LED Red/Data GPIO"
+            default 9
+            help
+                GPIO for red channel (RGB) or data pin (mono/GPIO).
+
+        config LED_DRIVER_EXTERNAL_GPIO_G
+            int "External LED Green GPIO"
+            default 7
+            depends on LED_DRIVER_EXTERNAL_RGB_LEDC
+            help
+                GPIO for green channel.
+
+        config LED_DRIVER_EXTERNAL_GPIO_B
+            int "External LED Blue GPIO"
+            default 8
+            depends on LED_DRIVER_EXTERNAL_RGB_LEDC
+            help
+                GPIO for blue channel.
+
+    endif # LED_DRIVER_EXTERNAL_ENABLED
+
+endmenu
