@@ -19,6 +19,7 @@
 #include "http_server.h"
 #include "sys_console.h"
 #include "status_led.h"
+#include "status_buzzer.h"
 
 static const char *TAG = "boorker";
 
@@ -145,6 +146,12 @@ static void init_console(void)
         ESP_LOGW(TAG, "LED console init failed: %s", esp_err_to_name(ret));
     }
 
+    // Register status buzzer console commands
+    ret = status_buzzer_register_console();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Buzzer console init failed: %s", esp_err_to_name(ret));
+    }
+
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
 }
@@ -220,6 +227,13 @@ void app_main(void)
         ESP_LOGW(TAG, "Status LED init failed: %s (continuing without LED)",
                  esp_err_to_name(ret));
         // Non-fatal - continue without status LED
+    }
+
+    // Initialize status buzzer (registers with event bus)
+    ret = status_buzzer_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Buzzer init failed: %s", esp_err_to_name(ret));
+        // Continue - buzzer is not critical
     }
 
     // Show credentials on first boot (until OLED is implemented)
