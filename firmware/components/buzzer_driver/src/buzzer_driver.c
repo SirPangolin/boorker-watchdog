@@ -7,6 +7,7 @@
  */
 
 #include "buzzer_driver.h"
+#include "driver/ledc.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
 
@@ -32,14 +33,38 @@ esp_err_t buzzer_driver_init(void)
 
     ESP_LOGI(TAG, "Initializing buzzer driver on GPIO %d", CONFIG_BUZZER_DRIVER_GPIO);
 
-    // TODO: Task 2 - Configure LEDC timer and channel for PWM
-    // - Use CONFIG_BUZZER_DRIVER_LEDC_TIMER
-    // - Use CONFIG_BUZZER_DRIVER_LEDC_CHANNEL
-    // - Use CONFIG_BUZZER_DRIVER_PWM_FREQ
-    // - Low-level trigger: duty cycle inverted (100% duty = off, 0% duty = full volume)
+    // Configure LEDC timer
+    ledc_timer_config_t timer_conf = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .timer_num = CONFIG_BUZZER_DRIVER_LEDC_TIMER,
+        .duty_resolution = LEDC_TIMER_8_BIT,
+        .freq_hz = CONFIG_BUZZER_DRIVER_PWM_FREQ,
+        .clk_cfg = LEDC_AUTO_CLK,
+    };
+    esp_err_t err = ledc_timer_config(&timer_conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "LEDC timer config failed: %s", esp_err_to_name(err));
+        return ESP_FAIL;
+    }
 
-    // Set default state
-    s_ctx.volume = 100;
+    // Configure LEDC channel - start with GPIO HIGH (buzzer off)
+    ledc_channel_config_t channel_conf = {
+        .speed_mode = LEDC_LOW_SPEED_MODE,
+        .channel = CONFIG_BUZZER_DRIVER_LEDC_CHANNEL,
+        .timer_sel = CONFIG_BUZZER_DRIVER_LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = CONFIG_BUZZER_DRIVER_GPIO,
+        .duty = 255,  // GPIO HIGH = buzzer off (low-level trigger)
+        .hpoint = 0,
+    };
+    err = ledc_channel_config(&channel_conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "LEDC channel config failed: %s", esp_err_to_name(err));
+        return ESP_FAIL;
+    }
+
+    // Set default state - ear-safe volume for development
+    s_ctx.volume = 2;
     s_ctx.is_on = false;
     s_ctx.initialized = true;
 
@@ -59,7 +84,8 @@ esp_err_t buzzer_driver_deinit(void)
     // Ensure buzzer is off before deinit
     buzzer_driver_off();
 
-    // TODO: Task 2 - Stop LEDC and reset GPIO
+    // Stop LEDC channel with idle HIGH (buzzer off)
+    ledc_stop(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL, 1);  // 1 = idle HIGH
 
     s_ctx.initialized = false;
 
@@ -82,7 +108,24 @@ esp_err_t buzzer_driver_set_volume(uint8_t percent)
     s_ctx.volume = percent;
     ESP_LOGD(TAG, "Volume set to %d%%", percent);
 
-    // TODO: Task 2 - If buzzer is on, update LEDC duty cycle
+    // If buzzer is on, update LEDC duty cycle immediately
+    if (s_ctx.is_on) {
+        // Low-level trigger: duty=0 means GPIO always LOW = full volume
+        // duty=255 means GPIO always HIGH = off
+        // Map: volume 0% -> duty 255, volume 100% -> duty 0
+        uint32_t duty = 255 - (s_ctx.volume * 255 / 100);
+
+        esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL, duty);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to set duty: %s", esp_err_to_name(err));
+            return err;
+        }
+        err = ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to update duty: %s", esp_err_to_name(err));
+            return err;
+        }
+    }
 
     return ESP_OK;
 }
@@ -102,8 +145,21 @@ esp_err_t buzzer_driver_on(void)
     ESP_LOGD(TAG, "Buzzer on (volume: %d%%)", s_ctx.volume);
     s_ctx.is_on = true;
 
-    // TODO: Task 2 - Set LEDC duty cycle based on volume
-    // Low-level trigger: inverted duty (100% volume = 0% duty = GPIO LOW)
+    // Low-level trigger: duty=0 means GPIO always LOW = full volume
+    // duty=255 means GPIO always HIGH = off
+    // Map: volume 0% -> duty 255, volume 100% -> duty 0
+    uint32_t duty = 255 - (s_ctx.volume * 255 / 100);
+
+    esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL, duty);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set duty: %s", esp_err_to_name(err));
+        return err;
+    }
+    err = ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to update duty: %s", esp_err_to_name(err));
+        return err;
+    }
 
     return ESP_OK;
 }
@@ -118,7 +174,11 @@ esp_err_t buzzer_driver_off(void)
     ESP_LOGD(TAG, "Buzzer off");
     s_ctx.is_on = false;
 
-    // TODO: Task 2 - Set LEDC to 100% duty (GPIO HIGH = buzzer off)
+    // Set GPIO HIGH (duty 255) to turn buzzer off (low-level trigger)
+    esp_err_t err = ledc_set_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL, 255);
+    if (err != ESP_OK) return err;
+    err = ledc_update_duty(LEDC_LOW_SPEED_MODE, CONFIG_BUZZER_DRIVER_LEDC_CHANNEL);
+    if (err != ESP_OK) return err;
 
     return ESP_OK;
 }
