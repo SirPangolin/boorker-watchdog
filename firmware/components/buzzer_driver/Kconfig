@@ -1,0 +1,32 @@
+menu "Buzzer Driver"
+
+    config BUZZER_DRIVER_GPIO
+        int "Buzzer GPIO pin"
+        default 6
+        range 0 48
+        help
+            GPIO pin connected to buzzer signal (I/O pin).
+
+    config BUZZER_DRIVER_LEDC_TIMER
+        int "LEDC timer number"
+        default 1
+        range 0 3
+        help
+            LEDC timer to use (0-3). Avoid conflicts with LED driver.
+
+    config BUZZER_DRIVER_LEDC_CHANNEL
+        int "LEDC channel number"
+        default 2
+        range 0 7
+        help
+            LEDC channel to use (0-7). Avoid conflicts with LED driver.
+
+    config BUZZER_DRIVER_PWM_FREQ
+        int "PWM frequency (Hz)"
+        default 1000
+        range 100 10000
+        help
+            PWM frequency for volume modulation. Does not affect buzzer tone
+            (active buzzer has fixed internal frequency).
+
+endmenu
