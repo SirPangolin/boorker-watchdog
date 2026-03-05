@@ -12,12 +12,19 @@
 
 static const char *TAG = "buzzer_patterns";
 
-// Pattern definitions
+/**
+ * @brief Pattern definitions
+ *
+ * Each step: {on_ms, off_ms}
+ * - on_ms: Duration buzzer sounds (ms)
+ * - off_ms: Silence after sound (ms), 0 = no gap before next step
+ * - UINT16_MAX for on_ms = indefinite until stop() called (no timer scheduled)
+ */
 static const buzzer_step_t PATTERN_CHIRP[] = {{50, 0}};
 static const buzzer_step_t PATTERN_DOUBLE_BEEP[] = {{100, 100}, {100, 0}};
 static const buzzer_step_t PATTERN_TRIPLE_BEEP[] = {{100, 100}, {100, 100}, {100, 0}};
 static const buzzer_step_t PATTERN_ALARM[] = {{200, 200}};  // Loops
-static const buzzer_step_t PATTERN_SOLID[] = {{UINT16_MAX, 0}};  // Until stopped
+static const buzzer_step_t PATTERN_SOLID[] = {{UINT16_MAX, 0}};  // Indefinite until stop()
 
 // Player state
 static struct {
@@ -52,15 +59,64 @@ void buzzer_pattern_get(buzzer_preset_t preset, const buzzer_step_t **steps, siz
 
 static void timer_callback(void *arg);
 
+/**
+ * @brief Start the next step's on-phase
+ *
+ * Helper to reduce code duplication in advance_pattern().
+ * Called with mutex held.
+ */
+static void start_next_on_phase(void)
+{
+    s_player.is_on_phase = true;
+    esp_err_t err = buzzer_driver_set_volume(s_player.volume);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set volume: %s", esp_err_to_name(err));
+    }
+    err = buzzer_driver_on();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to turn buzzer on: %s", esp_err_to_name(err));
+        s_player.playing = false;
+        return;
+    }
+
+    uint16_t on_ms = s_player.steps[s_player.current_step].on_ms;
+    // UINT16_MAX = indefinite (no timer), used by SOLID pattern
+    if (on_ms < UINT16_MAX) {
+        err = esp_timer_start_once(s_player.timer, on_ms * 1000);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start timer: %s", esp_err_to_name(err));
+            s_player.playing = false;
+        }
+    }
+}
+
+/**
+ * @brief Move pattern forward to next phase/step
+ *
+ * Called with mutex held from timer callback.
+ */
 static void advance_pattern(void)
 {
+    esp_err_t err;
+
     if (s_player.is_on_phase) {
-        buzzer_driver_off();
+        // Finished on-phase, turn buzzer off
+        err = buzzer_driver_off();
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to turn buzzer off: %s", esp_err_to_name(err));
+        }
+
         uint16_t off_ms = s_player.steps[s_player.current_step].off_ms;
         if (off_ms > 0) {
+            // Start off-phase timer
             s_player.is_on_phase = false;
-            esp_timer_start_once(s_player.timer, off_ms * 1000);
+            err = esp_timer_start_once(s_player.timer, off_ms * 1000);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to start off timer: %s", esp_err_to_name(err));
+                s_player.playing = false;
+            }
         } else {
+            // No gap - move to next step immediately
             s_player.current_step++;
             if (s_player.current_step >= s_player.step_count) {
                 if (s_player.loops) {
@@ -70,15 +126,10 @@ static void advance_pattern(void)
                     return;
                 }
             }
-            s_player.is_on_phase = true;
-            buzzer_driver_set_volume(s_player.volume);
-            buzzer_driver_on();
-            uint16_t on_ms = s_player.steps[s_player.current_step].on_ms;
-            if (on_ms < UINT16_MAX) {
-                esp_timer_start_once(s_player.timer, on_ms * 1000);
-            }
+            start_next_on_phase();
         }
     } else {
+        // Finished off-phase, move to next step
         s_player.current_step++;
         if (s_player.current_step >= s_player.step_count) {
             if (s_player.loops) {
@@ -88,13 +139,7 @@ static void advance_pattern(void)
                 return;
             }
         }
-        s_player.is_on_phase = true;
-        buzzer_driver_set_volume(s_player.volume);
-        buzzer_driver_on();
-        uint16_t on_ms = s_player.steps[s_player.current_step].on_ms;
-        if (on_ms < UINT16_MAX) {
-            esp_timer_start_once(s_player.timer, on_ms * 1000);
-        }
+        start_next_on_phase();
     }
 }
 
@@ -105,6 +150,10 @@ static void timer_callback(void *arg)
             advance_pattern();
         }
         xSemaphoreGive(s_player.mutex);
+    } else {
+        // Mutex held by another context - pattern step will be delayed
+        // This can cause timing jitter but is recoverable
+        ESP_LOGW(TAG, "Timer callback: mutex busy, step delayed");
     }
 }
 
@@ -151,10 +200,22 @@ esp_err_t buzzer_pattern_play(buzzer_preset_t preset, uint8_t volume)
 {
     if (!s_player.mutex) return ESP_ERR_INVALID_STATE;
 
-    xSemaphoreTake(s_player.mutex, portMAX_DELAY);
+    // Use finite timeout to avoid deadlock with timer callback
+    if (xSemaphoreTake(s_player.mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in play");
+        return ESP_ERR_TIMEOUT;
+    }
 
-    esp_timer_stop(s_player.timer);
-    buzzer_driver_off();
+    // Stop any current pattern
+    esp_err_t err = esp_timer_stop(s_player.timer);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        // ESP_ERR_INVALID_STATE is ok (timer not running)
+        ESP_LOGW(TAG, "Failed to stop timer: %s", esp_err_to_name(err));
+    }
+    err = buzzer_driver_off();
+    if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "Failed to turn off buzzer: %s", esp_err_to_name(err));
+    }
 
     bool loops;
     buzzer_pattern_get(preset, &s_player.steps, &s_player.step_count, &loops);
@@ -169,11 +230,30 @@ esp_err_t buzzer_pattern_play(buzzer_preset_t preset, uint8_t volume)
     s_player.playing = true;
     s_player.volume = volume;
 
-    buzzer_driver_set_volume(volume);
-    buzzer_driver_on();
+    err = buzzer_driver_set_volume(volume);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set volume: %s", esp_err_to_name(err));
+    }
+
+    err = buzzer_driver_on();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start buzzer: %s", esp_err_to_name(err));
+        s_player.playing = false;
+        xSemaphoreGive(s_player.mutex);
+        return err;
+    }
+
     uint16_t on_ms = s_player.steps[0].on_ms;
+    // UINT16_MAX = indefinite (no timer needed)
     if (on_ms < UINT16_MAX) {
-        esp_timer_start_once(s_player.timer, on_ms * 1000);
+        err = esp_timer_start_once(s_player.timer, on_ms * 1000);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to start timer: %s", esp_err_to_name(err));
+            buzzer_driver_off();
+            s_player.playing = false;
+            xSemaphoreGive(s_player.mutex);
+            return err;
+        }
     }
 
     xSemaphoreGive(s_player.mutex);
@@ -185,17 +265,38 @@ esp_err_t buzzer_pattern_stop(void)
 {
     if (!s_player.mutex) return ESP_ERR_INVALID_STATE;
 
-    xSemaphoreTake(s_player.mutex, portMAX_DELAY);
-    esp_timer_stop(s_player.timer);
-    buzzer_driver_off();
+    // Use finite timeout to avoid deadlock
+    if (xSemaphoreTake(s_player.mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in stop");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t ret = ESP_OK;
+
+    esp_err_t err = esp_timer_stop(s_player.timer);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        // ESP_ERR_INVALID_STATE is ok (timer not running)
+        ESP_LOGW(TAG, "Failed to stop timer: %s", esp_err_to_name(err));
+        ret = err;
+    }
+
+    err = buzzer_driver_off();
+    if (err != ESP_OK && err != ESP_ERR_TIMEOUT) {
+        ESP_LOGW(TAG, "Failed to turn off buzzer: %s", esp_err_to_name(err));
+        if (ret == ESP_OK) ret = err;
+    }
+
     s_player.playing = false;
     xSemaphoreGive(s_player.mutex);
 
     ESP_LOGD(TAG, "Stopped");
-    return ESP_OK;
+    return ret;
 }
 
 bool buzzer_pattern_is_playing(void)
 {
+    // Reading a bool is atomic on ESP32 - returns point-in-time snapshot
+    // Caller should not make critical decisions based on this value
+    // as it may change immediately after return
     return s_player.playing;
 }

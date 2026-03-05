@@ -327,8 +327,8 @@ static void on_event_state_change(event_state_t new_state, void *ctx)
             buzzer_pattern_stop();
             s_ctx.alarm_active = false;
         }
-        // Play acknowledgment chirp (unless alerts_only is set and this isn't an alert)
-        if (!s_ctx.alerts_only || is_alert) {
+        // Play acknowledgment chirp unless in alerts_only mode
+        if (!s_ctx.alerts_only) {
             play_preset_unlocked(BUZZER_PRESET_CHIRP);
         }
         xSemaphoreGive(s_ctx.mutex);
@@ -620,14 +620,6 @@ esp_err_t status_buzzer_save_config(void)
 
     xSemaphoreGive(s_ctx.mutex);
     return ret;
-}
-
-esp_err_t status_buzzer_register_console(void)
-{
-    // Will be implemented in buzzer_console.c
-    // This is called from outside during console setup
-    ESP_LOGI(TAG, "Console registration delegated to buzzer_console.c");
-    return ESP_OK;
 }
 
 const char *buzzer_preset_name(buzzer_preset_t preset)
