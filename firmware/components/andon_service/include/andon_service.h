@@ -4,7 +4,7 @@
  *
  * Implements a centralized notification hub inspired by Toyota Production System's
  * ANDON concept. Domains (wifi_manager, rules_engine, etc.) publish states via
- * andon_set_state(). Channels (led_feedback, buzzer, etc.) subscribe via
+ * andon_set_state(). Channels (status_led, buzzer, etc.) subscribe via
  * andon_register_channel() and receive callbacks when the active state changes.
  *
  * States are tracked via a bitmask, allowing multiple states to be active
@@ -137,7 +137,7 @@ andon_state_t andon_get_active_state(void);
  * Registers a callback to be notified when the active ANDON state changes.
  * The callback is immediately called with the current active state.
  *
- * @param name Human-readable channel name for logging (e.g., "led_feedback")
+ * @param name Human-readable channel name for logging (e.g., "status_led")
  * @param cb Callback function to invoke on state changes
  * @param ctx User context pointer passed to callback
  * @return ESP_OK on success

@@ -18,7 +18,7 @@
 #include "web_auth.h"
 #include "web_server.h"
 #include "system_console.h"
-#include "led_feedback.h"
+#include "status_led.h"
 
 static const char *TAG = "boorker";
 
@@ -139,8 +139,8 @@ static void init_console(void)
         // Non-fatal - continue without system commands
     }
 
-    // Register LED feedback console commands
-    ret = led_feedback_register_console();
+    // Register status LED console commands
+    ret = status_led_register_console();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "LED console init failed: %s", esp_err_to_name(ret));
     }
@@ -214,12 +214,12 @@ void app_main(void)
         return;
     }
 
-    // Initialize LED feedback (registers with ANDON)
-    ret = led_feedback_init();
+    // Initialize status LED (registers with ANDON)
+    ret = status_led_init();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "LED feedback init failed: %s (continuing without LED)",
+        ESP_LOGW(TAG, "Status LED init failed: %s (continuing without LED)",
                  esp_err_to_name(ret));
-        // Non-fatal - continue without LED feedback
+        // Non-fatal - continue without status LED
     }
 
     // Show credentials on first boot (until OLED is implemented)
