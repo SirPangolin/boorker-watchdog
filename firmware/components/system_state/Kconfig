@@ -1,0 +1,10 @@
+menu "System State"
+
+    config SYSTEM_STATE_NVS_NAMESPACE
+        string "NVS namespace for system state"
+        default "sys_state"
+        help
+            NVS namespace used to persist system lifecycle state
+            (claimed status, factory reset, OTA state).
+
+endmenu

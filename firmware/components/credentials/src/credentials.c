@@ -1,4 +1,4 @@
-#include "device_identity.h"
+#include "credentials.h"
 #include "esp_log.h"
 #include "esp_mac.h"
 #include "esp_random.h"
@@ -7,15 +7,15 @@
 #include <string.h>
 #include <stdio.h>
 
-static const char *TAG = "device_id";
+static const char *TAG = "cred";
 
-#define NVS_NAMESPACE "device_id"
+#define NVS_NAMESPACE "cred"
 #define NVS_KEY_WEB_PASS "web_pass"
 #define NVS_KEY_AP_PASS "ap_pass"
 #define NVS_KEY_BLE_POP "ble_pop"
 #define NVS_KEY_FIRST_BOOT "first_boot"
 
-static device_identity_t s_identity;
+static credentials_t s_cred;
 static bool s_initialized = false;
 static bool s_first_boot = false;
 
@@ -54,12 +54,12 @@ static esp_err_t derive_node_name(void)
     }
 
     // Node suffix from last 2 bytes of MAC
-    snprintf(s_identity.node_suffix, sizeof(s_identity.node_suffix),
+    snprintf(s_cred.node_suffix, sizeof(s_cred.node_suffix),
              "%02X%02X", mac[4], mac[5]);
 
     // Full node name
-    snprintf(s_identity.node_name, sizeof(s_identity.node_name),
-             "%s-%s", CONFIG_DEVICE_ID_NAME_PREFIX, s_identity.node_suffix);
+    snprintf(s_cred.node_name, sizeof(s_cred.node_name),
+             "%s-%s", CONFIG_CRED_NAME_PREFIX, s_cred.node_suffix);
 
     return ESP_OK;
 }
@@ -76,34 +76,34 @@ static esp_err_t load_or_generate_credentials(void)
     }
 
     // Check if credentials exist
-    size_t len = sizeof(s_identity.web_password);
-    ret = nvs_get_str(handle, NVS_KEY_WEB_PASS, s_identity.web_password, &len);
+    size_t len = sizeof(s_cred.web_password);
+    ret = nvs_get_str(handle, NVS_KEY_WEB_PASS, s_cred.web_password, &len);
 
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         // First boot - generate new credentials
         ESP_LOGI(TAG, "First boot - generating credentials with hardware RNG");
         s_first_boot = true;
 
-        generate_random_string(s_identity.web_password, CONFIG_DEVICE_ID_WEB_PASS_LEN);
-        generate_random_string(s_identity.ap_password, CONFIG_DEVICE_ID_AP_PASS_LEN);
-        generate_random_digits(s_identity.ble_pop, 6);
+        generate_random_string(s_cred.web_password, CONFIG_CRED_WEB_PASS_LEN);
+        generate_random_string(s_cred.ap_password, CONFIG_CRED_AP_PASS_LEN);
+        generate_random_digits(s_cred.ble_pop, 6);
 
         // Store in NVS
-        ret = nvs_set_str(handle, NVS_KEY_WEB_PASS, s_identity.web_password);
+        ret = nvs_set_str(handle, NVS_KEY_WEB_PASS, s_cred.web_password);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set web_pass: %s", esp_err_to_name(ret));
             nvs_close(handle);
             return ret;
         }
 
-        ret = nvs_set_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password);
+        ret = nvs_set_str(handle, NVS_KEY_AP_PASS, s_cred.ap_password);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set ap_pass: %s", esp_err_to_name(ret));
             nvs_close(handle);
             return ret;
         }
 
-        ret = nvs_set_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop);
+        ret = nvs_set_str(handle, NVS_KEY_BLE_POP, s_cred.ble_pop);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to set ble_pop: %s", esp_err_to_name(ret));
             nvs_close(handle);
@@ -124,19 +124,19 @@ static esp_err_t load_or_generate_credentials(void)
             return ret;
         }
 
-        ESP_LOGI(TAG, "Credentials generated for %s", s_identity.node_name);
+        ESP_LOGI(TAG, "Credentials generated for %s", s_cred.node_name);
     } else if (ret == ESP_OK) {
         // Load existing credentials
-        len = sizeof(s_identity.ap_password);
-        ret = nvs_get_str(handle, NVS_KEY_AP_PASS, s_identity.ap_password, &len);
+        len = sizeof(s_cred.ap_password);
+        ret = nvs_get_str(handle, NVS_KEY_AP_PASS, s_cred.ap_password, &len);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to read ap_pass: %s", esp_err_to_name(ret));
             nvs_close(handle);
             return ret;
         }
 
-        len = sizeof(s_identity.ble_pop);
-        ret = nvs_get_str(handle, NVS_KEY_BLE_POP, s_identity.ble_pop, &len);
+        len = sizeof(s_cred.ble_pop);
+        ret = nvs_get_str(handle, NVS_KEY_BLE_POP, s_cred.ble_pop, &len);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to read ble_pop: %s", esp_err_to_name(ret));
             nvs_close(handle);
@@ -145,22 +145,22 @@ static esp_err_t load_or_generate_credentials(void)
 
         // Validate loaded credentials - check for reasonable values
         bool valid = true;
-        if (strlen(s_identity.web_password) < 8) {
-            ESP_LOGW(TAG, "Loaded web_password too short (%d chars)", (int)strlen(s_identity.web_password));
+        if (strlen(s_cred.web_password) < 8) {
+            ESP_LOGW(TAG, "Loaded web_password too short (%d chars)", (int)strlen(s_cred.web_password));
             valid = false;
         }
-        if (strlen(s_identity.ap_password) < 8) {
-            ESP_LOGW(TAG, "Loaded ap_password too short (%d chars)", (int)strlen(s_identity.ap_password));
+        if (strlen(s_cred.ap_password) < 8) {
+            ESP_LOGW(TAG, "Loaded ap_password too short (%d chars)", (int)strlen(s_cred.ap_password));
             valid = false;
         }
-        if (strlen(s_identity.ble_pop) != 6) {
+        if (strlen(s_cred.ble_pop) != 6) {
             ESP_LOGW(TAG, "Loaded ble_pop invalid length (%d chars, expected 6)",
-                     (int)strlen(s_identity.ble_pop));
+                     (int)strlen(s_cred.ble_pop));
             valid = false;
         }
         // Check ble_pop contains only digits
-        for (size_t i = 0; i < strlen(s_identity.ble_pop) && valid; i++) {
-            if (s_identity.ble_pop[i] < '0' || s_identity.ble_pop[i] > '9') {
+        for (size_t i = 0; i < strlen(s_cred.ble_pop) && valid; i++) {
+            if (s_cred.ble_pop[i] < '0' || s_cred.ble_pop[i] > '9') {
                 ESP_LOGW(TAG, "Loaded ble_pop contains non-digit character");
                 valid = false;
             }
@@ -171,7 +171,7 @@ static esp_err_t load_or_generate_credentials(void)
             nvs_close(handle);
             // Clear invalid data and regenerate
             s_initialized = false;
-            return device_identity_regenerate();
+            return credentials_regenerate();
         }
 
         // Check if first boot was acknowledged
@@ -180,7 +180,7 @@ static esp_err_t load_or_generate_credentials(void)
             s_first_boot = true;
         }
 
-        ESP_LOGI(TAG, "Credentials loaded and validated for %s", s_identity.node_name);
+        ESP_LOGI(TAG, "Credentials loaded and validated for %s", s_cred.node_name);
         ret = ESP_OK;  // Ensure success return
     } else {
         ESP_LOGE(TAG, "Failed to read NVS: %s", esp_err_to_name(ret));
@@ -190,7 +190,7 @@ static esp_err_t load_or_generate_credentials(void)
     return ret;
 }
 
-esp_err_t device_identity_init(void)
+esp_err_t credentials_init(void)
 {
     if (s_initialized) {
         return ESP_OK;
@@ -210,15 +210,15 @@ esp_err_t device_identity_init(void)
 
     s_initialized = true;
 
-#if CONFIG_DEVICE_ID_LOG_CREDENTIALS
+#if CONFIG_CRED_LOG_CREDENTIALS
     // Display credentials on every boot until acknowledged
     if (s_first_boot) {
         ESP_LOGI(TAG, "========================================");
         ESP_LOGI(TAG, "CREDENTIALS (save these!):");
-        ESP_LOGI(TAG, "  Node: %s", s_identity.node_name);
-        ESP_LOGI(TAG, "  Web Password: %s", s_identity.web_password);
-        ESP_LOGI(TAG, "  AP Password: %s", s_identity.ap_password);
-        ESP_LOGI(TAG, "  BLE PoP: %s", s_identity.ble_pop);
+        ESP_LOGI(TAG, "  Node: %s", s_cred.node_name);
+        ESP_LOGI(TAG, "  Web Password: %s", s_cred.web_password);
+        ESP_LOGI(TAG, "  AP Password: %s", s_cred.ap_password);
+        ESP_LOGI(TAG, "  BLE PoP: %s", s_cred.ble_pop);
         ESP_LOGI(TAG, "========================================");
     }
 #endif
@@ -226,21 +226,21 @@ esp_err_t device_identity_init(void)
     return ESP_OK;
 }
 
-const device_identity_t* device_identity_get(void)
+const credentials_t* credentials_get(void)
 {
     if (!s_initialized) {
         ESP_LOGE(TAG, "Not initialized");
         return NULL;
     }
-    return &s_identity;
+    return &s_cred;
 }
 
-bool device_identity_is_first_boot(void)
+bool credentials_is_first_boot(void)
 {
     return s_first_boot;
 }
 
-esp_err_t device_identity_ack_first_boot(void)
+esp_err_t credentials_ack_first_boot(void)
 {
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -267,7 +267,7 @@ esp_err_t device_identity_ack_first_boot(void)
     return ret;
 }
 
-esp_err_t device_identity_regenerate(void)
+esp_err_t credentials_regenerate(void)
 {
     nvs_handle_t handle;
     esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
@@ -295,10 +295,10 @@ esp_err_t device_identity_regenerate(void)
 
     // Re-initialize (will generate new credentials)
     s_initialized = false;
-    return device_identity_init();
+    return credentials_init();
 }
 
-esp_err_t device_identity_get_qr_json(char *buf, size_t buf_len)
+esp_err_t credentials_get_qr_json(char *buf, size_t buf_len)
 {
     if (buf == NULL || buf_len == 0) {
         return ESP_ERR_INVALID_ARG;
@@ -317,11 +317,11 @@ esp_err_t device_identity_get_qr_json(char *buf, size_t buf_len)
         "\"ble_name\":\"PROV_%s\","
         "\"setup_url\":\"http://192.168.4.1\""
         "}",
-        s_identity.node_name,
-        s_identity.web_password,
-        s_identity.ap_password,
-        s_identity.ble_pop,
-        s_identity.node_suffix
+        s_cred.node_name,
+        s_cred.web_password,
+        s_cred.ap_password,
+        s_cred.ble_pop,
+        s_cred.node_suffix
     );
 
     if (written < 0 || (size_t)written >= buf_len) {

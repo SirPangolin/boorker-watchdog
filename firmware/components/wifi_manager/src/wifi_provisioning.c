@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
-#include "device_identity.h"
+#include "credentials.h"
 #include "esp_wifi.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
@@ -91,16 +91,16 @@ esp_err_t wifi_prov_start(const char *device_name)
         // Continue anyway to allow re-provisioning
     }
 
-    // Configure security (with Proof-of-Possession from device_identity)
+    // Configure security (with Proof-of-Possession from credentials)
     wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-    const device_identity_t *identity = device_identity_get();
+    const credentials_t *identity = credentials_get();
     if (identity == NULL) {
-        ESP_LOGE(TAG, "device_identity not initialized");
+        ESP_LOGE(TAG, "credentials not initialized");
         wifi_prov_mgr_deinit();
         return ESP_ERR_INVALID_STATE;
     }
     const char *pop = identity->ble_pop;
-    ESP_LOGI(TAG, "Using BLE PoP from device_identity");
+    ESP_LOGI(TAG, "Using BLE PoP from credentials");
 
     // BLE service UUID (generated: b00e4e8c-7c9a-4e5d-8a2f-1d3c5f7a9b0e)
     // Use a unique UUID to avoid conflicts with other BLE devices
