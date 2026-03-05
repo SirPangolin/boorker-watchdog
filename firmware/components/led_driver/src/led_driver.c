@@ -2,7 +2,7 @@
  * @file led_driver.c
  * @brief LED hardware abstraction layer implementation
  *
- * Uses esp-idf-lib led_indicator for WS2812 addressable LEDs.
+ * Uses esp-iot-solution led_indicator component for LED control.
  * Thread-safe with mutex protection.
  */
 
@@ -13,6 +13,7 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 #include "driver/ledc.h"  // For LEDC_TIMER_*, LEDC_CHANNEL_*
+#include "driver/gpio.h"  // For gpio_reset_pin()
 
 static const char *TAG = "led_driver";
 
@@ -31,7 +32,7 @@ static inline uint8_t rgb_to_luminance(uint8_t r, uint8_t g, uint8_t b)
  */
 typedef struct {
     led_indicator_handle_t onboard_handle;   /**< Handle for onboard LED */
-    led_indicator_handle_t external_handle;  /**< Handle for external LED (future) */
+    led_indicator_handle_t external_handle;  /**< Handle for external LED */
     led_driver_caps_t caps;                  /**< Cached capabilities */
     uint8_t brightness;                      /**< Current brightness (0-100) */
     SemaphoreHandle_t mutex;                 /**< Mutex for thread safety */
@@ -52,11 +53,17 @@ static esp_err_t recreate_indicators_with_patterns(void)
 {
     // Delete existing handles
     if (s_ctx.onboard_handle) {
-        led_indicator_delete(s_ctx.onboard_handle);
+        esp_err_t del_ret = led_indicator_delete(s_ctx.onboard_handle);
+        if (del_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to delete onboard indicator: %s", esp_err_to_name(del_ret));
+        }
         s_ctx.onboard_handle = NULL;
     }
     if (s_ctx.external_handle) {
-        led_indicator_delete(s_ctx.external_handle);
+        esp_err_t del_ret = led_indicator_delete(s_ctx.external_handle);
+        if (del_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to delete external indicator: %s", esp_err_to_name(del_ret));
+        }
         s_ctx.external_handle = NULL;
     }
 
@@ -109,6 +116,28 @@ static esp_err_t recreate_indicators_with_patterns(void)
 #if CONFIG_LED_DRIVER_EXTERNAL_ENABLED
 
 #if CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
+    // Reset GPIOs before reconfiguring - led_indicator_rgb_deinit() doesn't release
+    // GPIO configuration, causing "GPIO X is not usable" warnings on recreation
+    gpio_reset_pin(CONFIG_LED_DRIVER_EXTERNAL_GPIO_R);
+    gpio_reset_pin(CONFIG_LED_DRIVER_EXTERNAL_GPIO_G);
+    gpio_reset_pin(CONFIG_LED_DRIVER_EXTERNAL_GPIO_B);
+
+    // Stop LEDC channels before reconfiguring - led_indicator_rgb_deinit() doesn't
+    // clean up LEDC resources, which can cause issues when recreating the indicator
+    esp_err_t ledc_ret;
+    ledc_ret = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
+    if (ledc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop LEDC channel 1: %s", esp_err_to_name(ledc_ret));
+    }
+    ledc_ret = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_2, 0);
+    if (ledc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop LEDC channel 2: %s", esp_err_to_name(ledc_ret));
+    }
+    ledc_ret = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_3, 0);
+    if (ledc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop LEDC channel 3: %s", esp_err_to_name(ledc_ret));
+    }
+
     led_indicator_rgb_config_t rgb_config = {
         .is_active_level_high = true,
         .timer_inited = false,
@@ -134,6 +163,15 @@ static esp_err_t recreate_indicators_with_patterns(void)
     }
 
 #elif CONFIG_LED_DRIVER_EXTERNAL_MONO_LEDC
+    // Reset GPIO before reconfiguring
+    gpio_reset_pin(CONFIG_LED_DRIVER_EXTERNAL_GPIO_R);
+
+    // Stop LEDC channel before reconfiguring
+    esp_err_t ledc_ret = ledc_stop(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, 0);
+    if (ledc_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to stop LEDC channel 1: %s", esp_err_to_name(ledc_ret));
+    }
+
     led_indicator_ledc_config_t ledc_config = {
         .is_active_level_high = true,
         .timer_inited = false,
@@ -155,6 +193,9 @@ static esp_err_t recreate_indicators_with_patterns(void)
     }
 
 #elif CONFIG_LED_DRIVER_EXTERNAL_GPIO
+    // Reset GPIO before reconfiguring
+    gpio_reset_pin(CONFIG_LED_DRIVER_EXTERNAL_GPIO_R);
+
     led_indicator_gpio_config_t ext_gpio_config = {
         .is_active_level_high = true,
         .gpio_num = CONFIG_LED_DRIVER_EXTERNAL_GPIO_R,
