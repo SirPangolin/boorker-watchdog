@@ -1,17 +1,17 @@
 /**
  * @file status_led.h
- * @brief Status LED component (ANDON channel subscriber)
+ * @brief Status LED component (event bus channel subscriber)
  *
  * Maps system states to LED patterns via onboard (and optional external) LED.
- * Subscribes to andon_service for state notifications and renders appropriate
- * LED patterns based on the current ANDON state.
+ * Subscribes to event_bus for state notifications and renders appropriate
+ * LED patterns based on the current event state.
  *
  * @note Thread Safety: All public functions are thread-safe and may be
  *       called from multiple tasks.
  *
- * @note ANDON Integration: State changes come from andon_service callbacks.
- *       Domains should use andon_set_state()/andon_clear_state() rather than
- *       calling status_led directly.
+ * @note Event Bus Integration: State changes come from event_bus callbacks.
+ *       Domains should use event_bus_set_state()/event_bus_clear_state() rather
+ *       than calling status_led directly.
  */
 
 #pragma once
@@ -27,15 +27,15 @@ extern "C" {
 /**
  * @brief Internal LED pattern states (used for led_indicator pattern indexing)
  *
- * @note These are internal pattern identifiers, not a public API. ANDON states
- *       are mapped to these patterns in the ANDON callback handler.
+ * @note These are internal pattern identifiers, not a public API. Event states
+ *       are mapped to these patterns in the event bus callback handler.
  *
  * @note Enum values use STATUS_LED_ prefix to avoid conflict with led_indicator's
  *       LED_STATE_OFF/LED_STATE_ON brightness values.
  */
 typedef enum {
     // Pattern identifiers for LED visual feedback
-    // Note: Priority is handled by ANDON service, not by this enum's ordering.
+    // Note: Priority is handled by event bus, not by this enum's ordering.
     // These simply define the visual patterns to display.
 
     STATUS_LED_ALERT_CRITICAL,       ///< Fast double-pulse (red on RGB)
@@ -55,7 +55,7 @@ typedef enum {
  * @brief Initialize status LED component
  *
  * Creates internal mutex, loads config from NVS (or uses Kconfig defaults),
- * initializes the LED indicator driver(s), and registers as an ANDON channel.
+ * initializes the LED indicator driver(s), and registers as an event bus channel.
  *
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if already initialized

@@ -3,7 +3,7 @@
 #include "device_identity.h"
 #include "device_state.h"
 #include "wifi_manager.h"
-#include "andon_service.h"
+#include "event_bus.h"
 #include "system_console.h"
 #include "version.h"
 #include "esp_log.h"
@@ -489,9 +489,9 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     }
 
     // Set FIRST_BOOT LED state
-    esp_err_t andon_ret = andon_set_state(ANDON_FIRST_BOOT);
-    if (andon_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set FIRST_BOOT LED state: %s", esp_err_to_name(andon_ret));
+    esp_err_t event_ret = event_bus_set_state(EVENT_FIRST_BOOT);
+    if (event_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set FIRST_BOOT LED state: %s", esp_err_to_name(event_ret));
         // Non-fatal - continue with factory reset
     }
 
