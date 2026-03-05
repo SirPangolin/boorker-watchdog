@@ -1,5 +1,5 @@
 # Build dependency list (tailscale_manager is optional)
-set(SYSTEM_CONSOLE_REQUIRES console esp_timer device_identity wifi_manager)
+set(SYSTEM_CONSOLE_REQUIRES console esp_timer credentials wifi_manager)
 
 if(CONFIG_TS_MGR_ENABLED)
     list(APPEND SYSTEM_CONSOLE_REQUIRES tailscale_manager)

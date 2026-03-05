@@ -10,7 +10,7 @@
 #include "freertos/semphr.h"
 #include "argtable3/argtable3.h"
 #include "version.h"
-#include "device_identity.h"
+#include "credentials.h"
 #include "wifi_manager.h"
 #if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
@@ -295,7 +295,7 @@ static int cmd_uptime(int argc, char **argv)
 static int cmd_status(int argc, char **argv)
 {
     // Header with version and node name
-    const device_identity_t *id = device_identity_get();
+    const credentials_t *id = credentials_get();
     printf("Boorker v%s", BOORKER_VERSION_STRING);
     if (id) {
         printf(" - %s", id->node_name);

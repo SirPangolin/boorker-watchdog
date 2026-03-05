@@ -1,11 +1,11 @@
 /**
- * @file device_state.c
- * @brief Device lifecycle state management implementation
+ * @file system_state.c
+ * @brief System lifecycle state management implementation
  *
  * Manages system lifecycle states with NVS persistence and thread-safe access.
  */
 
-#include "device_state.h"
+#include "system_state.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -13,7 +13,7 @@
 #include "freertos/semphr.h"
 #include "sdkconfig.h"
 
-static const char *TAG = "device_state";
+static const char *TAG = "system_state";
 
 // NVS keys
 #define NVS_KEY_CLAIMED     "claimed"
@@ -26,30 +26,30 @@ static const char *TAG = "device_state";
 
 // State name arrays for logging
 static const char *factory_reset_names[] = {
-    [DEVICE_FACTORY_RESET_NONE]        = "NONE",
-    [DEVICE_FACTORY_RESET_PENDING]     = "PENDING",
-    [DEVICE_FACTORY_RESET_IN_PROGRESS] = "IN_PROGRESS",
+    [SYSTEM_FACTORY_RESET_NONE]        = "NONE",
+    [SYSTEM_FACTORY_RESET_PENDING]     = "PENDING",
+    [SYSTEM_FACTORY_RESET_IN_PROGRESS] = "IN_PROGRESS",
 };
 
 static const char *ota_state_names[] = {
-    [DEVICE_OTA_IDLE]           = "IDLE",
-    [DEVICE_OTA_DOWNLOADING]    = "DOWNLOADING",
-    [DEVICE_OTA_VERIFYING]      = "VERIFYING",
-    [DEVICE_OTA_PENDING_REBOOT] = "PENDING_REBOOT",
+    [SYSTEM_OTA_IDLE]           = "IDLE",
+    [SYSTEM_OTA_DOWNLOADING]    = "DOWNLOADING",
+    [SYSTEM_OTA_VERIFYING]      = "VERIFYING",
+    [SYSTEM_OTA_PENDING_REBOOT] = "PENDING_REBOOT",
 };
 
 // Static state structure
 static struct {
     bool initialized;
     bool claimed;
-    device_factory_reset_t factory_reset;
-    device_ota_state_t ota_state;
+    system_factory_reset_t factory_reset;
+    system_ota_state_t ota_state;
     SemaphoreHandle_t mutex;
 } s_state = {
     .initialized = false,
     .claimed = false,
-    .factory_reset = DEVICE_FACTORY_RESET_NONE,
-    .ota_state = DEVICE_OTA_IDLE,
+    .factory_reset = SYSTEM_FACTORY_RESET_NONE,
+    .ota_state = SYSTEM_OTA_IDLE,
     .mutex = NULL,
 };
 
@@ -68,7 +68,7 @@ static void load_state_from_nvs(void)
     nvs_handle_t handle;
     esp_err_t ret;
 
-    ret = nvs_open(CONFIG_DEVICE_STATE_NVS_NAMESPACE, NVS_READONLY, &handle);
+    ret = nvs_open(CONFIG_SYSTEM_STATE_NVS_NAMESPACE, NVS_READONLY, &handle);
     if (ret != ESP_OK) {
         if (ret == ESP_ERR_NVS_NOT_FOUND) {
             ESP_LOGI(TAG, "No saved state found, using defaults");
@@ -91,11 +91,11 @@ static void load_state_from_nvs(void)
     uint8_t factory_rst_val;
     ret = nvs_get_u8(handle, NVS_KEY_FACTORY_RST, &factory_rst_val);
     if (ret == ESP_OK) {
-        if (factory_rst_val <= DEVICE_FACTORY_RESET_IN_PROGRESS) {
-            s_state.factory_reset = (device_factory_reset_t)factory_rst_val;
+        if (factory_rst_val <= SYSTEM_FACTORY_RESET_IN_PROGRESS) {
+            s_state.factory_reset = (system_factory_reset_t)factory_rst_val;
         } else {
             ESP_LOGW(TAG, "Invalid factory_rst value %d, using NONE", factory_rst_val);
-            s_state.factory_reset = DEVICE_FACTORY_RESET_NONE;
+            s_state.factory_reset = SYSTEM_FACTORY_RESET_NONE;
         }
     } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to read '%s': %s", NVS_KEY_FACTORY_RST, esp_err_to_name(ret));
@@ -105,11 +105,11 @@ static void load_state_from_nvs(void)
     uint8_t ota_state_val;
     ret = nvs_get_u8(handle, NVS_KEY_OTA_STATE, &ota_state_val);
     if (ret == ESP_OK) {
-        if (ota_state_val <= DEVICE_OTA_PENDING_REBOOT) {
-            s_state.ota_state = (device_ota_state_t)ota_state_val;
+        if (ota_state_val <= SYSTEM_OTA_PENDING_REBOOT) {
+            s_state.ota_state = (system_ota_state_t)ota_state_val;
         } else {
             ESP_LOGW(TAG, "Invalid ota_state value %d, using IDLE", ota_state_val);
-            s_state.ota_state = DEVICE_OTA_IDLE;
+            s_state.ota_state = SYSTEM_OTA_IDLE;
         }
     } else if (ret != ESP_ERR_NVS_NOT_FOUND) {
         ESP_LOGW(TAG, "Failed to read '%s': %s", NVS_KEY_OTA_STATE, esp_err_to_name(ret));
@@ -135,7 +135,7 @@ static esp_err_t save_u8_to_nvs(const char *key, uint8_t value)
     nvs_handle_t handle;
     esp_err_t ret;
 
-    ret = nvs_open(CONFIG_DEVICE_STATE_NVS_NAMESPACE, NVS_READWRITE, &handle);
+    ret = nvs_open(CONFIG_SYSTEM_STATE_NVS_NAMESPACE, NVS_READWRITE, &handle);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to open NVS for writing: %s", esp_err_to_name(ret));
         return ret;
@@ -161,7 +161,7 @@ static esp_err_t save_u8_to_nvs(const char *key, uint8_t value)
 // Core API Implementation
 // --------------------------------------------------------------------------
 
-esp_err_t device_state_init(void)
+esp_err_t system_state_init(void)
 {
     if (s_state.initialized) {
         ESP_LOGD(TAG, "Already initialized");
@@ -184,7 +184,7 @@ esp_err_t device_state_init(void)
     return ESP_OK;
 }
 
-esp_err_t device_state_deinit(void)
+esp_err_t system_state_deinit(void)
 {
     if (!s_state.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -211,17 +211,17 @@ esp_err_t device_state_deinit(void)
 // Claimed Status API
 // --------------------------------------------------------------------------
 
-bool device_state_is_claimed(void)
+bool system_state_is_claimed(void)
 {
     if (!s_state.initialized) {
-        ESP_LOGW(TAG, "device_state_is_claimed() called before init - returning false");
+        ESP_LOGW(TAG, "system_state_is_claimed() called before init - returning false");
         return false;
     }
     // Reading a single bool is atomic on ESP32
     return s_state.claimed;
 }
 
-esp_err_t device_state_set_claimed(bool claimed)
+esp_err_t system_state_set_claimed(bool claimed)
 {
     if (!s_state.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -252,17 +252,17 @@ esp_err_t device_state_set_claimed(bool claimed)
 // Factory Reset API
 // --------------------------------------------------------------------------
 
-device_factory_reset_t device_state_get_factory_reset(void)
+system_factory_reset_t system_state_get_factory_reset(void)
 {
     if (!s_state.initialized) {
-        ESP_LOGW(TAG, "device_state_get_factory_reset() called before init - returning NONE");
-        return DEVICE_FACTORY_RESET_NONE;
+        ESP_LOGW(TAG, "system_state_get_factory_reset() called before init - returning NONE");
+        return SYSTEM_FACTORY_RESET_NONE;
     }
     // Reading a single enum (backed by int) is atomic on ESP32
     return s_state.factory_reset;
 }
 
-esp_err_t device_state_request_factory_reset(void)
+esp_err_t system_state_request_factory_reset(void)
 {
     if (!s_state.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -273,9 +273,9 @@ esp_err_t device_state_request_factory_reset(void)
         return ESP_ERR_TIMEOUT;
     }
 
-    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)DEVICE_FACTORY_RESET_PENDING);
+    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)SYSTEM_FACTORY_RESET_PENDING);
     if (ret == ESP_OK) {
-        s_state.factory_reset = DEVICE_FACTORY_RESET_PENDING;
+        s_state.factory_reset = SYSTEM_FACTORY_RESET_PENDING;
         ESP_LOGI(TAG, "Factory reset requested (state: %s)",
                  factory_reset_names[s_state.factory_reset]);
     }
@@ -284,7 +284,7 @@ esp_err_t device_state_request_factory_reset(void)
     return ret;
 }
 
-esp_err_t device_state_begin_factory_reset(void)
+esp_err_t system_state_begin_factory_reset(void)
 {
     if (!s_state.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -296,16 +296,16 @@ esp_err_t device_state_begin_factory_reset(void)
     }
 
     // Only allow transition from PENDING state
-    if (s_state.factory_reset != DEVICE_FACTORY_RESET_PENDING) {
+    if (s_state.factory_reset != SYSTEM_FACTORY_RESET_PENDING) {
         ESP_LOGW(TAG, "Cannot begin factory reset: current state is %s",
                  factory_reset_names[s_state.factory_reset]);
         xSemaphoreGive(s_state.mutex);
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)DEVICE_FACTORY_RESET_IN_PROGRESS);
+    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)SYSTEM_FACTORY_RESET_IN_PROGRESS);
     if (ret == ESP_OK) {
-        s_state.factory_reset = DEVICE_FACTORY_RESET_IN_PROGRESS;
+        s_state.factory_reset = SYSTEM_FACTORY_RESET_IN_PROGRESS;
         ESP_LOGI(TAG, "Factory reset in progress (state: %s)",
                  factory_reset_names[s_state.factory_reset]);
     }
@@ -314,7 +314,7 @@ esp_err_t device_state_begin_factory_reset(void)
     return ret;
 }
 
-esp_err_t device_state_clear_factory_reset(void)
+esp_err_t system_state_clear_factory_reset(void)
 {
     if (!s_state.initialized) {
         return ESP_ERR_INVALID_STATE;
@@ -326,15 +326,15 @@ esp_err_t device_state_clear_factory_reset(void)
     }
 
     // Skip if already cleared
-    if (s_state.factory_reset == DEVICE_FACTORY_RESET_NONE) {
+    if (s_state.factory_reset == SYSTEM_FACTORY_RESET_NONE) {
         xSemaphoreGive(s_state.mutex);
         return ESP_OK;
     }
 
-    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)DEVICE_FACTORY_RESET_NONE);
+    esp_err_t ret = save_u8_to_nvs(NVS_KEY_FACTORY_RST, (uint8_t)SYSTEM_FACTORY_RESET_NONE);
     if (ret == ESP_OK) {
-        device_factory_reset_t prev_state = s_state.factory_reset;
-        s_state.factory_reset = DEVICE_FACTORY_RESET_NONE;
+        system_factory_reset_t prev_state = s_state.factory_reset;
+        s_state.factory_reset = SYSTEM_FACTORY_RESET_NONE;
         ESP_LOGI(TAG, "Factory reset cleared (was: %s)", factory_reset_names[prev_state]);
     }
 
@@ -346,19 +346,19 @@ esp_err_t device_state_clear_factory_reset(void)
 // OTA State API
 // --------------------------------------------------------------------------
 
-device_ota_state_t device_state_get_ota(void)
+system_ota_state_t system_state_get_ota(void)
 {
     if (!s_state.initialized) {
-        ESP_LOGW(TAG, "device_state_get_ota() called before init - returning IDLE");
-        return DEVICE_OTA_IDLE;
+        ESP_LOGW(TAG, "system_state_get_ota() called before init - returning IDLE");
+        return SYSTEM_OTA_IDLE;
     }
     // Reading a single enum (backed by int) is atomic on ESP32
     return s_state.ota_state;
 }
 
-esp_err_t device_state_set_ota(device_ota_state_t state)
+esp_err_t system_state_set_ota(system_ota_state_t state)
 {
-    if (state > DEVICE_OTA_PENDING_REBOOT) {
+    if (state > SYSTEM_OTA_PENDING_REBOOT) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -379,7 +379,7 @@ esp_err_t device_state_set_ota(device_ota_state_t state)
 
     esp_err_t ret = save_u8_to_nvs(NVS_KEY_OTA_STATE, (uint8_t)state);
     if (ret == ESP_OK) {
-        device_ota_state_t prev_state = s_state.ota_state;
+        system_ota_state_t prev_state = s_state.ota_state;
         s_state.ota_state = state;
         ESP_LOGI(TAG, "OTA state: %s -> %s",
                  ota_state_names[prev_state], ota_state_names[state]);
@@ -393,17 +393,17 @@ esp_err_t device_state_set_ota(device_ota_state_t state)
 // Utility Functions
 // --------------------------------------------------------------------------
 
-const char *device_state_factory_reset_name(device_factory_reset_t state)
+const char *system_state_factory_reset_name(system_factory_reset_t state)
 {
-    if (state > DEVICE_FACTORY_RESET_IN_PROGRESS) {
+    if (state > SYSTEM_FACTORY_RESET_IN_PROGRESS) {
         return "UNKNOWN";
     }
     return factory_reset_names[state];
 }
 
-const char *device_state_ota_name(device_ota_state_t state)
+const char *system_state_ota_name(system_ota_state_t state)
 {
-    if (state > DEVICE_OTA_PENDING_REBOOT) {
+    if (state > SYSTEM_OTA_PENDING_REBOOT) {
         return "UNKNOWN";
     }
     return ota_state_names[state];

@@ -1,7 +1,7 @@
 #include "web_server.h"
 #include "web_auth.h"
-#include "device_identity.h"
-#include "device_state.h"
+#include "credentials.h"
+#include "system_state.h"
 #include "wifi_manager.h"
 #include "event_bus.h"
 #include "system_console.h"
@@ -226,7 +226,7 @@ static esp_err_t api_auth_login(httpd_req_t *req)
         httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 
         // Check if password change is required (device unclaimed)
-        if (!device_state_is_claimed()) {
+        if (!system_state_is_claimed()) {
             httpd_resp_sendstr(req, "{\"success\":true,\"password_change_required\":true}");
         } else {
             httpd_resp_sendstr(req, "{\"success\":true}");
@@ -458,14 +458,14 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
 
     // Regenerate device identity FIRST (new credentials)
     // Must happen before web_auth_reset so it uses the new password
-    esp_err_t err = device_identity_regenerate();
+    esp_err_t err = credentials_regenerate();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to regenerate identity: %s", esp_err_to_name(err));
         httpd_resp_send_500(req);
         return ESP_FAIL;
     }
 
-    // Reset web auth password to default (uses new device_identity credentials)
+    // Reset web auth password to default (uses regenerated credentials)
     err = web_auth_reset_password();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
@@ -483,7 +483,7 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     }
 
     // Reset device claimed state (returns to first boot)
-    err = device_state_set_claimed(false);
+    err = system_state_set_claimed(false);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Failed to reset claimed state: %s", esp_err_to_name(err));
     }
@@ -534,7 +534,7 @@ static esp_err_t api_system_status(httpd_req_t *req)
     ok = ok && cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
     ok = ok && cJSON_AddNumberToObject(json, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
-    const device_identity_t *id = device_identity_get();
+    const credentials_t *id = credentials_get();
     if (id) {
         ok = ok && cJSON_AddStringToObject(json, "node_name", id->node_name);
     }
@@ -637,7 +637,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     // Only expose credentials during first boot period (security measure)
-    if (!device_identity_is_first_boot()) {
+    if (!credentials_is_first_boot()) {
         ESP_LOGW(TAG, "QR endpoint accessed after first boot - credentials hidden");
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Credentials only available during first boot\"}");
@@ -645,7 +645,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     }
 
     char qr_json[256];
-    esp_err_t err = device_identity_get_qr_json(qr_json, sizeof(qr_json));
+    esp_err_t err = credentials_get_qr_json(qr_json, sizeof(qr_json));
 
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, qr_json);

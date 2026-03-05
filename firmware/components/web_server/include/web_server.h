@@ -13,7 +13,7 @@ extern "C" {
  * - Starts HTTP server on configured port
  * - Registers all API endpoints
  *
- * @note Requires web_auth and device_identity to be initialized first
+ * @note Requires web_auth and credentials to be initialized first
  *
  * @return ESP_OK on success
  */

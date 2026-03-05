@@ -18,5 +18,5 @@ idf_component_register(
         log
     PRIV_REQUIRES
         mdns
-        device_identity
+        credentials
 )
