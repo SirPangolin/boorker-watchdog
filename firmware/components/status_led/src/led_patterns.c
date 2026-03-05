@@ -8,7 +8,8 @@
 #include "sdkconfig.h"
 
 // Include RGB colors for WS2812 (onboard) or RGB_LEDC (external 3-channel)
-#if CONFIG_STATUS_LED_TYPE_WS2812 || CONFIG_STATUS_LED_EXTERNAL_TYPE_RGB_LEDC
+// Note: Uses led_driver Kconfig names (CONFIG_LED_DRIVER_*)
+#if CONFIG_LED_DRIVER_ONBOARD_WS2812 || CONFIG_LED_DRIVER_EXTERNAL_RGB_LEDC
 #include "led_convert.h"
 
 // RGB colors (from design doc)
