@@ -108,6 +108,16 @@ static int cmd_sensor(int argc, char **argv)
     return 1;
 }
 
+static void free_argtable(void)
+{
+    // Use arg_freetable to properly free argtable allocations
+    void *argtable[] = {sensor_args.action, sensor_args.sensor_id, sensor_args.end};
+    arg_freetable(argtable, sizeof(argtable) / sizeof(argtable[0]));
+    sensor_args.action = NULL;
+    sensor_args.sensor_id = NULL;
+    sensor_args.end = NULL;
+}
+
 esp_err_t sensor_manager_register_console(void)
 {
     sensor_args.action = arg_str0(NULL, NULL, "<action>", "status|read");
@@ -117,6 +127,7 @@ esp_err_t sensor_manager_register_console(void)
     if (sensor_args.action == NULL || sensor_args.sensor_id == NULL ||
         sensor_args.end == NULL) {
         ESP_LOGE(TAG, "Failed to allocate argtable");
+        free_argtable();
         return ESP_ERR_NO_MEM;
     }
 
@@ -131,6 +142,7 @@ esp_err_t sensor_manager_register_console(void)
     esp_err_t ret = esp_console_cmd_register(&cmd);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register command: %s", esp_err_to_name(ret));
+        free_argtable();
         return ret;
     }
 
