@@ -38,6 +38,7 @@ esp_err_t dht22_driver_init(void);
  *
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  * @return ESP_FAIL if sensor cleanup fails (resources may leak)
  */
 esp_err_t dht22_driver_deinit(void);
@@ -56,6 +57,7 @@ esp_err_t dht22_driver_deinit(void);
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if not initialized
  * @return ESP_ERR_INVALID_ARG if both pointers are NULL
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
  * @return ESP_ERR_INVALID_RESPONSE if sensor returns out-of-range values
  * @return ESP_FAIL on read failure
  */

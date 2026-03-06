@@ -253,13 +253,21 @@ sensor_status_t sensor_manager_get_status(const char *sensor_id)
         return SENSOR_STATUS_ERROR;
     }
 
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        ESP_LOGE(TAG, "Failed to acquire mutex for get_status");
+        return SENSOR_STATUS_ERROR;
+    }
+
+    sensor_status_t result = SENSOR_STATUS_ERROR;
     for (size_t i = 0; i < s_ctx.sensor_count; i++) {
         if (strcmp(s_ctx.sensors[i].id, sensor_id) == 0) {
-            return s_ctx.sensors[i].status;
+            result = s_ctx.sensors[i].status;
+            break;
         }
     }
 
-    return SENSOR_STATUS_ERROR;
+    xSemaphoreGive(s_ctx.mutex);
+    return result;
 }
 
 size_t sensor_manager_get_sensor_count(void)
@@ -362,6 +370,10 @@ static void sensor_task(void *arg)
             }
 
             if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                sensor_reading_t reading_copy = {0};
+                sensor_callback_t cb = NULL;
+                void *cb_user_data = NULL;
+
                 if (err == ESP_OK) {
                     // Success
                     if (sensor->status == SENSOR_STATUS_OFFLINE) {
@@ -375,10 +387,10 @@ static void sensor_task(void *arg)
                     sensor->last_reading.value2 = humidity;
                     sensor->last_reading.status = SENSOR_STATUS_ONLINE;
 
-                    // Invoke callback (still holding mutex for consistent state)
-                    if (s_ctx.callback != NULL) {
-                        s_ctx.callback(&sensor->last_reading, s_ctx.callback_user_data);
-                    }
+                    // Copy reading and callback info for invocation outside mutex
+                    reading_copy = sensor->last_reading;
+                    cb = s_ctx.callback;
+                    cb_user_data = s_ctx.callback_user_data;
                 } else {
                     // Failure
                     if (sensor->status == SENSOR_STATUS_ONLINE) {
@@ -395,6 +407,14 @@ static void sensor_task(void *arg)
                              (unsigned long)(sensor->next_retry_ms - now_ms));
                 }
                 xSemaphoreGive(s_ctx.mutex);
+
+                // Invoke callback outside mutex to prevent deadlock
+                if (cb != NULL) {
+                    cb(&reading_copy, cb_user_data);
+                }
+            } else {
+                ESP_LOGW(TAG, "Failed to acquire mutex after reading sensor '%s' "
+                         "(result: %s)", sensor->id, esp_err_to_name(err));
             }
         }
 
