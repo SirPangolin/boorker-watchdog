@@ -5,6 +5,7 @@
 
 #include "sensor_manager.h"
 #include "dht22_driver.h"
+#include "sw420_driver.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -31,6 +32,14 @@ typedef struct {
     sensor_reading_t last_reading; /**< Cached reading */
     uint8_t fail_count;            /**< Consecutive failures */
     uint32_t next_retry_ms;        /**< Next retry time (uptime) */
+
+    // Handle-based drivers
+    void *driver_handle;
+
+    // Transition tracking (for digital sensors)
+    bool last_bool_value;
+    uint32_t last_transition_ms;
+    uint32_t transition_count;
 } sensor_instance_t;
 
 /**
@@ -102,6 +111,21 @@ esp_err_t sensor_manager_init(void)
                 sensor->status = SENSOR_STATUS_OFFLINE; // Until first read
                 ESP_LOGI(TAG, "DHT22 driver initialized for '%s'", sensor->id);
             }
+        } else if (strcmp(sensor->driver, "sw420") == 0) {
+            sw420_handle_t handle;
+            err = sw420_driver_create(CONFIG_SW420_DEFAULT_GPIO, &handle);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "SW420 init failed for '%s': %s",
+                         sensor->id, esp_err_to_name(err));
+                sensor->status = SENSOR_STATUS_ERROR;
+            } else {
+                sensor->driver_handle = handle;
+                sensor->status = SENSOR_STATUS_OFFLINE;
+                sensor->last_bool_value = false;
+                sensor->last_transition_ms = 0;
+                sensor->transition_count = 0;
+                ESP_LOGI(TAG, "SW420 driver initialized for '%s'", sensor->id);
+            }
         } else {
             ESP_LOGW(TAG, "Unknown driver '%s' for sensor '%s'",
                      sensor->driver, sensor->id);
@@ -136,6 +160,10 @@ esp_err_t sensor_manager_deinit(void)
             if (err != ESP_OK) {
                 ESP_LOGW(TAG, "DHT22 deinit failed: %s", esp_err_to_name(err));
             }
+        }
+        if (strcmp(sensor->driver, "sw420") == 0 && sensor->driver_handle != NULL) {
+            sw420_driver_destroy(sensor->driver_handle);
+            sensor->driver_handle = NULL;
         }
     }
 
@@ -364,57 +392,119 @@ static void sensor_task(void *arg)
             // Attempt read
             float temp = 0, humidity = 0;
             esp_err_t err = ESP_FAIL;
+            sensor_reading_t reading_copy = {0};
+            sensor_callback_t cb = NULL;
+            void *cb_user_data = NULL;
 
             if (strcmp(sensor->driver, "dht22") == 0) {
                 err = dht22_driver_read(&temp, &humidity);
-            }
 
-            if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
-                sensor_reading_t reading_copy = {0};
-                sensor_callback_t cb = NULL;
-                void *cb_user_data = NULL;
+                if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                    if (err == ESP_OK) {
+                        // Success
+                        if (sensor->status == SENSOR_STATUS_OFFLINE) {
+                            ESP_LOGI(TAG, "Sensor '%s' came online", sensor->id);
+                        }
+                        sensor->status = SENSOR_STATUS_ONLINE;
+                        sensor->fail_count = 0;
+                        sensor->last_reading.sensor_id = sensor->id;
+                        sensor->last_reading.timestamp_ms = now_ms;
+                        sensor->last_reading.value = temp;
+                        sensor->last_reading.value2 = humidity;
+                        sensor->last_reading.status = SENSOR_STATUS_ONLINE;
+
+                        // Copy reading and callback info for invocation outside mutex
+                        reading_copy = sensor->last_reading;
+                        cb = s_ctx.callback;
+                        cb_user_data = s_ctx.callback_user_data;
+                    } else {
+                        // Failure
+                        if (sensor->status == SENSOR_STATUS_ONLINE) {
+                            ESP_LOGW(TAG, "Sensor '%s' went offline: %s",
+                                     sensor->id, esp_err_to_name(err));
+                        }
+                        sensor->fail_count++;
+                        sensor->status = SENSOR_STATUS_OFFLINE;
+                        sensor->next_retry_ms = now_ms +
+                            calculate_backoff(sensor->fail_count, sensor->poll_interval_ms);
+
+                        ESP_LOGD(TAG, "Sensor '%s' fail_count=%d, next_retry in %lu ms",
+                                 sensor->id, sensor->fail_count,
+                                 (unsigned long)(sensor->next_retry_ms - now_ms));
+                    }
+                    xSemaphoreGive(s_ctx.mutex);
+
+                    // Invoke callback outside mutex to prevent deadlock
+                    if (cb != NULL) {
+                        cb(&reading_copy, cb_user_data);
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Failed to acquire mutex after reading sensor '%s' "
+                             "(result: %s)", sensor->id, esp_err_to_name(err));
+                }
+            } else if (strcmp(sensor->driver, "sw420") == 0) {
+                bool vibrating;
+                err = sw420_driver_read(sensor->driver_handle, &vibrating);
 
                 if (err == ESP_OK) {
-                    // Success
-                    if (sensor->status == SENSOR_STATUS_OFFLINE) {
-                        ESP_LOGI(TAG, "Sensor '%s' came online", sensor->id);
-                    }
-                    sensor->status = SENSOR_STATUS_ONLINE;
-                    sensor->fail_count = 0;
-                    sensor->last_reading.sensor_id = sensor->id;
-                    sensor->last_reading.timestamp_ms = now_ms;
-                    sensor->last_reading.value = temp;
-                    sensor->last_reading.value2 = humidity;
-                    sensor->last_reading.status = SENSOR_STATUS_ONLINE;
+                    float current_value = vibrating ? 1.0f : 0.0f;
 
-                    // Copy reading and callback info for invocation outside mutex
-                    reading_copy = sensor->last_reading;
-                    cb = s_ctx.callback;
-                    cb_user_data = s_ctx.callback_user_data;
+                    // Detect transition
+                    if ((current_value > 0.5f) != sensor->last_bool_value) {
+                        sensor->last_transition_ms = now_ms;
+                        sensor->transition_count++;
+                        sensor->last_bool_value = (current_value > 0.5f);
+                        ESP_LOGD(TAG, "Sensor '%s' transition #%lu: %s",
+                                 sensor->id,
+                                 (unsigned long)sensor->transition_count,
+                                 vibrating ? "VIBRATING" : "IDLE");
+                    }
+
+                    // Calculate duration
+                    uint32_t duration_ms = now_ms - sensor->last_transition_ms;
+
+                    // Update with mutex
+                    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                        sensor->status = SENSOR_STATUS_ONLINE;
+                        sensor->fail_count = 0;
+                        sensor->last_reading.sensor_id = sensor->id;
+                        sensor->last_reading.timestamp_ms = now_ms;
+                        sensor->last_reading.value = current_value;
+                        sensor->last_reading.value2 = (float)duration_ms;
+                        sensor->last_reading.status = SENSOR_STATUS_ONLINE;
+
+                        reading_copy = sensor->last_reading;
+                        cb = s_ctx.callback;
+                        cb_user_data = s_ctx.callback_user_data;
+                        xSemaphoreGive(s_ctx.mutex);
+
+                        if (cb != NULL) {
+                            cb(&reading_copy, cb_user_data);
+                        }
+                    }
                 } else {
-                    // Failure
-                    if (sensor->status == SENSOR_STATUS_ONLINE) {
-                        ESP_LOGW(TAG, "Sensor '%s' went offline: %s",
-                                 sensor->id, esp_err_to_name(err));
+                    // Handle read error - must use mutex like dht22 path
+                    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
+                        sensor->fail_count++;
+                        if (sensor->status == SENSOR_STATUS_ONLINE) {
+                            ESP_LOGW(TAG, "Sensor '%s' went offline: %s",
+                                     sensor->id, esp_err_to_name(err));
+                        }
+                        sensor->status = SENSOR_STATUS_OFFLINE;
+
+                        // Calculate backoff for retry
+                        sensor->next_retry_ms = now_ms +
+                            calculate_backoff(sensor->fail_count, sensor->poll_interval_ms);
+
+                        ESP_LOGD(TAG, "Sensor '%s' fail_count=%d, next_retry in %lu ms",
+                                 sensor->id, sensor->fail_count,
+                                 (unsigned long)(sensor->next_retry_ms - now_ms));
+
+                        xSemaphoreGive(s_ctx.mutex);
+                    } else {
+                        ESP_LOGW(TAG, "Mutex timeout updating '%s' status", sensor->id);
                     }
-                    sensor->fail_count++;
-                    sensor->status = SENSOR_STATUS_OFFLINE;
-                    sensor->next_retry_ms = now_ms +
-                        calculate_backoff(sensor->fail_count, sensor->poll_interval_ms);
-
-                    ESP_LOGD(TAG, "Sensor '%s' fail_count=%d, next_retry in %lu ms",
-                             sensor->id, sensor->fail_count,
-                             (unsigned long)(sensor->next_retry_ms - now_ms));
                 }
-                xSemaphoreGive(s_ctx.mutex);
-
-                // Invoke callback outside mutex to prevent deadlock
-                if (cb != NULL) {
-                    cb(&reading_copy, cb_user_data);
-                }
-            } else {
-                ESP_LOGW(TAG, "Failed to acquire mutex after reading sensor '%s' "
-                         "(result: %s)", sensor->id, esp_err_to_name(err));
             }
         }
 
