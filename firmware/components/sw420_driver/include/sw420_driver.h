@@ -108,6 +108,16 @@ esp_err_t sw420_driver_save_config(sw420_handle_t handle);
  */
 esp_err_t sw420_driver_load_config(sw420_handle_t handle);
 
+/**
+ * @brief Register console commands
+ *
+ * Registers: vibration [status|raw|config]
+ *
+ * @param handle Instance handle (NULL to use singleton)
+ * @return ESP_OK on success
+ */
+esp_err_t sw420_driver_register_console(sw420_handle_t handle);
+
 #ifdef __cplusplus
 }
 #endif
