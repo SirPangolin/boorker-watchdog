@@ -163,6 +163,12 @@ static void init_console(void)
         ESP_LOGW(TAG, "Buzzer console init failed: %s", esp_err_to_name(ret));
     }
 
+    // Register sensor manager console commands
+    ret = sensor_manager_register_console();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
+    }
+
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
 }

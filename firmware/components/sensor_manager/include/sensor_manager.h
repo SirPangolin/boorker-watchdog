@@ -95,6 +95,19 @@ sensor_status_t sensor_manager_get_status(const char *sensor_id);
  */
 size_t sensor_manager_get_sensor_count(void);
 
+/**
+ * @brief Register console commands for sensor manager
+ *
+ * Registers the "sensor" command with subcommands:
+ * - sensor: Show all configured sensors
+ * - sensor status: Same as bare sensor command
+ * - sensor read <id>: Read specific sensor
+ *
+ * @return ESP_OK on success
+ * @return ESP_ERR_NO_MEM if argtable allocation fails
+ */
+esp_err_t sensor_manager_register_console(void);
+
 #ifdef __cplusplus
 }
 #endif
