@@ -1,0 +1,16 @@
+menu "DHT22 Driver"
+
+    config DHT22_DRIVER_ENABLED
+        bool "Enable DHT22 driver"
+        default y
+        help
+            Enable the DHT22 temperature/humidity sensor driver.
+
+    config DHT22_DEFAULT_GPIO
+        int "Default GPIO for DHT22"
+        default 2
+        range 0 48
+        help
+            GPIO pin connected to DHT22 data line.
+
+endmenu
