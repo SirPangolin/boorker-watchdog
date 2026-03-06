@@ -20,6 +20,7 @@
 #include "sys_console.h"
 #include "status_led.h"
 #include "status_buzzer.h"
+#include "sensor_manager.h"
 
 static const char *TAG = "boorker";
 
@@ -110,6 +111,16 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
     }
 }
 
+static void on_sensor_reading(const sensor_reading_t *reading, void *ctx)
+{
+    (void)ctx;
+    ESP_LOGI(TAG, "Sensor '%s': %.1f F, %.1f%% humidity [%s]",
+             reading->sensor_id,
+             reading->value,
+             reading->value2,
+             sensor_status_name(reading->status));
+}
+
 static void init_console(void)
 {
     esp_err_t ret;
@@ -150,6 +161,12 @@ static void init_console(void)
     ret = status_buzzer_register_console();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Buzzer console init failed: %s", esp_err_to_name(ret));
+    }
+
+    // Register sensor manager console commands
+    ret = sensor_manager_register_console();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
     }
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
@@ -234,6 +251,19 @@ void app_main(void)
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Buzzer init failed: %s", esp_err_to_name(ret));
         // Continue - buzzer is not critical
+    }
+
+    // Initialize sensor manager
+    ret = sensor_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor manager init failed: %s", esp_err_to_name(ret));
+        // Continue without sensors - not critical for basic operation
+    } else {
+        sensor_manager_register_callback(on_sensor_reading, NULL);
+        ret = sensor_manager_start();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Sensor polling start failed: %s", esp_err_to_name(ret));
+        }
     }
 
     // Show credentials on first boot (until OLED is implemented)
