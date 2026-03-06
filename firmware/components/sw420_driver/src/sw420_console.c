@@ -206,6 +206,8 @@ esp_err_t sw420_driver_register_console(sw420_handle_t handle)
     // Use provided handle or fall back to singleton
     if (handle != NULL) {
         s_handle = handle;
+    } else {
+        s_handle = sw420_driver_get_instance();
     }
     // Note: If s_handle is still NULL, commands will fail gracefully
 

@@ -109,6 +109,15 @@ esp_err_t sw420_driver_save_config(sw420_handle_t handle);
 esp_err_t sw420_driver_load_config(sw420_handle_t handle);
 
 /**
+ * @brief Get singleton instance
+ *
+ * @note v1: Returns the single instance created by sw420_driver_create
+ *
+ * @return Instance handle, or NULL if not created
+ */
+sw420_handle_t sw420_driver_get_instance(void);
+
+/**
  * @brief Register console commands
  *
  * Registers: vibration [status|raw|config]

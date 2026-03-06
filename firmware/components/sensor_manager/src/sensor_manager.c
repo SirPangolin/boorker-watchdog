@@ -328,8 +328,10 @@ static esp_err_t load_config_from_nvs(void)
 
 static esp_err_t init_default_sensor(void)
 {
+    size_t count = 0;
+
     // Add default DHT22 sensor using Kconfig values
-    sensor_instance_t *sensor = &s_ctx.sensors[0];
+    sensor_instance_t *sensor = &s_ctx.sensors[count];
     strncpy(sensor->id, "temp_humidity", sizeof(sensor->id) - 1);
     strncpy(sensor->driver, "dht22", sizeof(sensor->driver) - 1);
     sensor->poll_interval_ms = CONFIG_SENSOR_DEFAULT_POLL_MS;
@@ -339,8 +341,28 @@ static esp_err_t init_default_sensor(void)
     sensor->last_reading.value2 = NAN;
     sensor->fail_count = 0;
     sensor->next_retry_ms = 0;
+    count++;
 
-    s_ctx.sensor_count = 1;
+#ifdef CONFIG_SW420_DRIVER_ENABLED
+    // Add SW420 vibration sensor
+    sensor = &s_ctx.sensors[count];
+    strncpy(sensor->id, "vibration", sizeof(sensor->id) - 1);
+    strncpy(sensor->driver, "sw420", sizeof(sensor->driver) - 1);
+    sensor->poll_interval_ms = CONFIG_SENSOR_DEFAULT_POLL_MS;
+    sensor->enabled = true;
+    sensor->status = SENSOR_STATUS_OFFLINE;
+    sensor->last_reading.value = NAN;
+    sensor->last_reading.value2 = NAN;
+    sensor->fail_count = 0;
+    sensor->next_retry_ms = 0;
+    sensor->driver_handle = NULL;
+    sensor->last_bool_value = false;
+    sensor->last_transition_ms = 0;
+    sensor->transition_count = 0;
+    count++;
+#endif
+
+    s_ctx.sensor_count = count;
     return ESP_OK;
 }
 

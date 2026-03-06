@@ -236,6 +236,11 @@ esp_err_t sw420_driver_save_config(sw420_handle_t handle)
     return err;
 }
 
+sw420_handle_t sw420_driver_get_instance(void)
+{
+    return s_single_instance;
+}
+
 esp_err_t sw420_driver_load_config(sw420_handle_t handle)
 {
     if (handle == NULL) {
