@@ -1,0 +1,38 @@
+menu "Sensor Manager"
+
+    config SENSOR_MANAGER_ENABLED
+        bool "Enable Sensor Manager"
+        default y
+        help
+            Enable the sensor manager component.
+
+    config SENSOR_MAX_COUNT
+        int "Maximum number of sensors"
+        default 8
+        range 1 16
+        help
+            Maximum number of sensors that can be configured.
+
+    config SENSOR_DEFAULT_POLL_MS
+        int "Default poll interval (ms)"
+        default 5000
+        range 2000 300000
+        help
+            Default polling interval for sensors.
+            DHT22 minimum is 2000ms.
+            Recommend 30000-60000ms for production.
+
+    config SENSOR_TASK_STACK_SIZE
+        int "Sensor task stack size"
+        default 4096
+        help
+            Stack size for the sensor polling task.
+
+    config SENSOR_TASK_PRIORITY
+        int "Sensor task priority"
+        default 5
+        range 1 24
+        help
+            FreeRTOS priority for sensor polling task.
+
+endmenu

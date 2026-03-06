@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "src/sensor_manager.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        dht22_driver
+        nvs_flash
+        log
+    PRIV_REQUIRES
+        freertos
+)
