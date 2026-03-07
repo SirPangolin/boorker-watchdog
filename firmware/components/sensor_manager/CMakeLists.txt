@@ -6,6 +6,7 @@ idf_component_register(
         "include"
     REQUIRES
         dht22_driver
+        sw420_driver
         nvs_flash
         log
         console

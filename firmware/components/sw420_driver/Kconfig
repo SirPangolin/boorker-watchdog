@@ -1,0 +1,36 @@
+menu "SW-420 Vibration Driver"
+
+    config SW420_DRIVER_ENABLED
+        bool "Enable SW-420 driver"
+        default y
+        help
+            Enable SW-420 vibration sensor driver.
+
+    config SW420_DEFAULT_GPIO
+        int "Default GPIO for SW-420"
+        default 5
+        range 0 48
+        help
+            GPIO pin connected to SW-420 DO (digital output).
+
+    config SW420_DEBOUNCE_ON_MS
+        int "Debounce ON threshold (ms)"
+        default 200
+        range 0 5000
+        help
+            Vibration must sustain this long to register as active.
+
+    config SW420_DEBOUNCE_OFF_MS
+        int "Debounce OFF threshold (ms)"
+        default 500
+        range 0 5000
+        help
+            Quiet period before reporting idle.
+
+    config SW420_ACTIVE_HIGH
+        bool "Active HIGH output"
+        default y
+        help
+            GPIO HIGH = vibrating. Disable if module outputs LOW on vibration.
+
+endmenu
