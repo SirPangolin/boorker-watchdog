@@ -21,6 +21,9 @@
 #include "status_led.h"
 #include "status_buzzer.h"
 #include "sensor_manager.h"
+#if CONFIG_SW420_DRIVER_ENABLED
+#include "sw420_driver.h"
+#endif
 
 static const char *TAG = "boorker";
 
@@ -114,11 +117,23 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
 static void on_sensor_reading(const sensor_reading_t *reading, void *ctx)
 {
     (void)ctx;
-    ESP_LOGI(TAG, "Sensor '%s': %.1f F, %.1f%% humidity [%s]",
-             reading->sensor_id,
-             reading->value,
-             reading->value2,
-             sensor_status_name(reading->status));
+
+    // Digital sensors (vibration, float_switch) use value=0/1, value2=duration_ms
+    if (strstr(reading->sensor_id, "vibration") != NULL ||
+        strstr(reading->sensor_id, "float") != NULL) {
+        ESP_LOGI(TAG, "Sensor '%s': %s, duration %.0fms [%s]",
+                 reading->sensor_id,
+                 reading->value > 0.5f ? "ACTIVE" : "IDLE",
+                 reading->value2,
+                 sensor_status_name(reading->status));
+    } else {
+        // Analog sensors (temp/humidity)
+        ESP_LOGI(TAG, "Sensor '%s': %.1f F, %.1f%% humidity [%s]",
+                 reading->sensor_id,
+                 reading->value,
+                 reading->value2,
+                 sensor_status_name(reading->status));
+    }
 }
 
 static void init_console(void)
@@ -168,6 +183,14 @@ static void init_console(void)
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
     }
+
+#if CONFIG_SW420_DRIVER_ENABLED
+    // Register SW420 vibration sensor console commands
+    ret = sw420_driver_register_console(NULL);  // Uses singleton
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "SW420 console init failed: %s", esp_err_to_name(ret));
+    }
+#endif
 
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
