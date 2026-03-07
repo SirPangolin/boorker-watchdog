@@ -99,8 +99,9 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
             break;
 
         case WIFI_MGR_EVENT_PROVISIONED:
+            // Just clear provisioning state - WIFI_CONNECTING was set at startup
+            // and will be cleared by CONNECTED handler when connection succeeds
             event_bus_clear_state(EVENT_WIFI_PROVISIONING);
-            event_bus_set_state(EVENT_WIFI_CONNECTING);
             ESP_LOGI(TAG, "Credentials saved - connecting...");
             break;
 

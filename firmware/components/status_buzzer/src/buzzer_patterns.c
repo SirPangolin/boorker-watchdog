@@ -103,7 +103,10 @@ static void advance_pattern(void)
         // Finished on-phase, turn buzzer off
         err = buzzer_driver_off();
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to turn buzzer off: %s", esp_err_to_name(err));
+            // Critical: buzzer is still on! Reschedule to retry.
+            ESP_LOGW(TAG, "Failed to turn buzzer off: %s - retrying", esp_err_to_name(err));
+            esp_timer_start_once(s_player.timer, 1000);  // Retry in 1ms
+            return;
         }
 
         uint16_t off_ms = s_player.steps[s_player.current_step].off_ms;
@@ -151,9 +154,9 @@ static void timer_callback(void *arg)
         }
         xSemaphoreGive(s_player.mutex);
     } else {
-        // Mutex held by another context - pattern step will be delayed
-        // This can cause timing jitter but is recoverable
-        ESP_LOGW(TAG, "Timer callback: mutex busy, step delayed");
+        // Mutex held by another context - reschedule to retry
+        // This causes timing jitter but ensures pattern completes
+        esp_timer_start_once(s_player.timer, 1000);  // Retry in 1ms
     }
 }
 
