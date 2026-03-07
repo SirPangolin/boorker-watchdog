@@ -117,6 +117,10 @@ esp_err_t sensor_manager_init(void)
             if (err != ESP_OK) {
                 ESP_LOGE(TAG, "SW420 init failed for '%s': %s",
                          sensor->id, esp_err_to_name(err));
+                if (err == ESP_ERR_INVALID_ARG) {
+                    ESP_LOGE(TAG, "Check CONFIG_SW420_DEFAULT_GPIO value (%d)",
+                             CONFIG_SW420_DEFAULT_GPIO);
+                }
                 sensor->status = SENSOR_STATUS_ERROR;
             } else {
                 sensor->driver_handle = handle;
@@ -162,7 +166,10 @@ esp_err_t sensor_manager_deinit(void)
             }
         }
         if (strcmp(sensor->driver, "sw420") == 0 && sensor->driver_handle != NULL) {
-            sw420_driver_destroy(sensor->driver_handle);
+            esp_err_t err = sw420_driver_destroy(sensor->driver_handle);
+            if (err != ESP_OK) {
+                ESP_LOGW(TAG, "SW420 deinit failed: %s", esp_err_to_name(err));
+            }
             sensor->driver_handle = NULL;
         }
     }
@@ -333,7 +340,9 @@ static esp_err_t init_default_sensor(void)
     // Add default DHT22 sensor using Kconfig values
     sensor_instance_t *sensor = &s_ctx.sensors[count];
     strncpy(sensor->id, "temp_humidity", sizeof(sensor->id) - 1);
+    sensor->id[sizeof(sensor->id) - 1] = '\0';
     strncpy(sensor->driver, "dht22", sizeof(sensor->driver) - 1);
+    sensor->driver[sizeof(sensor->driver) - 1] = '\0';
     sensor->poll_interval_ms = CONFIG_SENSOR_DEFAULT_POLL_MS;
     sensor->enabled = true;
     sensor->status = SENSOR_STATUS_OFFLINE;
@@ -347,7 +356,9 @@ static esp_err_t init_default_sensor(void)
     // Add SW420 vibration sensor
     sensor = &s_ctx.sensors[count];
     strncpy(sensor->id, "vibration", sizeof(sensor->id) - 1);
+    sensor->id[sizeof(sensor->id) - 1] = '\0';
     strncpy(sensor->driver, "sw420", sizeof(sensor->driver) - 1);
+    sensor->driver[sizeof(sensor->driver) - 1] = '\0';
     sensor->poll_interval_ms = CONFIG_SENSOR_DEFAULT_POLL_MS;
     sensor->enabled = true;
     sensor->status = SENSOR_STATUS_OFFLINE;
@@ -482,8 +493,11 @@ static void sensor_task(void *arg)
                                  vibrating ? "VIBRATING" : "IDLE");
                     }
 
-                    // Calculate duration
-                    uint32_t duration_ms = now_ms - sensor->last_transition_ms;
+                    // Calculate duration (guard against underflow if last_transition_ms not yet set)
+                    uint32_t duration_ms = 0;
+                    if (sensor->last_transition_ms > 0 && now_ms >= sensor->last_transition_ms) {
+                        duration_ms = now_ms - sensor->last_transition_ms;
+                    }
 
                     // Update with mutex
                     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) == pdTRUE) {
@@ -503,6 +517,9 @@ static void sensor_task(void *arg)
                         if (cb != NULL) {
                             cb(&reading_copy, cb_user_data);
                         }
+                    } else {
+                        ESP_LOGW(TAG, "Mutex timeout updating '%s' after successful read",
+                                 sensor->id);
                     }
                 } else {
                     // Handle read error - must use mutex like dht22 path

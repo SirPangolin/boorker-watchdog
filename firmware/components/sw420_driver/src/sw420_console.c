@@ -209,7 +209,12 @@ esp_err_t sw420_driver_register_console(sw420_handle_t handle)
     } else {
         s_handle = sw420_driver_get_instance();
     }
-    // Note: If s_handle is still NULL, commands will fail gracefully
+
+    // Warn if no handle available - commands will return errors
+    if (s_handle == NULL) {
+        ESP_LOGW(TAG, "Console registered without sensor handle - "
+                 "commands will return errors until sensor is initialized");
+    }
 
     vibration_args.action = arg_str0(NULL, NULL, "<action>", "status|raw|config");
     vibration_args.param = arg_str0(NULL, NULL, "<param>", "Parameter name");

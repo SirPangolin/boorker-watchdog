@@ -30,7 +30,7 @@ typedef struct sw420_inst* sw420_handle_t;
  * @param[out] out_handle Output handle
  * @return ESP_OK on success
  * @return ESP_ERR_INVALID_STATE if instance already exists
- * @return ESP_ERR_INVALID_ARG if gpio invalid
+ * @return ESP_ERR_INVALID_ARG if out_handle is NULL or gpio invalid
  * @return ESP_ERR_NO_MEM if allocation fails
  */
 esp_err_t sw420_driver_create(gpio_num_t gpio, sw420_handle_t *out_handle);
@@ -49,7 +49,7 @@ esp_err_t sw420_driver_destroy(sw420_handle_t handle);
  * @param handle Instance handle
  * @param[out] vibrating true if vibrating, false if idle
  * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if handle invalid
+ * @return ESP_ERR_INVALID_STATE if handle is NULL
  * @return ESP_ERR_INVALID_ARG if vibrating is NULL
  */
 esp_err_t sw420_driver_read(sw420_handle_t handle, bool *vibrating);
@@ -60,18 +60,22 @@ esp_err_t sw420_driver_read(sw420_handle_t handle, bool *vibrating);
  * Bypasses debounce logic. Use for live calibration feedback.
  *
  * @param handle Instance handle
- * @return true if GPIO indicates vibration, false otherwise
+ * @return true if GPIO indicates vibration
+ * @return false if no vibration OR if handle is NULL (logs warning)
  */
 bool sw420_driver_read_raw(sw420_handle_t handle);
 
 /**
  * @brief Set debounce configuration
  *
+ * @note Default values: on_ms=200, off_ms=500 (configurable via Kconfig
+ *       SW420_DEBOUNCE_ON_MS and SW420_DEBOUNCE_OFF_MS)
+ *
  * @param handle Instance handle
- * @param debounce_on_ms Vibration sustain time to register active
- * @param debounce_off_ms Quiet time to register idle
+ * @param debounce_on_ms Vibration sustain time to register active (ms)
+ * @param debounce_off_ms Quiet time to register idle (ms)
  * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if handle invalid
+ * @return ESP_ERR_INVALID_STATE if handle is NULL
  */
 esp_err_t sw420_driver_set_config(sw420_handle_t handle,
                                    uint32_t debounce_on_ms,
@@ -81,10 +85,10 @@ esp_err_t sw420_driver_set_config(sw420_handle_t handle,
  * @brief Get debounce configuration
  *
  * @param handle Instance handle
- * @param[out] debounce_on_ms Output ON threshold (NULL to skip)
- * @param[out] debounce_off_ms Output OFF threshold (NULL to skip)
+ * @param[out] debounce_on_ms Output ON threshold in ms (NULL to skip)
+ * @param[out] debounce_off_ms Output OFF threshold in ms (NULL to skip)
  * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if handle invalid
+ * @return ESP_ERR_INVALID_STATE if handle is NULL
  */
 esp_err_t sw420_driver_get_config(sw420_handle_t handle,
                                    uint32_t *debounce_on_ms,
@@ -104,7 +108,9 @@ esp_err_t sw420_driver_save_config(sw420_handle_t handle);
  * @brief Load config from NVS (called automatically by create)
  *
  * @param handle Instance handle
- * @return ESP_OK on success (or no saved config, uses defaults)
+ * @return ESP_OK on success (missing keys use defaults; logs warning on
+ *         NVS read errors but still returns ESP_OK with defaults)
+ * @return ESP_ERR_INVALID_STATE if handle is NULL
  */
 esp_err_t sw420_driver_load_config(sw420_handle_t handle);
 
@@ -120,10 +126,12 @@ sw420_handle_t sw420_driver_get_instance(void);
 /**
  * @brief Register console commands
  *
- * Registers: vibration [status|raw|config]
+ * Registers: vibration [status|raw [sec]|config [param] [value]|config save]
  *
  * @param handle Instance handle (NULL to use singleton)
  * @return ESP_OK on success
+ * @return ESP_ERR_NO_MEM if argtable allocation fails
+ * @note If no handle available, commands will return errors until sensor init
  */
 esp_err_t sw420_driver_register_console(sw420_handle_t handle);
 

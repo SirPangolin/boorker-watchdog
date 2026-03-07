@@ -18,18 +18,21 @@ static const char *TAG = "sw420_driver";
 #define NVS_KEY_ON_MS "sw420_on_ms"
 #define NVS_KEY_OFF_MS "sw420_off_ms"
 
+/**
+ * @brief Internal driver instance
+ */
 typedef struct sw420_inst {
-    gpio_num_t gpio;
-    bool active_high;
+    gpio_num_t gpio;           /**< Configured GPIO pin */
+    bool active_high;          /**< true if HIGH=vibrating (from Kconfig) */
 
-    // Debounce state
-    bool current_state;
-    bool raw_state;
-    uint32_t state_start_ms;
+    // Debounce state machine
+    bool current_state;        /**< Debounced output state (IDLE or VIBRATING) */
+    bool raw_state;            /**< Last raw GPIO reading */
+    uint32_t state_start_ms;   /**< Timestamp when raw_state last changed */
 
-    // Config
-    uint32_t debounce_on_ms;
-    uint32_t debounce_off_ms;
+    // Configuration (defaults from Kconfig, adjustable at runtime)
+    uint32_t debounce_on_ms;   /**< Sustain time to transition IDLE->VIBRATING */
+    uint32_t debounce_off_ms;  /**< Sustain time to transition VIBRATING->IDLE */
 } sw420_inst_t;
 
 // v1: Single instance limit
@@ -102,7 +105,10 @@ esp_err_t sw420_driver_destroy(sw420_handle_t handle)
     ESP_LOGI(TAG, "Destroying SW-420 driver on GPIO %d", inst->gpio);
 
     // Reset GPIO
-    gpio_reset_pin(inst->gpio);
+    esp_err_t err = gpio_reset_pin(inst->gpio);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "GPIO reset failed: %s", esp_err_to_name(err));
+    }
 
     free(inst);
     s_single_instance = NULL;
@@ -113,6 +119,7 @@ esp_err_t sw420_driver_destroy(sw420_handle_t handle)
 bool sw420_driver_read_raw(sw420_handle_t handle)
 {
     if (handle == NULL) {
+        ESP_LOGW(TAG, "sw420_driver_read_raw called with NULL handle");
         return false;
     }
 
@@ -144,7 +151,13 @@ esp_err_t sw420_driver_read(sw420_handle_t handle, bool *vibrating)
 
     uint32_t elapsed_ms = now_ms - inst->state_start_ms;
 
-    // Apply debounce logic (truth table from design)
+    /*
+     * Debounce state machine (hysteresis filter):
+     * - When IDLE: transition to VIBRATING if raw HIGH for >= debounce_on_ms
+     * - When VIBRATING: transition to IDLE if raw LOW for >= debounce_off_ms
+     * This provides noise rejection and prevents rapid state toggling.
+     * See memory/components/sw420_driver.md for full truth table.
+     */
     if (inst->current_state) {
         // Currently vibrating - check for stop
         if (!raw_now && elapsed_ms >= inst->debounce_off_ms) {
