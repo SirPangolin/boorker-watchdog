@@ -153,8 +153,8 @@ esp_err_t buzzer_driver_set_volume(uint8_t percent)
         return ESP_ERR_INVALID_ARG;
     }
 
-    // Use zero timeout for timer callback context compatibility
-    if (xSemaphoreTake(s_ctx.mutex, 0) != pdTRUE) {
+    // Use short timeout - allows retry from timer callback reschedule
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         ESP_LOGW(TAG, "Mutex busy in set_volume");
         return ESP_ERR_TIMEOUT;
     }
@@ -201,8 +201,8 @@ esp_err_t buzzer_driver_on(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Use zero timeout for timer callback context compatibility
-    if (xSemaphoreTake(s_ctx.mutex, 0) != pdTRUE) {
+    // Use short timeout - allows retry from timer callback reschedule
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         ESP_LOGW(TAG, "Mutex busy in on");
         return ESP_ERR_TIMEOUT;
     }
@@ -236,8 +236,8 @@ esp_err_t buzzer_driver_off(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Use zero timeout for timer callback context compatibility
-    if (xSemaphoreTake(s_ctx.mutex, 0) != pdTRUE) {
+    // Use short timeout - allows retry from timer callback reschedule
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(10)) != pdTRUE) {
         ESP_LOGW(TAG, "Mutex busy in off");
         return ESP_ERR_TIMEOUT;
     }
