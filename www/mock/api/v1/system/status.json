@@ -1,0 +1,13 @@
+{
+  "device_name": "boorker-a1b2",
+  "uptime_seconds": 302520,
+  "heap_free": 145408,
+  "heap_total": 327680,
+  "psram_free": 7130316,
+  "psram_total": 8388608,
+  "mac_address": "A1:B2:C3:D4:E5:F6",
+  "wifi_connected": true,
+  "wifi_ssid": "HomeNetwork-5G",
+  "wifi_rssi": -42,
+  "ip_address": "192.168.1.42"
+}
