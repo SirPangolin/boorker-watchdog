@@ -69,7 +69,7 @@ typedef struct {
     char source[16];             /**< Source component (e.g., "ota") */
     char message[128];           /**< MOTD message text */
     motd_priority_t priority;    /**< Priority level */
-    uint32_t timestamp;          /**< Unix timestamp when posted */
+    uint32_t timestamp;          /**< Seconds since boot (esp_log_timestamp / 1000) */
 } motd_entry_t;
 
 #define EVENT_BUS_MAX_MOTDS 4    /**< Maximum concurrent MOTDs */
@@ -204,6 +204,11 @@ esp_err_t event_bus_post_motd(const char *source, const char *message, motd_prio
 
 /**
  * @brief Get active MOTDs
+ *
+ * @note Thread-safety: The returned pointer references the internal MOTD array.
+ *       The mutex is released before this function returns, so the caller must
+ *       copy the results immediately or otherwise ensure no concurrent
+ *       post/dismiss/clear operations occur while accessing the data.
  *
  * @param count Output: number of active MOTDs
  * @return Pointer to MOTD array (valid until next post/dismiss), or NULL if none

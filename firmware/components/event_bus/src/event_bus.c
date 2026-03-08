@@ -345,6 +345,10 @@ esp_err_t event_bus_post_motd(const char *source, const char *message, motd_prio
         return ESP_ERR_INVALID_ARG;
     }
 
+    if (priority > MOTD_PRIORITY_CRITICAL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (!s_ctx.initialized) {
         return ESP_ERR_INVALID_STATE;
     }
