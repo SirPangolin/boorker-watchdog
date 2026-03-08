@@ -41,6 +41,7 @@ static void load_nvs_config(void)
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "NVS open failed (%s), using defaults", esp_err_to_name(err));
         strncpy(g_ota.repo_url, BOORKER_GITHUB_URL, sizeof(g_ota.repo_url) - 1);
+        g_ota.repo_url[sizeof(g_ota.repo_url) - 1] = '\0';
         g_ota.channel = CONFIG_OTA_MANAGER_DEFAULT_CHANNEL;
         g_ota.last_check = 0;
         return;
@@ -50,6 +51,7 @@ static void load_nvs_config(void)
     err = nvs_get_str(nvs, OTA_NVS_KEY_REPO, g_ota.repo_url, &len);
     if (err != ESP_OK) {
         strncpy(g_ota.repo_url, BOORKER_GITHUB_URL, sizeof(g_ota.repo_url) - 1);
+        g_ota.repo_url[sizeof(g_ota.repo_url) - 1] = '\0';
     }
 
     err = nvs_get_u8(nvs, OTA_NVS_KEY_CHAN, &g_ota.channel);
@@ -99,6 +101,7 @@ static void ota_check_task(void *arg)
 // Public API
 // ---------------------------------------------------------------------------
 
+// NOTE: Must be called from app_main() before other tasks access OTA manager
 esp_err_t ota_manager_init(void)
 {
     if (g_ota.initialized) {
@@ -106,13 +109,26 @@ esp_err_t ota_manager_init(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    memset(&g_ota, 0, sizeof(g_ota));
-
     g_ota.mutex = xSemaphoreCreateMutex();
     if (g_ota.mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create mutex");
         return ESP_ERR_NO_MEM;
     }
+
+    g_ota.update_available = false;
+    memset(&g_ota.update_info, 0, sizeof(g_ota.update_info));
+    g_ota.ota_handle = 0;
+    g_ota.update_partition = NULL;
+    g_ota.bytes_written = 0;
+    g_ota.total_bytes = 0;
+    g_ota.progress_cb = NULL;
+    g_ota.progress_ctx = NULL;
+    g_ota.expected_sha256[0] = '\0';
+    g_ota.has_expected_sha256 = false;
+    g_ota.repo_url[0] = '\0';
+    g_ota.channel = 0;
+    g_ota.last_check = 0;
+    g_ota.check_task = NULL;
 
     load_nvs_config();
 
@@ -171,12 +187,19 @@ esp_err_t ota_manager_check_now(void)
     return err;
 }
 
+// NOTE: Returns pointer to internal state — caller must not free or cache long-term
 const ota_update_info_t *ota_manager_get_available_update(void)
 {
-    if (g_ota.update_available) {
-        return &g_ota.update_info;
+    if (!OTA_LOCK()) {
+        return NULL;
     }
-    return NULL;
+
+    const ota_update_info_t *result = g_ota.update_available
+        ? &g_ota.update_info
+        : NULL;
+
+    OTA_UNLOCK();
+    return result;
 }
 
 esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
@@ -208,7 +231,10 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
 
     OTA_UNLOCK();
 
+    // Blocking download — mutex released during network I/O
     esp_err_t err = ota_download_start(&g_ota.update_info, cb, ctx);
+
+    OTA_LOCK();  // re-acquire after blocking call
 
     if (err == ESP_OK) {
         system_state_set_ota(SYSTEM_OTA_PENDING_REBOOT);
@@ -221,6 +247,7 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
         ESP_LOGE(TAG, "Update failed: %s", esp_err_to_name(err));
     }
 
+    OTA_UNLOCK();
     return err;
 }
 
@@ -275,21 +302,34 @@ esp_err_t ota_manager_start_upload(uint32_t size, const char *expected_sha256,
 
 esp_err_t ota_manager_write_upload_chunk(const void *data, size_t len)
 {
+    if (!OTA_LOCK()) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     if (system_state_get_ota() != SYSTEM_OTA_DOWNLOADING) {
+        OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
     }
 
     esp_err_t err = ota_flash_write(data, len);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Flash write failed: %s", esp_err_to_name(err));
+        OTA_UNLOCK();
         return err;
     }
 
     g_ota.bytes_written += len;
 
-    if (g_ota.progress_cb) {
-        g_ota.progress_cb(g_ota.bytes_written, g_ota.total_bytes,
-                          g_ota.progress_ctx);
+    // Copy callback info under lock, invoke outside to avoid holding mutex
+    ota_progress_cb_t cb = g_ota.progress_cb;
+    void *cb_ctx = g_ota.progress_ctx;
+    uint32_t written = g_ota.bytes_written;
+    uint32_t total = g_ota.total_bytes;
+
+    OTA_UNLOCK();
+
+    if (cb) {
+        cb(written, total, cb_ctx);
     }
 
     return ESP_OK;
@@ -330,6 +370,10 @@ esp_err_t ota_manager_finish_upload(void)
 
 esp_err_t ota_manager_abort(void)
 {
+    if (!g_ota.initialized) {
+        return ESP_OK;
+    }
+
     esp_err_t err = ota_flash_abort();
 
     event_bus_clear_motds_from("ota");
