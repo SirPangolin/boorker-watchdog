@@ -352,6 +352,8 @@ function bindActions() {
   const rebootBtn = document.getElementById('reboot-confirm-btn');
   if (rebootBtn) {
     rebootBtn.addEventListener('click', async () => {
+      rebootBtn.setAttribute('aria-busy', 'true');
+      rebootBtn.disabled = true;
       try {
         await api('POST', '/system/reboot');
         showToast('Rebooting device...');
@@ -359,6 +361,9 @@ function bindActions() {
         if (dialog) dialog.close();
       } catch (err) {
         showToast('Reboot failed: ' + err.message);
+      } finally {
+        rebootBtn.removeAttribute('aria-busy');
+        rebootBtn.disabled = false;
       }
     });
   }
@@ -372,6 +377,8 @@ function bindActions() {
     });
 
     resetBtn.addEventListener('click', async () => {
+      resetBtn.setAttribute('aria-busy', 'true');
+      resetBtn.disabled = true;
       try {
         await api('POST', '/system/factory-reset');
         showToast('Factory reset complete, rebooting...');
@@ -379,6 +386,9 @@ function bindActions() {
         if (dialog) dialog.close();
       } catch (err) {
         showToast('Factory reset failed: ' + err.message);
+      } finally {
+        resetBtn.removeAttribute('aria-busy');
+        resetBtn.disabled = false;
       }
     });
   }
@@ -440,11 +450,15 @@ function bindActions() {
 
       try {
         const buffer = await file.arrayBuffer();
-        await fetch('/api/v1/ota', {
+        const res = await fetch('/api/v1/ota', {
           method: 'POST',
           headers: { 'Content-Type': 'application/octet-stream' },
           body: buffer,
         });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message || `Upload failed (${res.status})`);
+        }
         showToast('Firmware uploaded. Reboot to apply.');
       } catch (err) {
         showToast('Upload failed: ' + err.message);
