@@ -64,6 +64,11 @@ static struct {
     .mutex = NULL,
 };
 
+// MOTD storage (protected by s_ctx.mutex)
+static motd_entry_t s_motds[EVENT_BUS_MAX_MOTDS];
+static size_t s_motd_count = 0;
+static uint32_t s_motd_next_id = 1;
+
 // --------------------------------------------------------------------------
 // Helper Functions
 // --------------------------------------------------------------------------
@@ -150,6 +155,11 @@ esp_err_t event_bus_init(void)
     s_ctx.channel_count = 0;
     memset(s_ctx.channels, 0, sizeof(s_ctx.channels));
 
+    // Initialize MOTD storage
+    memset(s_motds, 0, sizeof(s_motds));
+    s_motd_count = 0;
+    s_motd_next_id = 1;
+
     s_ctx.initialized = true;
     ESP_LOGI(TAG, "Initialized (max channels: %d)", CONFIG_EVENT_BUS_MAX_CHANNELS);
 
@@ -173,6 +183,11 @@ esp_err_t event_bus_deinit(void)
     s_ctx.current_active = EVENT_OFF;
     s_ctx.channel_count = 0;
     memset(s_ctx.channels, 0, sizeof(s_ctx.channels));
+
+    // Clear MOTD storage
+    memset(s_motds, 0, sizeof(s_motds));
+    s_motd_count = 0;
+    s_motd_next_id = 1;
 
     // Give back mutex before deleting
     xSemaphoreGive(s_ctx.mutex);
@@ -318,4 +333,164 @@ const char *event_state_name(event_state_t state)
         return "UNKNOWN";
     }
     return state_names[state];
+}
+
+// --------------------------------------------------------------------------
+// MOTD Functions
+// --------------------------------------------------------------------------
+
+esp_err_t event_bus_post_motd(const char *source, const char *message, motd_priority_t priority)
+{
+    if (source == NULL || message == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in post_motd");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    // Check for existing MOTD from same source with same message (update in place)
+    for (size_t i = 0; i < s_motd_count; i++) {
+        if (strncmp(s_motds[i].source, source, sizeof(s_motds[i].source)) == 0 &&
+            strncmp(s_motds[i].message, message, sizeof(s_motds[i].message)) == 0) {
+            // Update existing entry
+            s_motds[i].priority = priority;
+            s_motds[i].timestamp = (uint32_t)(esp_log_timestamp() / 1000);
+            ESP_LOGD(TAG, "MOTD updated: [%s] %s (id=%" PRIu32 ")",
+                     source, message, s_motds[i].id);
+            xSemaphoreGive(s_ctx.mutex);
+            return ESP_OK;
+        }
+    }
+
+    // Check for available slot
+    if (s_motd_count >= EVENT_BUS_MAX_MOTDS) {
+        ESP_LOGW(TAG, "MOTD slots full (%d), cannot post from '%s'",
+                 EVENT_BUS_MAX_MOTDS, source);
+        xSemaphoreGive(s_ctx.mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    // Add new MOTD entry
+    motd_entry_t *entry = &s_motds[s_motd_count];
+    entry->id = s_motd_next_id++;
+    strncpy(entry->source, source, sizeof(entry->source) - 1);
+    entry->source[sizeof(entry->source) - 1] = '\0';
+    strncpy(entry->message, message, sizeof(entry->message) - 1);
+    entry->message[sizeof(entry->message) - 1] = '\0';
+    entry->priority = priority;
+    entry->timestamp = (uint32_t)(esp_log_timestamp() / 1000);
+    s_motd_count++;
+
+    ESP_LOGI(TAG, "MOTD posted: [%s] %s (id=%" PRIu32 ", %zu/%d)",
+             source, message, entry->id, s_motd_count, EVENT_BUS_MAX_MOTDS);
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ESP_OK;
+}
+
+const motd_entry_t *event_bus_get_motds(size_t *count)
+{
+    if (count == NULL) {
+        return NULL;
+    }
+
+    if (!s_ctx.initialized) {
+        *count = 0;
+        return NULL;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in get_motds");
+        *count = 0;
+        return NULL;
+    }
+
+    *count = s_motd_count;
+    const motd_entry_t *result = (s_motd_count > 0) ? s_motds : NULL;
+
+    xSemaphoreGive(s_ctx.mutex);
+    return result;
+}
+
+esp_err_t event_bus_dismiss_motd(uint32_t id)
+{
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in dismiss_motd");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    // Find entry by ID
+    for (size_t i = 0; i < s_motd_count; i++) {
+        if (s_motds[i].id == id) {
+            ESP_LOGI(TAG, "MOTD dismissed: [%s] %s (id=%" PRIu32 ")",
+                     s_motds[i].source, s_motds[i].message, id);
+
+            // Compact array: shift remaining entries down
+            for (size_t j = i; j < s_motd_count - 1; j++) {
+                s_motds[j] = s_motds[j + 1];
+            }
+            s_motd_count--;
+            memset(&s_motds[s_motd_count], 0, sizeof(motd_entry_t));
+
+            xSemaphoreGive(s_ctx.mutex);
+            return ESP_OK;
+        }
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ESP_ERR_NOT_FOUND;
+}
+
+esp_err_t event_bus_clear_motds_from(const char *source)
+{
+    if (source == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in clear_motds_from");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    // Remove all entries matching source, compact as we go
+    size_t write_idx = 0;
+    size_t removed = 0;
+    for (size_t read_idx = 0; read_idx < s_motd_count; read_idx++) {
+        if (strncmp(s_motds[read_idx].source, source, sizeof(s_motds[read_idx].source)) == 0) {
+            removed++;
+        } else {
+            if (write_idx != read_idx) {
+                s_motds[write_idx] = s_motds[read_idx];
+            }
+            write_idx++;
+        }
+    }
+
+    // Clear vacated slots
+    for (size_t i = write_idx; i < s_motd_count; i++) {
+        memset(&s_motds[i], 0, sizeof(motd_entry_t));
+    }
+    s_motd_count = write_idx;
+
+    if (removed > 0) {
+        ESP_LOGI(TAG, "Cleared %zu MOTDs from '%s' (%zu remaining)",
+                 removed, source, s_motd_count);
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ESP_OK;
 }
