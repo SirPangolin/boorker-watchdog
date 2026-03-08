@@ -6,7 +6,8 @@
     "dev": "vite",
     "dev:mock": "VITE_MOCK=true vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "deploy": "bash scripts/deploy.sh"
   },
   "dependencies": {
     "@knadh/oat": "^0.4.2",
