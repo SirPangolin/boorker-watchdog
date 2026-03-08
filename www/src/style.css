@@ -103,22 +103,32 @@
 .status-dot.offline { background: var(--danger); }
 .status-dot.connecting { background: var(--warning); }
 
-/* Dashboard grid */
+/* Stat card grid */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 1rem;
+  margin-bottom: 1.5rem;
 }
-
-.stat-card {
-  text-align: center;
-}
-
+.stat-card header { padding-bottom: 0; }
 .stat-value {
-  font-size: 2rem;
-  font-weight: 600;
-  color: var(--primary);
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--foreground);
+  padding: 0 1rem 1rem;
 }
+
+/* Event rows */
+.event-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.event-row:last-child { border-bottom: none; }
+.event-msg { flex: 1; }
+.event-source, .event-time { color: var(--muted-foreground); }
 
 /* Footer */
 .app-footer {
