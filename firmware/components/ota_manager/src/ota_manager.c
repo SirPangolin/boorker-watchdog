@@ -318,8 +318,6 @@ esp_err_t ota_manager_write_upload_chunk(const void *data, size_t len)
         return err;
     }
 
-    g_ota.bytes_written += len;
-
     // Copy callback info under lock, invoke outside to avoid holding mutex
     ota_progress_cb_t cb = g_ota.progress_cb;
     void *cb_ctx = g_ota.progress_ctx;

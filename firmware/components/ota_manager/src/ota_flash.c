@@ -2,6 +2,7 @@
 #include "esp_ota_ops.h"
 #include "esp_log.h"
 #include "mbedtls/sha256.h"
+#include <inttypes.h>
 #include <string.h>
 #include <stdio.h>
 #include <ctype.h>
@@ -80,6 +81,11 @@ esp_err_t ota_flash_verify_hash(const char *expected_sha256)
 {
     if (expected_sha256 == NULL) {
         ESP_LOGE(TAG, "Expected SHA256 is NULL");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (strlen(expected_sha256) != 64) {
+        ESP_LOGE(TAG, "Expected SHA256 has invalid length: %zu", strlen(expected_sha256));
         return ESP_ERR_INVALID_ARG;
     }
 
