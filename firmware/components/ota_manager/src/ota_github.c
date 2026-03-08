@@ -203,6 +203,7 @@ esp_err_t ota_github_check_releases(void)
 
     esp_http_client_set_header(client, "Accept", "application/vnd.github+json");
     esp_http_client_set_header(client, "User-Agent", "boorker-watchdog-ota");
+    esp_http_client_set_header(client, "X-GitHub-Api-Version", "2022-11-28");
 
     esp_err_t err = esp_http_client_open(client, 0);
     if (err != ESP_OK) {
@@ -285,7 +286,10 @@ esp_err_t ota_github_check_releases(void)
 
     ESP_LOGI(TAG, "Latest release: %s (prerelease=%d)", tag_name, is_prerelease);
 
-    /* Channel check: if stable channel and it's a prerelease, skip */
+    /* Channel check: if stable channel and it's a prerelease, skip.
+     * Note: /releases/latest already excludes prereleases by definition,
+     * so this check is defensive.  When prerelease channel support is
+     * needed, switch to the /releases endpoint and iterate the array. */
     if (g_ota.channel == 0 && is_prerelease) {
         ESP_LOGI(TAG, "Skipping prerelease on stable channel");
         g_ota.update_available = false;
@@ -379,7 +383,7 @@ cleanup:
         cJSON_Delete(root);
     }
     if (response_buf != NULL) {
-        free(response_buf);
+        heap_caps_free(response_buf);
     }
     if (client != NULL) {
         esp_http_client_cleanup(client);
