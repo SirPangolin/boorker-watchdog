@@ -23,7 +23,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
     char *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (!buf) {
         ESP_LOGE(TAG, "Failed to allocate download buffer");
-        ota_flash_abort();
+        /* No flash session exists yet — nothing to abort */
         return ESP_ERR_NO_MEM;
     }
 
@@ -71,6 +71,13 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
         goto cleanup;
     }
 
+    /* Warn if server-reported size doesn't match release metadata */
+    if (content_length > 0 && info->size_bytes > 0 &&
+        (uint32_t)content_length != info->size_bytes) {
+        ESP_LOGW(TAG, "Content-Length %d differs from expected %" PRIu32 " bytes",
+                 content_length, info->size_bytes);
+    }
+
     /* Step 3: Read and flash in chunks */
     int bytes_read;
     while ((bytes_read = esp_http_client_read(client, buf, buf_size)) > 0) {
@@ -81,7 +88,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
         }
 
         if (cb != NULL) {
-            cb(g_ota.bytes_written, g_ota.total_bytes, ctx);
+            cb(g_ota.session.bytes_written, g_ota.session.total_bytes, ctx);
         }
     }
 
@@ -116,6 +123,8 @@ cleanup:
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
     }
+    /* This function owns the flash session it created —
+     * abort on failure so the caller doesn't need to */
     if (ret != ESP_OK) {
         ota_flash_abort();
     }

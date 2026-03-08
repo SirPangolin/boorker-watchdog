@@ -41,7 +41,8 @@ typedef void (*ota_progress_cb_t)(uint32_t bytes_written, uint32_t total_bytes, 
  *
  * Sets up internal state, reads NVS configuration (release channel, boot
  * counter), and spawns the periodic background task that checks GitHub
- * for new releases.
+ * for new releases. Must be called from app_main() after NVS and
+ * networking are available; not safe to call from multiple tasks.
  *
  * @return
  *  - ESP_OK on success
@@ -65,15 +66,18 @@ esp_err_t ota_manager_init(void);
 esp_err_t ota_manager_check_now(void);
 
 /**
- * @brief Get information about the most recently discovered update.
+ * @brief Copy available update info into caller-provided buffer.
  *
- * Returns a pointer to the internally stored update info. The pointer
- * remains valid until the next call to ota_manager_check_now() or
- * until the update is started.
+ * Thread-safe: copies update data under lock so the caller owns the result.
  *
- * @return Pointer to update info, or NULL if no update is available.
+ * @param out  Destination buffer (must not be NULL).
+ * @return
+ *  - ESP_OK if an update was copied into @p out
+ *  - ESP_ERR_NOT_FOUND if no update is available
+ *  - ESP_ERR_INVALID_ARG if out is NULL
+ *  - ESP_ERR_TIMEOUT if mutex could not be acquired
  */
-const ota_update_info_t *ota_manager_get_available_update(void);
+esp_err_t ota_manager_get_available_update(ota_update_info_t *out);
 
 /**
  * @brief Start downloading and flashing a firmware update from GitHub.
@@ -90,6 +94,7 @@ const ota_update_info_t *ota_manager_get_available_update(void);
  * @return
  *  - ESP_OK on success
  *  - ESP_ERR_INVALID_STATE if no update available or already in progress
+ *  - ESP_ERR_TIMEOUT if mutex could not be acquired
  *  - ESP_ERR_OTA_VALIDATE_FAILED if hash verification failed
  *  - ESP_FAIL on download or flash error
  */
@@ -110,7 +115,8 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx);
  * @return
  *  - ESP_OK on success
  *  - ESP_ERR_INVALID_STATE if an update is already in progress
- *  - ESP_ERR_NO_MEM if OTA partition is too small
+ *  - ESP_ERR_INVALID_SIZE if firmware exceeds OTA partition capacity
+ *  - ESP_ERR_NOT_FOUND if no OTA partition exists
  */
 esp_err_t ota_manager_start_upload(uint32_t size, const char *expected_sha256,
                                    ota_progress_cb_t cb, void *ctx);
@@ -161,15 +167,16 @@ esp_err_t ota_manager_abort(void);
  * @brief Mark the currently running firmware as valid.
  *
  * Should be called early during boot (after basic self-tests pass) to
- * confirm that this firmware is working. Resets the failed-boot counter
- * in NVS and calls esp_ota_mark_app_valid_cancel_rollback().
+ * confirm that this firmware is working. Calls
+ * esp_ota_mark_app_valid_cancel_rollback() which prevents the bootloader
+ * from rolling back on subsequent reboots.
  *
- * If this is not called within the configured number of boot attempts,
- * the bootloader will automatically roll back to the previous firmware.
+ * Safe to call even on factory-only (non-OTA) boots — returns ESP_OK
+ * if no rollback state exists.
  *
  * @return
  *  - ESP_OK on success
- *  - ESP_FAIL on NVS or OTA API error
+ *  - ESP_FAIL on OTA API error
  */
 esp_err_t ota_manager_mark_valid(void);
 

@@ -345,7 +345,7 @@ esp_err_t event_bus_post_motd(const char *source, const char *message, motd_prio
         return ESP_ERR_INVALID_ARG;
     }
 
-    if (priority > MOTD_PRIORITY_CRITICAL) {
+    if (priority >= MOTD_PRIORITY_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -398,28 +398,31 @@ esp_err_t event_bus_post_motd(const char *source, const char *message, motd_prio
     return ESP_OK;
 }
 
-const motd_entry_t *event_bus_get_motds(size_t *count)
+esp_err_t event_bus_get_motds(motd_entry_t *out, size_t max_count, size_t *count)
 {
-    if (count == NULL) {
-        return NULL;
+    if (out == NULL || count == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
 
+    *count = 0;
+
     if (!s_ctx.initialized) {
-        *count = 0;
-        return NULL;
+        return ESP_ERR_INVALID_STATE;
     }
 
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "Mutex timeout in get_motds");
-        *count = 0;
-        return NULL;
+        return ESP_ERR_TIMEOUT;
     }
 
-    *count = s_motd_count;
-    const motd_entry_t *result = (s_motd_count > 0) ? s_motds : NULL;
+    size_t to_copy = (s_motd_count < max_count) ? s_motd_count : max_count;
+    if (to_copy > 0) {
+        memcpy(out, s_motds, to_copy * sizeof(motd_entry_t));
+    }
+    *count = to_copy;
 
     xSemaphoreGive(s_ctx.mutex);
-    return result;
+    return ESP_OK;
 }
 
 esp_err_t event_bus_dismiss_motd(uint32_t id)

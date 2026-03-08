@@ -59,6 +59,7 @@ typedef enum {
     MOTD_PRIORITY_INFO = 0,      /**< Informational (lowest) */
     MOTD_PRIORITY_WARNING,       /**< Warning */
     MOTD_PRIORITY_CRITICAL,      /**< Critical (highest) */
+    MOTD_PRIORITY_MAX            /**< Sentinel — must be last */
 } motd_priority_t;
 
 /**
@@ -203,17 +204,16 @@ const char *event_state_name(event_state_t state);
 esp_err_t event_bus_post_motd(const char *source, const char *message, motd_priority_t priority);
 
 /**
- * @brief Get active MOTDs
+ * @brief Copy active MOTDs into caller-provided buffer
  *
- * @note Thread-safety: The returned pointer references the internal MOTD array.
- *       The mutex is released before this function returns, so the caller must
- *       copy the results immediately or otherwise ensure no concurrent
- *       post/dismiss/clear operations occur while accessing the data.
+ * Thread-safe: copies MOTD data under lock so the caller owns the result.
  *
- * @param count Output: number of active MOTDs
- * @return Pointer to MOTD array (valid until next post/dismiss), or NULL if none
+ * @param out       Destination buffer for MOTD entries
+ * @param max_count Capacity of @p out (number of entries)
+ * @param count     Output: number of entries actually copied
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if out/count is NULL
  */
-const motd_entry_t *event_bus_get_motds(size_t *count);
+esp_err_t event_bus_get_motds(motd_entry_t *out, size_t max_count, size_t *count);
 
 /**
  * @brief Dismiss an MOTD by ID
