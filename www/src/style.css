@@ -56,6 +56,48 @@
   --danger-foreground: #ffffff;
 }
 
+/* App header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 1rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  height: 56px;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.header-left .logo svg { width: 32px; height: 32px; }
+.brand { font-weight: 700; font-size: 1rem; }
+.header-nav {
+  display: flex;
+  gap: 1rem;
+}
+.header-nav a {
+  text-decoration: none;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+}
+.header-nav a.active,
+.header-nav a:hover {
+  color: var(--primary);
+  background: var(--muted);
+}
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
 /* Logo styling */
 .logo {
   display: flex;
@@ -73,16 +115,16 @@
 
 /* Centered auth layout */
 .auth-page {
-  min-height: 100vh;
   display: flex;
-  align-items: center;
   justify-content: center;
-  padding: 1rem;
+  align-items: center;
+  min-height: calc(100vh - 56px);
+  padding: 2rem 1rem;
 }
 
 .auth-card {
   width: 100%;
-  max-width: 380px;
+  max-width: 400px;
 }
 
 .auth-card header {
@@ -132,14 +174,11 @@
 
 /* Footer */
 .app-footer {
-  border-top: 1px solid var(--border);
-  padding: 0.75rem 1rem;
-  font-size: 0.875rem;
+  text-align: center;
+  padding: 1rem;
   color: var(--muted-foreground);
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 0.5rem;
+  font-size: 0.875rem;
+  border-top: 1px solid var(--border);
 }
 
 /* Settings layout */
@@ -174,4 +213,10 @@ details[name="settings"] { margin-bottom: 0.5rem; }
   justify-content: space-between;
   align-items: center;
   margin: 0 1rem;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+  .header-nav { display: none; }
+  .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
