@@ -1,0 +1,133 @@
+/* Boorker Theme - GitLab-inspired soft modes with cyan accent */
+
+:root {
+  /* Soft light mode */
+  --background: #fbfafd;
+  --foreground: #1f1f23;
+  --card: #ffffff;
+  --card-foreground: #1f1f23;
+  --muted: #f0eff4;
+  --muted-foreground: #71717a;
+  --border: #dcdce0;
+  --input: #dcdce0;
+
+  /* Cyan/ocean accent */
+  --primary: #0891b2;
+  --primary-hover: #06b6d4;
+  --primary-foreground: #ffffff;
+
+  /* Status colors (poppy) */
+  --success: #16a34a;
+  --success-foreground: #ffffff;
+  --warning: #ea580c;
+  --warning-foreground: #ffffff;
+  --danger: #dc2626;
+  --danger-foreground: #ffffff;
+
+  --ring: #22d3ee;
+  --radius: 0.5rem;
+
+  /* OAT variable mappings */
+  --secondary: var(--muted);
+  --secondary-foreground: var(--foreground);
+}
+
+[data-theme="dark"] {
+  /* Soft dark mode */
+  --background: #0f0e13;
+  --foreground: #e4e4e7;
+  --card: #1a191f;
+  --card-foreground: #e4e4e7;
+  --muted: #242329;
+  --muted-foreground: #a1a1aa;
+  --border: #2e2d35;
+  --input: #2e2d35;
+
+  /* Cyan brighter in dark */
+  --primary: #22d3ee;
+  --primary-hover: #67e8f9;
+  --primary-foreground: #0f0e13;
+
+  --success: #22c55e;
+  --success-foreground: #0f0e13;
+  --warning: #f97316;
+  --warning-foreground: #0f0e13;
+  --danger: #ef4444;
+  --danger-foreground: #ffffff;
+}
+
+/* Logo styling */
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  text-decoration: none;
+  color: var(--foreground);
+  font-weight: 600;
+}
+
+.logo img, .logo svg {
+  width: 32px;
+  height: 32px;
+}
+
+/* Centered auth layout */
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 380px;
+}
+
+.auth-card header {
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+/* Status indicator */
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 0.5rem;
+}
+
+.status-dot.online { background: var(--success); }
+.status-dot.offline { background: var(--danger); }
+.status-dot.connecting { background: var(--warning); }
+
+/* Dashboard grid */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}
+
+.stat-card {
+  text-align: center;
+}
+
+.stat-value {
+  font-size: 2rem;
+  font-weight: 600;
+  color: var(--primary);
+}
+
+/* Footer */
+.app-footer {
+  border-top: 1px solid var(--border);
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: var(--muted-foreground);
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
