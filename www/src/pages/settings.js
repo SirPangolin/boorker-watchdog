@@ -476,6 +476,10 @@ function bindActions() {
           headers: { 'Content-Type': 'application/octet-stream' },
           body: buffer,
         });
+        if (res.status === 401) {
+          window.location.hash = '#login';
+          throw new Error('Session expired');
+        }
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.message || `Upload failed (${res.status})`);
@@ -494,7 +498,17 @@ function bindActions() {
 function showToast(message) {
   if (typeof ot !== 'undefined' && ot.toast) {
     ot.toast(message);
-  } else {
-    console.log('[Toast]', message);
+    return;
   }
+  // Fallback: simple DOM toast for browsers where OAT JS hasn't loaded
+  const toast = document.createElement('div');
+  toast.setAttribute('role', 'status');
+  toast.textContent = message;
+  toast.style.cssText = 'position:fixed;bottom:1rem;left:50%;transform:translateX(-50%);background:var(--foreground);color:var(--background);padding:0.75rem 1.25rem;border-radius:var(--radius);z-index:9999;font-size:0.875rem;opacity:0;transition:opacity 0.3s;';
+  document.body.appendChild(toast);
+  requestAnimationFrame(() => { toast.style.opacity = '1'; });
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
 }
