@@ -859,9 +859,15 @@ static esp_err_t api_ota_update_put(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
 
+    // TODO: start_update is blocking (downloads entire firmware). The HTTP server
+    // thread is unavailable during this time. Consider dispatching to a separate
+    // task and returning 202 Accepted for async operation.
     esp_err_t err = ota_manager_start_update(NULL, NULL);
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, "{\"success\":true}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No update available or already in progress\"}");
     } else {
         httpd_resp_set_status(req, "500 Internal Server Error");
         httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"OTA update failed\"}");
@@ -952,7 +958,13 @@ static esp_err_t api_ota_abort_delete(httpd_req_t *req)
         return ESP_OK;
     }
 
-    ota_manager_abort();
+    esp_err_t err = ota_manager_abort();
+    if (err != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Abort failed\"}");
+        return ESP_OK;
+    }
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, "{\"success\":true}");
