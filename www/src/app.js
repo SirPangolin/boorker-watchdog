@@ -52,6 +52,12 @@ const LOGOUT_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="
   <line x1="21" y1="12" x2="9" y2="12"/>
 </svg>`;
 
+const MENU_ICON = `<svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <line x1="3" y1="6" x2="21" y2="6"/>
+  <line x1="3" y1="12" x2="21" y2="12"/>
+  <line x1="3" y1="18" x2="21" y2="18"/>
+</svg>`;
+
 const VERSION = '0.7.0';
 
 const routes = {
@@ -94,8 +100,13 @@ function renderShell(pageHtml, showNav) {
       <div class="header-right">
         <button id="theme-toggle" class="btn btn-sm" title="Toggle theme">${themeIcon}</button>
         <button id="logout-btn" class="btn btn-sm" title="Logout">${LOGOUT_ICON}</button>
+        <button id="mobile-menu-btn" class="btn btn-sm mobile-only" title="Menu">${MENU_ICON}</button>
       </div>
     </header>
+    <nav id="mobile-nav" class="mobile-nav" hidden>
+      <a href="#dashboard" class="${hash === '#dashboard' ? 'active' : ''}">Dashboard</a>
+      <a href="#settings" class="${hash === '#settings' ? 'active' : ''}">Settings</a>
+    </nav>
     <div id="motd-area"></div>
     <main class="container">
       ${pageHtml}
@@ -162,6 +173,18 @@ export async function navigate() {
         } catch (_) { /* ignore */ }
         session = { authenticated: false, claimed: true };
         location.hash = '#login';
+      });
+    }
+
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const mobileNav = document.getElementById('mobile-nav');
+    if (menuBtn && mobileNav) {
+      menuBtn.addEventListener('click', () => {
+        mobileNav.hidden = !mobileNav.hidden;
+      });
+      // Close mobile nav when a link is clicked
+      mobileNav.addEventListener('click', (e) => {
+        if (e.target.tagName === 'A') mobileNav.hidden = true;
       });
     }
 

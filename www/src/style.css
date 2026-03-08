@@ -215,8 +215,33 @@ details[name="settings"] { margin-bottom: 0.5rem; }
   margin: 0 1rem;
 }
 
+/* Mobile menu button — hidden on desktop */
+.mobile-only { display: none; }
+
+/* Mobile dropdown nav */
+.mobile-nav {
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 0.5rem 1rem;
+  gap: 0.25rem;
+}
+.mobile-nav a {
+  text-decoration: none;
+  color: var(--muted-foreground);
+  padding: 0.5rem;
+  border-radius: 0.25rem;
+}
+.mobile-nav a.active,
+.mobile-nav a:hover {
+  color: var(--primary);
+  background: var(--muted);
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   .header-nav { display: none; }
+  .mobile-only { display: inline-flex; }
   .stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
