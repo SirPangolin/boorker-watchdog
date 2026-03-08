@@ -658,6 +658,129 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Helper: convert motd_priority_t to string
+static const char* motd_priority_str(motd_priority_t priority)
+{
+    switch (priority) {
+        case MOTD_PRIORITY_INFO:     return "info";
+        case MOTD_PRIORITY_WARNING:  return "warning";
+        case MOTD_PRIORITY_CRITICAL: return "critical";
+        default:                     return "info";
+    }
+}
+
+// GET /api/v1/system/motd
+static esp_err_t api_system_motd_get(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    size_t count = 0;
+    const motd_entry_t *motds = event_bus_get_motds(&count);
+
+    cJSON *arr = cJSON_CreateArray();
+    if (arr == NULL) {
+        ESP_LOGE(TAG, "Failed to create MOTD JSON array");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < count && ok; i++) {
+        cJSON *item = cJSON_CreateObject();
+        if (item == NULL) {
+            ok = false;
+            break;
+        }
+        ok = ok && cJSON_AddNumberToObject(item, "id", motds[i].id);
+        ok = ok && cJSON_AddStringToObject(item, "source", motds[i].source);
+        ok = ok && cJSON_AddStringToObject(item, "message", motds[i].message);
+        ok = ok && cJSON_AddStringToObject(item, "priority", motd_priority_str(motds[i].priority));
+        ok = ok && cJSON_AddNumberToObject(item, "timestamp", motds[i].timestamp);
+        if (ok) {
+            cJSON_AddItemToArray(arr, item);
+        } else {
+            cJSON_Delete(item);
+        }
+    }
+
+    if (!ok) {
+        ESP_LOGE(TAG, "Failed to build MOTD JSON - memory allocation failed");
+        cJSON_Delete(arr);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char *resp = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+
+    if (!resp) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
+    free(resp);
+
+    return ESP_OK;
+}
+
+// DELETE /api/v1/system/motd
+static esp_err_t api_system_motd_delete(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    char buf[64];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret < 0) {
+        ESP_LOGD(TAG, "MOTD delete recv error: %d", ret);
+        return ESP_FAIL;
+    }
+    if (ret == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No body\"}");
+        return ESP_OK;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Invalid JSON\"}");
+        return ESP_OK;
+    }
+
+    cJSON *id_json = cJSON_GetObjectItem(json, "id");
+    if (!cJSON_IsNumber(id_json)) {
+        cJSON_Delete(json);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Missing or invalid id\"}");
+        return ESP_OK;
+    }
+
+    uint32_t id = (uint32_t)id_json->valueint;
+    cJSON_Delete(json);
+
+    httpd_resp_set_type(req, "application/json");
+
+    esp_err_t err = event_bus_dismiss_motd(id);
+    if (err == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"MOTD not found\"}");
+    }
+
+    return ESP_OK;
+}
+
 // Mount LittleFS
 static esp_err_t mount_littlefs(void)
 {
@@ -823,6 +946,28 @@ esp_err_t http_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_factory_reset);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/system/factory-reset: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_motd_get = {
+        .uri = "/api/v1/system/motd",
+        .method = HTTP_GET,
+        .handler = api_system_motd_get,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_motd_get);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register GET /api/v1/system/motd: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_motd_delete = {
+        .uri = "/api/v1/system/motd",
+        .method = HTTP_DELETE,
+        .handler = api_system_motd_delete,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_motd_delete);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register DELETE /api/v1/system/motd: %s", esp_err_to_name(ret));
         if (first_error == ESP_OK) first_error = ret;
     }
 
