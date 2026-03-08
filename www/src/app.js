@@ -1,3 +1,12 @@
+// OAT CSS — Vite bundles these into the output
+import '@knadh/oat/oat.min.css';
+import '@someshkar/oat-chips/dist/chip.min.css';
+import 'oat-animate/oat-animate/oat-animate.css';
+
+// OAT JS — side-effect imports so Vite includes them
+import '@knadh/oat/oat.min.js';
+import 'oat-animate/oat-animate/oat-animate.js';
+
 import { initTheme, toggleTheme } from './lib/theme.js';
 import { checkSession, logout } from './lib/auth.js';
 import { api } from './lib/api.js';
@@ -53,6 +62,10 @@ const routes = {
 
 let currentPage = null;
 export let session = null;
+
+export function setSession(s) {
+  session = s;
+}
 const app = document.getElementById('app');
 
 /**
@@ -124,7 +137,7 @@ export async function navigate() {
 
   // SECURITY NOTE: renderShell and page.render() return only static template
   // strings. No user-supplied data is interpolated into this HTML.
-  app.innerHTML = renderShell(page.render(), showNav);
+  app.innerHTML = renderShell(page.render(session), showNav);
   currentPage = page;
   page.mount(session);
 

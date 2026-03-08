@@ -13,7 +13,12 @@ export async function api(method, path, body) {
 
   const res = await fetch(`${API_BASE}${path}`, opts);
 
-  const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    data = {};
+  }
 
   if (res.status === 401) {
     // Only redirect if we're not already on the login page
