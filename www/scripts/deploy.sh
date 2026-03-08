@@ -20,7 +20,7 @@ cp -r "$DIST_DIR"/* "$SPIFFS_DIR/"
 
 # Pre-gzip assets for ESP32 serving
 for f in "$SPIFFS_DIR"/*.html "$SPIFFS_DIR"/assets/*.js "$SPIFFS_DIR"/assets/*.css; do
-  [ -f "$f" ] && gzip -k "$f"
+  [ -f "$f" ] && gzip -kf "$f"
 done
 
 echo "Deployed to $SPIFFS_DIR"

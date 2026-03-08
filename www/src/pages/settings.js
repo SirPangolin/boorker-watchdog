@@ -20,14 +20,14 @@ export function render() {
             <strong>Reboot</strong>
             <small>Restart the device. This takes about 10 seconds.</small>
           </div>
-          <button class="outline" commandfor="reboot-dialog" command="show-modal">Reboot</button>
+          <button id="reboot-open-btn" class="outline">Reboot</button>
         </div>
         <div class="settings-row">
           <div>
             <strong>Factory Reset</strong>
             <small>Erase all settings and restore defaults.</small>
           </div>
-          <button data-variant="danger" commandfor="reset-dialog" command="show-modal">Factory Reset</button>
+          <button id="reset-open-btn" data-variant="danger">Factory Reset</button>
         </div>
       </div>
     </details>
@@ -94,21 +94,21 @@ export function render() {
     </details>
 
     <!-- Reboot Dialog -->
-    <dialog id="reboot-dialog" closedby="any">
+    <dialog id="reboot-dialog" >
       <form method="dialog">
         <header>
           <h3>Reboot Device</h3>
           <p>The device will restart and be temporarily unavailable. Are you sure?</p>
         </header>
         <footer>
-          <button type="button" class="outline" commandfor="reboot-dialog" command="close">Cancel</button>
+          <button type="button" id="reboot-cancel-btn" class="outline">Cancel</button>
           <button id="reboot-confirm-btn" value="confirm">Reboot Now</button>
         </footer>
       </form>
     </dialog>
 
     <!-- Factory Reset Dialog -->
-    <dialog id="reset-dialog" closedby="any">
+    <dialog id="reset-dialog" >
       <form method="dialog">
         <header>
           <h3>Factory Reset</h3>
@@ -119,7 +119,7 @@ export function render() {
           <input type="text" id="reset-confirm-input" autocomplete="off" placeholder="Device name">
         </div>
         <footer>
-          <button type="button" class="outline" commandfor="reset-dialog" command="close">Cancel</button>
+          <button type="button" id="reset-cancel-btn" class="outline">Cancel</button>
           <button id="reset-confirm-btn" data-variant="danger" value="confirm" disabled>Factory Reset</button>
         </footer>
       </form>
@@ -347,7 +347,28 @@ function appendInfoRow(parent, label, value) {
   parent.appendChild(row);
 }
 
+function bindDialogButton(openId, cancelId, dialogId) {
+  const openBtn = document.getElementById(openId);
+  const cancelBtn = document.getElementById(cancelId);
+  const dialog = document.getElementById(dialogId);
+  if (openBtn && dialog) {
+    openBtn.addEventListener('click', () => dialog.showModal());
+  }
+  if (cancelBtn && dialog) {
+    cancelBtn.addEventListener('click', () => dialog.close());
+  }
+  if (dialog) {
+    dialog.addEventListener('click', (e) => {
+      if (e.target === dialog) dialog.close();
+    });
+  }
+}
+
 function bindActions() {
+  // Dialog open/close/backdrop handlers (cross-browser)
+  bindDialogButton('reboot-open-btn', 'reboot-cancel-btn', 'reboot-dialog');
+  bindDialogButton('reset-open-btn', 'reset-cancel-btn', 'reset-dialog');
+
   // Reboot confirm
   const rebootBtn = document.getElementById('reboot-confirm-btn');
   if (rebootBtn) {
