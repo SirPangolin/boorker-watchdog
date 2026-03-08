@@ -13,12 +13,15 @@ export async function api(method, path, body) {
 
   const res = await fetch(`${API_BASE}${path}`, opts);
 
-  if (res.status === 401) {
-    window.location.hash = '#login';
-    throw new ApiError('Session expired', 401);
-  }
-
   const data = await res.json();
+
+  if (res.status === 401) {
+    // Only redirect if we're not already on the login page
+    if (window.location.hash !== '#login') {
+      window.location.hash = '#login';
+    }
+    throw new ApiError(data.message || 'Session expired', 401, data);
+  }
 
   if (!res.ok) {
     throw new ApiError(data.message || data.error || 'Request failed', res.status, data);
