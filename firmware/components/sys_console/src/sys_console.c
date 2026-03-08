@@ -12,6 +12,7 @@
 #include "version.h"
 #include "credentials.h"
 #include "wifi_manager.h"
+#include "event_bus.h"
 #if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
 #endif
@@ -342,6 +343,33 @@ static int cmd_status(int argc, char **argv)
     return 0;
 }
 
+static void print_motds(void)
+{
+    size_t count = 0;
+    const motd_entry_t *motds = event_bus_get_motds(&count);
+    if (motds == NULL || count == 0) {
+        return;
+    }
+
+    printf("-------------------------------\n");
+    for (size_t i = 0; i < count; i++) {
+        const char *prefix;
+        switch (motds[i].priority) {
+            case MOTD_PRIORITY_WARNING:
+                prefix = "[!]";
+                break;
+            case MOTD_PRIORITY_CRITICAL:
+                prefix = "[!!!]";
+                break;
+            default:
+                prefix = "[i]";
+                break;
+        }
+        printf("%s %s\n", prefix, motds[i].message);
+    }
+    printf("-------------------------------\n");
+}
+
 esp_err_t sys_console_register(void)
 {
     esp_err_t ret;
@@ -434,5 +462,8 @@ esp_err_t sys_console_register(void)
     }
 
     ESP_LOGI(TAG, "Registered commands: reboot, version, free, uptime, status");
+
+    print_motds();
+
     return ESP_OK;
 }
