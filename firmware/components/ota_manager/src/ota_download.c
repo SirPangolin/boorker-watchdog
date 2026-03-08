@@ -1,7 +1,10 @@
 #include "ota_manager_internal.h"
 #include "esp_http_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
+#include "version.h"
+#include <inttypes.h>
 #include <string.h>
 
 static const char *TAG = "ota_download";
@@ -15,7 +18,14 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
 
     esp_err_t ret = ESP_FAIL;
     esp_http_client_handle_t client = NULL;
-    char buf[4096];
+
+    const size_t buf_size = CONFIG_OTA_MANAGER_HTTP_BUF_SIZE_KB * 1024;
+    char *buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        ESP_LOGE(TAG, "Failed to allocate download buffer");
+        ota_flash_abort();
+        return ESP_ERR_NO_MEM;
+    }
 
     ESP_LOGI(TAG, "Starting OTA download from %s (%"PRIu32" bytes)",
              info->download_url, info->size_bytes);
@@ -24,6 +34,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
     ret = ota_flash_begin(info->size_bytes);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "ota_flash_begin failed: %s", esp_err_to_name(ret));
+        heap_caps_free(buf);
         return ret;
     }
 
@@ -32,6 +43,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
         .url = info->download_url,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .timeout_ms = 15000,
+        .max_redirection_count = 5,
     };
 
     client = esp_http_client_init(&config);
@@ -40,6 +52,8 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
         ret = ESP_FAIL;
         goto cleanup;
     }
+
+    esp_http_client_set_header(client, "User-Agent", "boorker-watchdog/" BOORKER_VERSION_STRING);
 
     ret = esp_http_client_open(client, 0); /* 0 = no POST data */
     if (ret != ESP_OK) {
@@ -59,7 +73,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
 
     /* Step 3: Read and flash in chunks */
     int bytes_read;
-    while ((bytes_read = esp_http_client_read(client, buf, sizeof(buf))) > 0) {
+    while ((bytes_read = esp_http_client_read(client, buf, buf_size)) > 0) {
         ret = ota_flash_write(buf, bytes_read);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "ota_flash_write failed: %s", esp_err_to_name(ret));
@@ -97,6 +111,7 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
     ESP_LOGI(TAG, "OTA download complete");
 
 cleanup:
+    heap_caps_free(buf);
     if (client) {
         esp_http_client_close(client);
         esp_http_client_cleanup(client);
