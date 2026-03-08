@@ -234,7 +234,13 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
     // Blocking download — mutex released during network I/O
     esp_err_t err = ota_download_start(&g_ota.update_info, cb, ctx);
 
-    OTA_LOCK();  // re-acquire after blocking call
+    if (!OTA_LOCK()) {
+        ESP_LOGE(TAG, "Failed to re-acquire lock after download");
+        if (err != ESP_OK) {
+            ota_flash_abort();
+        }
+        return (err == ESP_OK) ? ESP_ERR_TIMEOUT : err;
+    }
 
     if (err == ESP_OK) {
         system_state_set_ota(SYSTEM_OTA_PENDING_REBOOT);
@@ -335,14 +341,28 @@ esp_err_t ota_manager_write_upload_chunk(const void *data, size_t len)
 
 esp_err_t ota_manager_finish_upload(void)
 {
+    if (!OTA_LOCK()) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     if (system_state_get_ota() != SYSTEM_OTA_DOWNLOADING) {
+        OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
     }
 
     system_state_set_ota(SYSTEM_OTA_VERIFYING);
 
-    if (g_ota.has_expected_sha256) {
-        esp_err_t err = ota_flash_verify_hash(g_ota.expected_sha256);
+    // Copy SHA256 state under lock, then release for blocking flash ops
+    bool has_sha256 = g_ota.has_expected_sha256;
+    char sha256_copy[65];
+    if (has_sha256) {
+        memcpy(sha256_copy, g_ota.expected_sha256, sizeof(sha256_copy));
+    }
+
+    OTA_UNLOCK();
+
+    if (has_sha256) {
+        esp_err_t err = ota_flash_verify_hash(sha256_copy);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "SHA-256 verification failed");
             system_state_set_ota(SYSTEM_OTA_IDLE);

@@ -128,21 +128,24 @@ esp_err_t ota_flash_verify_hash(const char *expected_sha256)
 esp_err_t ota_flash_end(void)
 {
     esp_err_t err = esp_ota_end(g_ota.ota_handle);
+    g_ota.ota_handle = 0;  // Handle consumed by esp_ota_end regardless of result
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_end failed: %s", esp_err_to_name(err));
+        g_ota.update_partition = NULL;
         return err;
     }
 
     err = esp_ota_set_boot_partition(g_ota.update_partition);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_set_boot_partition failed: %s", esp_err_to_name(err));
+        g_ota.update_partition = NULL;
         return err;
     }
 
-    g_ota.ota_handle = 0;
-
     ESP_LOGI(TAG, "OTA flash end: boot partition set to %s",
              g_ota.update_partition->label);
+
+    g_ota.update_partition = NULL;
     return ESP_OK;
 }
 
