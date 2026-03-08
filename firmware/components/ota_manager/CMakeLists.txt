@@ -16,6 +16,7 @@ idf_component_register(
         json
         log
     PRIV_REQUIRES
+        main
         freertos
         mbedtls
 )
