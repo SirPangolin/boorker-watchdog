@@ -1,0 +1,21 @@
+idf_component_register(
+    SRCS
+        "src/ota_manager.c"
+        "src/ota_github.c"
+        "src/ota_download.c"
+        "src/ota_flash.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        event_bus
+        system_state
+        nvs_flash
+        esp_http_client
+        esp_https_ota
+        app_update
+        json
+        log
+    PRIV_REQUIRES
+        freertos
+        mbedtls
+)
