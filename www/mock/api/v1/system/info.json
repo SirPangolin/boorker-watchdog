@@ -1,0 +1,6 @@
+{
+  "version": "0.7.0",
+  "idf_version": "5.5.0",
+  "chip_revision": 1,
+  "cores": 2
+}

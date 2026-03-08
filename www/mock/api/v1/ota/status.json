@@ -1,0 +1,14 @@
+{
+  "state": "idle",
+  "version": "0.7.0",
+  "channel": "stable",
+  "last_check": 1741400000,
+  "update": {
+    "version": "0.8.0",
+    "tag_name": "v0.8.0",
+    "release_notes": "Bug fixes and OTA improvements",
+    "size_bytes": 1048576,
+    "is_prerelease": false,
+    "has_sha256": true
+  }
+}
