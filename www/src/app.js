@@ -109,6 +109,12 @@ export async function navigate() {
   let hash = location.hash || '#dashboard';
   let route = routes[hash];
 
+  // Always unmount before any redirect to prevent stale timers
+  if (currentPage) {
+    try { currentPage.unmount(); } catch (_) { /* ignore */ }
+    currentPage = null;
+  }
+
   // Unknown route -> dashboard
   if (!route) {
     location.hash = '#dashboard';
@@ -125,11 +131,6 @@ export async function navigate() {
   if (!route.auth && session && session.authenticated) {
     location.hash = '#dashboard';
     return;
-  }
-
-  // Unmount old page
-  if (currentPage) {
-    try { currentPage.unmount(); } catch (_) { /* ignore */ }
   }
 
   const page = route.page;
