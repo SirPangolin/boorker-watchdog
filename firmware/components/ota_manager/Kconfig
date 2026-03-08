@@ -29,6 +29,15 @@ menu "OTA Manager"
             Stack size for the OTA background check task.
             Must be large enough for HTTPS/TLS operations.
 
+    config OTA_MANAGER_HTTP_BUF_SIZE_KB
+        int "HTTP response buffer size (KB)"
+        default 16
+        range 4 64
+        help
+            Maximum size in kilobytes for HTTP response buffers used by
+            OTA operations (GitHub API calls, firmware downloads, and
+            local uploads).  Allocated from PSRAM at runtime.
+
     config OTA_MANAGER_TASK_PRIORITY
         int "OTA task priority"
         default 3
