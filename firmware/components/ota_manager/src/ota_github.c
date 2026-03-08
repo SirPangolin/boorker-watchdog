@@ -26,7 +26,12 @@ static bool parse_version(const char *str, int *major, int *minor, int *patch)
         str++;
     }
 
-    if (sscanf(str, "%d.%d.%d", major, minor, patch) != 3) {
+    char trailing = '\0';
+    if (sscanf(str, "%d.%d.%d%c", major, minor, patch, &trailing) != 3) {
+        return false;
+    }
+
+    if (*major < 0 || *minor < 0 || *patch < 0) {
         return false;
     }
 
