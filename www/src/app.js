@@ -69,20 +69,25 @@ function renderShell(pageHtml, showNav) {
   const themeIcon = document.documentElement.getAttribute('data-theme') === 'dark' ? SUN_ICON : MOON_ICON;
 
   return `
-    <header class="app-header" style="position:sticky;top:0;z-index:100;height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 1rem;background:var(--card);border-bottom:1px solid var(--border);">
-      <a href="#dashboard" class="logo">${LOGO_SVG}<span>Boorker</span></a>
-      <nav style="display:flex;align-items:center;gap:0.5rem;">
-        <a href="#dashboard" class="btn btn-sm${hash === '#dashboard' ? ' active' : ''}" style="text-decoration:none;">Dashboard</a>
-        <a href="#settings" class="btn btn-sm${hash === '#settings' ? ' active' : ''}" style="text-decoration:none;">Settings</a>
+    <header class="app-header">
+      <div class="header-left">
+        <a href="#dashboard" class="logo">${LOGO_SVG}</a>
+        <span class="brand">Boorker Watchdog</span>
+      </div>
+      <nav class="header-nav">
+        <a href="#dashboard" class="${hash === '#dashboard' ? 'active' : ''}">Dashboard</a>
+        <a href="#settings" class="${hash === '#settings' ? 'active' : ''}">Settings</a>
+      </nav>
+      <div class="header-right">
         <button id="theme-toggle" class="btn btn-sm" title="Toggle theme">${themeIcon}</button>
         <button id="logout-btn" class="btn btn-sm" title="Logout">${LOGOUT_ICON}</button>
-      </nav>
+      </div>
     </header>
     <div id="motd-area"></div>
-    <main class="container" style="padding:1rem;">
+    <main class="container">
       ${pageHtml}
     </main>
-    <footer class="app-footer" style="text-align:center;justify-content:center;">
+    <footer class="app-footer">
       <span>Boorker Watchdog v${VERSION}</span>
     </footer>`;
 }
