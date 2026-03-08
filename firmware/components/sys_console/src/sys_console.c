@@ -345,9 +345,9 @@ static int cmd_status(int argc, char **argv)
 
 static void print_motds(void)
 {
+    motd_entry_t motds[EVENT_BUS_MAX_MOTDS];
     size_t count = 0;
-    const motd_entry_t *motds = event_bus_get_motds(&count);
-    if (motds == NULL || count == 0) {
+    if (event_bus_get_motds(motds, EVENT_BUS_MAX_MOTDS, &count) != ESP_OK || count == 0) {
         return;
     }
 

@@ -39,7 +39,7 @@ static void load_nvs_config(void)
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READONLY, &nvs);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "NVS open failed (%s), using defaults", esp_err_to_name(err));
+        ESP_LOGD(TAG, "NVS open failed (%s), using defaults", esp_err_to_name(err));
         strncpy(g_ota.repo_url, BOORKER_GITHUB_URL, sizeof(g_ota.repo_url) - 1);
         g_ota.repo_url[sizeof(g_ota.repo_url) - 1] = '\0';
         g_ota.channel = CONFIG_OTA_MANAGER_DEFAULT_CHANNEL;
@@ -50,13 +50,17 @@ static void load_nvs_config(void)
     size_t len = sizeof(g_ota.repo_url);
     err = nvs_get_str(nvs, OTA_NVS_KEY_REPO, g_ota.repo_url, &len);
     if (err != ESP_OK) {
+        ESP_LOGD(TAG, "NVS key '%s' not found, using default repo", OTA_NVS_KEY_REPO);
         strncpy(g_ota.repo_url, BOORKER_GITHUB_URL, sizeof(g_ota.repo_url) - 1);
         g_ota.repo_url[sizeof(g_ota.repo_url) - 1] = '\0';
     }
 
-    err = nvs_get_u8(nvs, OTA_NVS_KEY_CHAN, &g_ota.channel);
+    uint8_t channel_raw;
+    err = nvs_get_u8(nvs, OTA_NVS_KEY_CHAN, &channel_raw);
     if (err != ESP_OK) {
         g_ota.channel = CONFIG_OTA_MANAGER_DEFAULT_CHANNEL;
+    } else {
+        g_ota.channel = (ota_channel_t)channel_raw;
     }
 
     err = nvs_get_u32(nvs, OTA_NVS_KEY_LAST, &g_ota.last_check);
@@ -73,11 +77,19 @@ static void save_last_check(uint32_t timestamp)
 {
     nvs_handle_t nvs;
     esp_err_t err = nvs_open(OTA_NVS_NAMESPACE, NVS_READWRITE, &nvs);
-    if (err == ESP_OK) {
-        nvs_set_u32(nvs, OTA_NVS_KEY_LAST, timestamp);
-        nvs_commit(nvs);
-        nvs_close(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NVS open for last_check failed: %s", esp_err_to_name(err));
+        return;
     }
+    err = nvs_set_u32(nvs, OTA_NVS_KEY_LAST, timestamp);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NVS set last_check failed: %s", esp_err_to_name(err));
+    }
+    err = nvs_commit(nvs);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "NVS commit last_check failed: %s", esp_err_to_name(err));
+    }
+    nvs_close(nvs);
 }
 
 // ---------------------------------------------------------------------------
@@ -87,12 +99,15 @@ static void save_last_check(uint32_t timestamp)
 static void ota_check_task(void *arg)
 {
     (void)arg;
-    const TickType_t interval = pdMS_TO_TICKS(
-        (uint32_t)CONFIG_OTA_MANAGER_CHECK_INTERVAL_HOURS * 3600U * 1000U);
+
+    /* Sleep in 1-hour increments to avoid TickType_t overflow on long intervals.
+     * CONFIG_OTA_MANAGER_CHECK_INTERVAL_HOURS can be up to 168 (1 week). */
+    const TickType_t one_hour = pdMS_TO_TICKS(3600U * 1000U);
 
     for (;;) {
-        // Wait one full interval before checking (REST API can trigger immediate)
-        vTaskDelay(interval);
+        for (int h = 0; h < CONFIG_OTA_MANAGER_CHECK_INTERVAL_HOURS; h++) {
+            vTaskDelay(one_hour);
+        }
         ota_manager_check_now();
     }
 }
@@ -117,16 +132,9 @@ esp_err_t ota_manager_init(void)
 
     g_ota.update_available = false;
     memset(&g_ota.update_info, 0, sizeof(g_ota.update_info));
-    g_ota.ota_handle = 0;
-    g_ota.update_partition = NULL;
-    g_ota.bytes_written = 0;
-    g_ota.total_bytes = 0;
-    g_ota.progress_cb = NULL;
-    g_ota.progress_ctx = NULL;
-    g_ota.expected_sha256[0] = '\0';
-    g_ota.has_expected_sha256 = false;
+    memset(&g_ota.session, 0, sizeof(g_ota.session));
     g_ota.repo_url[0] = '\0';
-    g_ota.channel = 0;
+    g_ota.channel = OTA_CHANNEL_STABLE;
     g_ota.last_check = 0;
     g_ota.check_task = NULL;
 
@@ -164,7 +172,16 @@ esp_err_t ota_manager_check_now(void)
     }
 
     ESP_LOGI(TAG, "Checking for updates...");
+
+    /* Release mutex before blocking HTTPS call */
+    OTA_UNLOCK();
+
     esp_err_t err = ota_github_check_releases();
+
+    if (!OTA_LOCK()) {
+        ESP_LOGE(TAG, "Failed to re-acquire lock after update check");
+        return (err == ESP_OK) ? ESP_ERR_TIMEOUT : err;
+    }
 
     if (err == ESP_OK && g_ota.update_available) {
         char msg[128];
@@ -179,27 +196,36 @@ esp_err_t ota_manager_check_now(void)
 
     system_state_set_ota(SYSTEM_OTA_IDLE);
 
-    // Save last check timestamp
-    g_ota.last_check = (uint32_t)time(NULL);
-    save_last_check(g_ota.last_check);
+    /* Only persist last_check timestamp on success */
+    if (err == ESP_OK) {
+        g_ota.last_check = (uint32_t)time(NULL);
+        save_last_check(g_ota.last_check);
+    }
 
     OTA_UNLOCK();
     return err;
 }
 
-// NOTE: Returns pointer to internal state — caller must not free or cache long-term
-const ota_update_info_t *ota_manager_get_available_update(void)
+esp_err_t ota_manager_get_available_update(ota_update_info_t *out)
 {
-    if (!OTA_LOCK()) {
-        return NULL;
+    if (out == NULL) {
+        return ESP_ERR_INVALID_ARG;
     }
 
-    const ota_update_info_t *result = g_ota.update_available
-        ? &g_ota.update_info
-        : NULL;
+    if (!OTA_LOCK()) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t ret;
+    if (g_ota.update_available) {
+        memcpy(out, &g_ota.update_info, sizeof(*out));
+        ret = ESP_OK;
+    } else {
+        ret = ESP_ERR_NOT_FOUND;
+    }
 
     OTA_UNLOCK();
-    return result;
+    return ret;
 }
 
 esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
@@ -226,19 +252,21 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
     }
 
     system_state_set_ota(SYSTEM_OTA_DOWNLOADING);
-    g_ota.progress_cb = cb;
-    g_ota.progress_ctx = ctx;
+    g_ota.session.progress_cb = cb;
+    g_ota.session.progress_ctx = ctx;
+
+    /* Copy update info under lock — download runs without mutex */
+    ota_update_info_t info;
+    memcpy(&info, &g_ota.update_info, sizeof(info));
 
     OTA_UNLOCK();
 
-    // Blocking download — mutex released during network I/O
-    esp_err_t err = ota_download_start(&g_ota.update_info, cb, ctx);
+    /* Blocking download — mutex released during network I/O.
+     * ota_download_start owns abort-on-failure internally. */
+    esp_err_t err = ota_download_start(&info, cb, ctx);
 
     if (!OTA_LOCK()) {
         ESP_LOGE(TAG, "Failed to re-acquire lock after download");
-        if (err != ESP_OK) {
-            ota_flash_abort();
-        }
         return (err == ESP_OK) ? ESP_ERR_TIMEOUT : err;
     }
 
@@ -249,7 +277,6 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
         ESP_LOGI(TAG, "Update complete, pending reboot");
     } else {
         system_state_set_ota(SYSTEM_OTA_IDLE);
-        ota_flash_abort();
         ESP_LOGE(TAG, "Update failed: %s", esp_err_to_name(err));
     }
 
@@ -283,24 +310,24 @@ esp_err_t ota_manager_start_upload(uint32_t size, const char *expected_sha256,
     }
 
     system_state_set_ota(SYSTEM_OTA_DOWNLOADING);
-    g_ota.total_bytes = size;
-    g_ota.bytes_written = 0;
-    g_ota.progress_cb = cb;
-    g_ota.progress_ctx = ctx;
+    g_ota.session.total_bytes = size;
+    g_ota.session.bytes_written = 0;
+    g_ota.session.progress_cb = cb;
+    g_ota.session.progress_ctx = ctx;
 
     if (expected_sha256 != NULL) {
-        strncpy(g_ota.expected_sha256, expected_sha256,
-                sizeof(g_ota.expected_sha256) - 1);
-        g_ota.expected_sha256[sizeof(g_ota.expected_sha256) - 1] = '\0';
-        g_ota.has_expected_sha256 = true;
+        strncpy(g_ota.session.expected_sha256, expected_sha256,
+                sizeof(g_ota.session.expected_sha256) - 1);
+        g_ota.session.expected_sha256[sizeof(g_ota.session.expected_sha256) - 1] = '\0';
+        g_ota.session.has_expected_sha256 = true;
     } else {
-        g_ota.expected_sha256[0] = '\0';
-        g_ota.has_expected_sha256 = false;
+        g_ota.session.expected_sha256[0] = '\0';
+        g_ota.session.has_expected_sha256 = false;
     }
 
     ESP_LOGI(TAG, "Upload session started (size=%lu, sha256=%s)",
              (unsigned long)size,
-             g_ota.has_expected_sha256 ? "provided" : "none");
+             g_ota.session.has_expected_sha256 ? "provided" : "none");
 
     OTA_UNLOCK();
     return ESP_OK;
@@ -325,10 +352,10 @@ esp_err_t ota_manager_write_upload_chunk(const void *data, size_t len)
     }
 
     // Copy callback info under lock, invoke outside to avoid holding mutex
-    ota_progress_cb_t cb = g_ota.progress_cb;
-    void *cb_ctx = g_ota.progress_ctx;
-    uint32_t written = g_ota.bytes_written;
-    uint32_t total = g_ota.total_bytes;
+    ota_progress_cb_t cb = g_ota.session.progress_cb;
+    void *cb_ctx = g_ota.session.progress_ctx;
+    uint32_t written = g_ota.session.bytes_written;
+    uint32_t total = g_ota.session.total_bytes;
 
     OTA_UNLOCK();
 
@@ -353,10 +380,10 @@ esp_err_t ota_manager_finish_upload(void)
     system_state_set_ota(SYSTEM_OTA_VERIFYING);
 
     // Copy SHA256 state under lock, then release for blocking flash ops
-    bool has_sha256 = g_ota.has_expected_sha256;
+    bool has_sha256 = g_ota.session.has_expected_sha256;
     char sha256_copy[65];
     if (has_sha256) {
-        memcpy(sha256_copy, g_ota.expected_sha256, sizeof(sha256_copy));
+        memcpy(sha256_copy, g_ota.session.expected_sha256, sizeof(sha256_copy));
     }
 
     OTA_UNLOCK();
@@ -392,15 +419,18 @@ esp_err_t ota_manager_abort(void)
         return ESP_OK;
     }
 
+    if (!OTA_LOCK()) {
+        ESP_LOGW(TAG, "Abort: failed to acquire mutex, proceeding without lock");
+    }
+
     esp_err_t err = ota_flash_abort();
 
     event_bus_clear_motds_from("ota");
     system_state_set_ota(SYSTEM_OTA_IDLE);
 
-    g_ota.progress_cb = NULL;
-    g_ota.progress_ctx = NULL;
-    g_ota.bytes_written = 0;
-    g_ota.total_bytes = 0;
+    memset(&g_ota.session, 0, sizeof(g_ota.session));
+
+    OTA_UNLOCK();
 
     ESP_LOGI(TAG, "OTA aborted");
     return err;

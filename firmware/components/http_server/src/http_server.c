@@ -677,8 +677,9 @@ static esp_err_t api_system_motd_get(httpd_req_t *req)
         return ESP_OK;
     }
 
+    motd_entry_t motds[EVENT_BUS_MAX_MOTDS];
     size_t count = 0;
-    const motd_entry_t *motds = event_bus_get_motds(&count);
+    event_bus_get_motds(motds, EVENT_BUS_MAX_MOTDS, &count);
 
     cJSON *arr = cJSON_CreateArray();
     if (arr == NULL) {
@@ -795,7 +796,10 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
         char val[8] = {0};
         if (httpd_query_key_value(query, "refresh", val, sizeof(val)) == ESP_OK) {
             if (strcmp(val, "true") == 0) {
-                ota_manager_check_now();
+                esp_err_t check_err = ota_manager_check_now();
+                if (check_err != ESP_OK) {
+                    ESP_LOGW(TAG, "OTA refresh check failed: %s", esp_err_to_name(check_err));
+                }
             }
         }
     }
@@ -812,16 +816,16 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
              system_state_ota_name(system_state_get_ota()));
     ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
 
-    const ota_update_info_t *update = ota_manager_get_available_update();
-    if (update != NULL) {
+    ota_update_info_t update;
+    if (ota_manager_get_available_update(&update) == ESP_OK) {
         cJSON *upd = cJSON_CreateObject();
         if (upd != NULL) {
-            ok = ok && cJSON_AddStringToObject(upd, "version", update->version);
-            ok = ok && cJSON_AddStringToObject(upd, "tag_name", update->tag_name);
-            ok = ok && cJSON_AddStringToObject(upd, "release_notes", update->release_notes);
-            ok = ok && cJSON_AddNumberToObject(upd, "size_bytes", update->size_bytes);
-            ok = ok && cJSON_AddBoolToObject(upd, "is_prerelease", update->is_prerelease);
-            ok = ok && cJSON_AddBoolToObject(upd, "has_sha256", update->sha256[0] != '\0');
+            ok = ok && cJSON_AddStringToObject(upd, "version", update.version);
+            ok = ok && cJSON_AddStringToObject(upd, "tag_name", update.tag_name);
+            ok = ok && cJSON_AddStringToObject(upd, "release_notes", update.release_notes);
+            ok = ok && cJSON_AddNumberToObject(upd, "size_bytes", update.size_bytes);
+            ok = ok && cJSON_AddBoolToObject(upd, "is_prerelease", update.is_prerelease);
+            ok = ok && cJSON_AddBoolToObject(upd, "has_sha256", update.sha256[0] != '\0');
             ok = ok && cJSON_AddItemToObject(json, "update", upd);
         } else {
             ok = false;
@@ -922,7 +926,9 @@ static esp_err_t api_ota_upload_post(httpd_req_t *req)
             }
             ESP_LOGE(TAG, "OTA upload recv error: %d", received);
             ota_manager_abort();
-            return ESP_FAIL;
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Upload receive failed\"}");
+            return ESP_OK;
         }
 
         err = ota_manager_write_upload_chunk(buf, received);

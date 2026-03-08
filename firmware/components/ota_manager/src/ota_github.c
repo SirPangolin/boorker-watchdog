@@ -34,7 +34,15 @@ static bool parse_version(const char *str, int *major, int *minor, int *patch)
     }
 
     char trailing = '\0';
-    if (sscanf(str, "%d.%d.%d%c", major, minor, patch, &trailing) != 3) {
+    int fields = sscanf(str, "%d.%d.%d%c", major, minor, patch, &trailing);
+
+    /* Accept exactly 3 fields, or 3 fields followed by a pre-release
+     * delimiter ('-' or '+') per semver, e.g. "1.2.3-rc1" */
+    if (fields == 3) {
+        /* Clean version string like "1.2.3" */
+    } else if (fields == 4 && (trailing == '-' || trailing == '+')) {
+        /* Pre-release or build metadata suffix — ignore it for comparison */
+    } else {
         return false;
     }
 
