@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Setup Wizard • Boorker Watchdog</title>
+
+  <!-- OAT Core + Extensions -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-chips/dist/chip.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-animate/oat-animate.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://unpkg.com/oat-animate/oat-animate.js" defer></script>
+
+  <style>
+    :root {
+      --background: #fbfafd; --foreground: #1f1f23; --card: #ffffff;
+      --card-foreground: #1f1f23; --muted: #f0eff4; --muted-foreground: #71717a;
+      --border: #dcdce0; --primary: #0891b2; --primary-hover: #06b6d4;
+      --primary-foreground: #ffffff; --success: #16a34a; --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c; --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626; --danger-bg: rgba(220, 38, 38, 0.1);
+      --radius: 0.5rem; --shadow: 0 4px 24px rgba(0,0,0,0.08);
+    }
+    [data-theme="dark"] {
+      --background: #0f0e13; --foreground: #e4e4e7; --card: #1a191f;
+      --card-foreground: #e4e4e7; --muted: #242329; --muted-foreground: #a1a1aa;
+      --border: #2e2d35; --primary: #22d3ee; --primary-hover: #67e8f9;
+      --primary-foreground: #0f0e13; --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316; --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow: 0 4px 32px rgba(0,0,0,0.4);
+    }
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background); color: var(--foreground);
+      min-height: 100vh; display: flex; flex-direction: column;
+      background-image: radial-gradient(ellipse at top, rgba(34, 211, 238, 0.03) 0%, transparent 50%);
+    }
+
+    /* Header */
+    .wizard-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 1.5rem; border-bottom: 1px solid var(--border);
+      background: var(--card);
+    }
+    .header-left { display: flex; align-items: center; gap: 0.75rem; }
+    .logo { width: 28px; height: 28px; }
+    .header-title { font-size: 0.875rem; font-weight: 600; }
+    .header-right { display: flex; align-items: center; gap: 0.5rem; }
+    .skip-link {
+      font-size: 0.8125rem; color: var(--muted-foreground);
+      text-decoration: none; padding: 0.375rem 0.75rem;
+      border-radius: var(--radius);
+    }
+    .skip-link:hover { background: var(--muted); color: var(--foreground); }
+
+    /* Progress */
+    .progress-bar {
+      display: flex; align-items: center; justify-content: center;
+      gap: 0.5rem; padding: 1.25rem; background: var(--muted);
+    }
+    .progress-step {
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .step-dot {
+      width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center; font-size: 0.75rem; font-weight: 600;
+      background: var(--border); color: var(--muted-foreground);
+      transition: all 0.2s;
+    }
+    .step-dot.active { background: var(--primary); color: var(--primary-foreground); }
+    .step-dot.complete { background: var(--success); color: #fff; }
+    .step-dot .check-icon { display: none; }
+    .step-dot.complete .check-icon { display: block; }
+    .step-dot.complete .step-num { display: none; }
+    .step-label {
+      font-size: 0.75rem; color: var(--muted-foreground);
+      display: none;
+    }
+    .progress-step.active .step-label { display: block; color: var(--foreground); font-weight: 500; }
+    .step-connector {
+      width: 32px; height: 2px; background: var(--border);
+    }
+    .step-connector.complete { background: var(--success); }
+
+    /* Main content */
+    .wizard-content {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 2rem 1.5rem;
+    }
+    .wizard-card {
+      width: 100%; max-width: 540px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    /* Step pages */
+    .step-page { display: none; }
+    .step-page.active { display: block; }
+
+    .step-content { padding: 2rem; }
+    .step-icon {
+      width: 56px; height: 56px; border-radius: 50%;
+      background: rgba(34, 211, 238, 0.1); display: grid; place-items: center;
+      margin: 0 auto 1.25rem;
+    }
+    .step-icon svg { width: 28px; height: 28px; color: var(--primary); }
+    .step-icon.success { background: var(--success-bg); }
+    .step-icon.success svg { color: var(--success); }
+
+    .step-title {
+      font-size: 1.375rem; font-weight: 600; text-align: center;
+      margin-bottom: 0.5rem;
+    }
+    .step-subtitle {
+      font-size: 0.9375rem; color: var(--muted-foreground);
+      text-align: center; margin-bottom: 1.5rem; line-height: 1.5;
+    }
+
+    /* Tutorial callout */
+    .tutorial-callout {
+      background: var(--muted); border-radius: var(--radius);
+      padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+      border-left: 3px solid var(--primary);
+    }
+    .tutorial-callout h4 {
+      font-size: 0.8125rem; font-weight: 600; margin-bottom: 0.375rem;
+      display: flex; align-items: center; gap: 0.5rem;
+    }
+    .tutorial-callout h4 svg { width: 16px; height: 16px; color: var(--primary); }
+    .tutorial-callout p {
+      font-size: 0.8125rem; color: var(--muted-foreground); line-height: 1.5;
+    }
+
+    /* Setting rows (for toggles) */
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 0; border-bottom: 1px solid var(--border);
+    }
+    .setting-row:last-of-type { border-bottom: none; }
+    .setting-info { flex: 1; }
+    .setting-label { font-size: 0.875rem; font-weight: 500; }
+    .setting-desc { font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.125rem; }
+
+    /* Form fields */
+    .field { margin-bottom: 1.25rem; }
+    .field:last-child { margin-bottom: 0; }
+    .field label {
+      display: block; font-size: 0.8125rem; font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+    .field input, .field select {
+      width: 100%; padding: 0.75rem 1rem; font-size: 0.9375rem;
+      background: var(--muted); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--foreground);
+    }
+    .field input:focus, .field select:focus {
+      outline: none; border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12);
+    }
+    .field .hint {
+      font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.375rem;
+    }
+    .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+
+    /* Sensor detection */
+    .sensor-list { display: flex; flex-direction: column; gap: 0.75rem; }
+    .sensor-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.875rem 1rem; background: var(--muted);
+      border: 1px solid var(--border); border-radius: var(--radius);
+    }
+    .sensor-item.detected { border-color: var(--success); background: var(--success-bg); }
+    .sensor-icon {
+      width: 36px; height: 36px; border-radius: var(--radius);
+      display: grid; place-items: center; background: var(--card);
+    }
+    .sensor-icon svg { width: 18px; height: 18px; }
+    .sensor-icon.temp { color: var(--primary); }
+    .sensor-icon.vibration { color: var(--warning); }
+    .sensor-icon.water { color: var(--danger); }
+    .sensor-info { flex: 1; }
+    .sensor-name { font-size: 0.875rem; font-weight: 500; }
+    .sensor-status { font-size: 0.75rem; color: var(--muted-foreground); }
+    .sensor-item.detected .sensor-status { color: var(--success); }
+    .sensor-toggle { display: flex; align-items: center; gap: 0.5rem; }
+
+    /* Notification preview */
+    .notification-preview {
+      display: flex; gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .preview-card {
+      flex: 1; padding: 1rem; background: var(--muted);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      text-align: center;
+    }
+    .preview-card.active { border-color: var(--primary); }
+    .preview-icon {
+      width: 40px; height: 40px; margin: 0 auto 0.5rem;
+      border-radius: 50%; display: grid; place-items: center;
+      background: var(--card);
+    }
+    .preview-icon svg { width: 20px; height: 20px; }
+    .preview-label { font-size: 0.75rem; color: var(--muted-foreground); }
+
+    /* WiFi list */
+    .wifi-list {
+      max-height: 180px; overflow-y: auto;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      margin-bottom: 1rem;
+    }
+    .wifi-item {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .wifi-item:last-child { border-bottom: none; }
+    .wifi-item:hover { background: var(--muted); }
+    .wifi-item input { accent-color: var(--primary); }
+    .wifi-info { flex: 1; }
+    .wifi-name { font-size: 0.875rem; font-weight: 500; }
+    .wifi-meta { font-size: 0.6875rem; color: var(--muted-foreground); }
+    .wifi-signal svg { width: 16px; height: 16px; color: var(--muted-foreground); }
+
+    /* Footer */
+    .step-footer {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 1rem 2rem; background: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+    .step-footer .btn-group { display: flex; gap: 0.75rem; }
+
+    /* Complete animation */
+    .complete-check {
+      width: 80px; height: 80px; margin: 0 auto 1.5rem;
+      border-radius: 50%; background: var(--success);
+      display: grid; place-items: center;
+      animation: scaleIn 0.3s ease-out;
+    }
+    .complete-check svg { width: 40px; height: 40px; color: #fff; }
+    @keyframes scaleIn {
+      from { transform: scale(0); }
+      to { transform: scale(1); }
+    }
+
+    .summary-list {
+      background: var(--muted); border-radius: var(--radius);
+      padding: 1rem 1.25rem; margin-bottom: 1.5rem;
+    }
+    .summary-item {
+      display: flex; justify-content: space-between;
+      padding: 0.5rem 0; border-bottom: 1px solid var(--border);
+      font-size: 0.875rem;
+    }
+    .summary-item:last-child { border-bottom: none; }
+    .summary-label { color: var(--muted-foreground); }
+    .summary-value { font-weight: 500; }
+
+    @media (max-width: 480px) {
+      .step-label { display: none !important; }
+      .field-row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="wizard-header">
+    <div class="header-left">
+      <svg class="logo" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--primary)"/>
+        <path d="M8 16c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="var(--primary-foreground)" stroke-width="2.5" stroke-linecap="round"/>
+        <circle cx="16" cy="16" r="3" fill="var(--primary-foreground)"/>
+        <path d="M16 19v5M13 24h6" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      <span class="header-title">Setup Wizard</span>
+    </div>
+    <div class="header-right">
+      <a href="#/dashboard" class="skip-link">Skip setup</a>
+    </div>
+  </header>
+
+  <!-- Progress Bar -->
+  <nav class="progress-bar">
+    <div class="progress-step active" data-step="1">
+      <div class="step-dot active">
+        <span class="step-num">1</span>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <span class="step-label">Welcome</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="progress-step" data-step="2">
+      <div class="step-dot">
+        <span class="step-num">2</span>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <span class="step-label">Device</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="progress-step" data-step="3">
+      <div class="step-dot">
+        <span class="step-num">3</span>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <span class="step-label">WiFi</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="progress-step" data-step="4">
+      <div class="step-dot">
+        <span class="step-num">4</span>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <span class="step-label">Sensors</span>
+    </div>
+    <div class="step-connector"></div>
+    <div class="progress-step" data-step="5">
+      <div class="step-dot">
+        <span class="step-num">5</span>
+        <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"/></svg>
+      </div>
+      <span class="step-label">Alerts</span>
+    </div>
+  </nav>
+
+  <!-- Content -->
+  <main class="wizard-content">
+    <div class="wizard-card">
+
+      <!-- Step 1: Welcome -->
+      <div class="step-page active" data-step="1">
+        <div class="step-content" ot-animate="fade-up">
+          <div class="step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+              <path d="M2 17l10 5 10-5M2 12l10 5 10-5"/>
+            </svg>
+          </div>
+          <h2 class="step-title">Welcome to Boorker Watchdog</h2>
+          <p class="step-subtitle">
+            Let's get your monitoring system ready. This wizard will guide you through the essential setup in about 2 minutes.
+          </p>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              What is Boorker Watchdog?
+            </h4>
+            <p>
+              A distributed sensor monitoring platform for your home or workspace. It watches for temperature changes, vibrations, water leaks, and more — alerting you when something needs attention.
+            </p>
+          </div>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/>
+              </svg>
+              What we'll set up
+            </h4>
+            <p>
+              Device identity, WiFi connection, sensor detection, and alert preferences. You can always change these later in Settings.
+            </p>
+          </div>
+        </div>
+        <footer class="step-footer">
+          <div></div>
+          <button onclick="goToStep(2)">Get Started</button>
+        </footer>
+      </div>
+
+      <!-- Step 2: Device Identity -->
+      <div class="step-page" data-step="2">
+        <div class="step-content" ot-animate="fade-up">
+          <div class="step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="4" y="4" width="16" height="16" rx="2"/>
+              <path d="M9 9h6M9 13h6M9 17h4"/>
+            </svg>
+          </div>
+          <h2 class="step-title">Name Your Device</h2>
+          <p class="step-subtitle">
+            Give this node a memorable name and location so you can identify it easily.
+          </p>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              Tip: Be specific
+            </h4>
+            <p>
+              If you have multiple nodes, names like "Basement Unit" or "Garage Monitor" are easier to remember than "Node 1".
+            </p>
+          </div>
+
+          <div class="field">
+            <label for="device-name">Device Name</label>
+            <input type="text" id="device-name" value="Basement Monitor" placeholder="e.g., Garage Unit">
+            <div class="hint">This appears in dashboards and alerts</div>
+          </div>
+
+          <div class="field-row">
+            <div class="field">
+              <label for="device-location">Location</label>
+              <input type="text" id="device-location" placeholder="e.g., Basement, near water heater">
+            </div>
+            <div class="field">
+              <label for="device-role">Role</label>
+              <select id="device-role">
+                <option>Coordinator (main hub)</option>
+                <option selected>Node (sensor unit)</option>
+              </select>
+            </div>
+          </div>
+        </div>
+        <footer class="step-footer">
+          <button class="outline" onclick="goToStep(1)">Back</button>
+          <button onclick="goToStep(3)">Continue</button>
+        </footer>
+      </div>
+
+      <!-- Step 3: WiFi -->
+      <div class="step-page" data-step="3">
+        <div class="step-content" ot-animate="fade-up">
+          <div class="step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+              <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+              <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+              <circle cx="12" cy="20" r="1"/>
+            </svg>
+          </div>
+          <h2 class="step-title">Connect to WiFi</h2>
+          <p class="step-subtitle">
+            Select your network to enable dashboard access and remote monitoring.
+          </p>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              Already connected?
+            </h4>
+            <p>
+              If you connected via the device's setup hotspot, your network is pre-selected. Just verify and continue.
+            </p>
+          </div>
+
+          <div class="wifi-list">
+            <label class="wifi-item">
+              <input type="radio" name="wifi" checked>
+              <div class="wifi-info">
+                <div class="wifi-name">HomeNetwork-5G</div>
+                <div class="wifi-meta">-52 dBm • WPA2 • Connected</div>
+              </div>
+              <span class="wifi-signal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg>
+              </span>
+            </label>
+            <label class="wifi-item">
+              <input type="radio" name="wifi">
+              <div class="wifi-info">
+                <div class="wifi-name">HomeNetwork-2.4G</div>
+                <div class="wifi-meta">-48 dBm • WPA2</div>
+              </div>
+              <span class="wifi-signal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg>
+              </span>
+            </label>
+            <label class="wifi-item">
+              <input type="radio" name="wifi">
+              <div class="wifi-info">
+                <div class="wifi-name">GuestNetwork</div>
+                <div class="wifi-meta">-65 dBm • Open</div>
+              </div>
+              <span class="wifi-signal">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/>
+                </svg>
+              </span>
+            </label>
+          </div>
+
+          <div class="field">
+            <label for="wifi-pass">Password</label>
+            <input type="password" id="wifi-pass" placeholder="Enter WiFi password">
+          </div>
+        </div>
+        <footer class="step-footer">
+          <button class="outline" onclick="goToStep(2)">Back</button>
+          <div class="btn-group">
+            <button class="ghost" onclick="goToStep(4)">Skip</button>
+            <button onclick="goToStep(4)">Connect</button>
+          </div>
+        </footer>
+      </div>
+
+      <!-- Step 4: Sensors -->
+      <div class="step-page" data-step="4">
+        <div class="step-content" ot-animate="fade-up">
+          <div class="step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 4v10.54a4 4 0 11-4 0V4a2 2 0 014 0z"/>
+            </svg>
+          </div>
+          <h2 class="step-title">Configure Sensors</h2>
+          <p class="step-subtitle">
+            We detected these sensors. Enable the ones you want to monitor.
+          </p>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              About thresholds
+            </h4>
+            <p>
+              Each sensor has default alert thresholds. You can fine-tune these later in Sensor Settings after you see how your environment behaves.
+            </p>
+          </div>
+
+          <div class="sensor-list">
+            <div class="sensor-item detected">
+              <div class="sensor-icon temp">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M14 4v10.54a4 4 0 11-4 0V4a2 2 0 014 0z"/>
+                </svg>
+              </div>
+              <div class="sensor-info">
+                <div class="sensor-name">DHT22 Temperature & Humidity</div>
+                <div class="sensor-status">Detected on GPIO4 • Reading: 22.3°C / 58%</div>
+              </div>
+              <div class="sensor-toggle">
+                <label><input type="checkbox" role="switch" checked></label>
+              </div>
+            </div>
+
+            <div class="sensor-item detected">
+              <div class="sensor-icon vibration">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M2 12h2M20 12h2M6 12a6 6 0 1012 0M9 12a3 3 0 106 0"/>
+                </svg>
+              </div>
+              <div class="sensor-info">
+                <div class="sensor-name">SW-420 Vibration Sensor</div>
+                <div class="sensor-status">Detected on GPIO5 • Status: Idle</div>
+              </div>
+              <div class="sensor-toggle">
+                <label><input type="checkbox" role="switch" checked></label>
+              </div>
+            </div>
+
+            <div class="sensor-item">
+              <div class="sensor-icon water">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 2.69l5.66 5.66a8 8 0 11-11.31 0z"/>
+                </svg>
+              </div>
+              <div class="sensor-info">
+                <div class="sensor-name">Float Switch (Water Level)</div>
+                <div class="sensor-status">Not detected • Check wiring on GPIO6</div>
+              </div>
+              <div class="sensor-toggle">
+                <label><input type="checkbox" role="switch" disabled></label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <footer class="step-footer">
+          <button class="outline" onclick="goToStep(3)">Back</button>
+          <button onclick="goToStep(5)">Continue</button>
+        </footer>
+      </div>
+
+      <!-- Step 5: Notifications -->
+      <div class="step-page" data-step="5">
+        <div class="step-content" ot-animate="fade-up">
+          <div class="step-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+              <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </svg>
+          </div>
+          <h2 class="step-title">Alert Preferences</h2>
+          <p class="step-subtitle">
+            Choose how you want to be notified when sensors detect issues.
+          </p>
+
+          <div class="tutorial-callout">
+            <h4>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>
+              </svg>
+              On-device alerts
+            </h4>
+            <p>
+              The LED and buzzer provide immediate local feedback. For remote notifications, you can configure push notifications or webhooks in Settings later.
+            </p>
+          </div>
+
+          <div class="notification-preview">
+            <div class="preview-card active">
+              <div class="preview-icon" style="background: var(--success-bg);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/>
+                </svg>
+              </div>
+              <div class="preview-label">Status LED</div>
+            </div>
+            <div class="preview-card active">
+              <div class="preview-icon" style="background: var(--warning-bg);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="var(--warning)" stroke-width="2">
+                  <path d="M12 2L2 22h20L12 2z"/><path d="M12 8v6M12 18h0"/>
+                </svg>
+              </div>
+              <div class="preview-label">Alert Buzzer</div>
+            </div>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Status LED</div>
+              <div class="setting-desc">Visual indicator for system status</div>
+            </div>
+            <label><input type="checkbox" role="switch" checked></label>
+          </div>
+
+          <div class="setting-row">
+            <div class="setting-info">
+              <div class="setting-label">Alert Buzzer</div>
+              <div class="setting-desc">Audio alert when thresholds exceeded</div>
+            </div>
+            <label><input type="checkbox" role="switch" checked></label>
+          </div>
+
+          <div class="field">
+            <label for="alert-sound">Alert Sound Pattern</label>
+            <select id="alert-sound">
+              <option>Continuous</option>
+              <option selected>Double Beep</option>
+              <option>Chirp</option>
+              <option>Pulse</option>
+            </select>
+          </div>
+        </div>
+        <footer class="step-footer">
+          <button class="outline" onclick="goToStep(4)">Back</button>
+          <button onclick="completeSetup()">Finish Setup</button>
+        </footer>
+      </div>
+
+      <!-- Complete -->
+      <div class="step-page" data-step="complete">
+        <div class="step-content" style="text-align: center;">
+          <div class="complete-check">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
+              <polyline points="20 6 9 17 4 12"/>
+            </svg>
+          </div>
+          <h2 class="step-title">You're All Set!</h2>
+          <p class="step-subtitle">
+            Your Boorker Watchdog is configured and ready to monitor.
+          </p>
+
+          <div class="summary-list">
+            <div class="summary-item">
+              <span class="summary-label">Device Name</span>
+              <span class="summary-value">Basement Monitor</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">WiFi Network</span>
+              <span class="summary-value">HomeNetwork-5G</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Active Sensors</span>
+              <span class="summary-value">2 sensors</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Alerts</span>
+              <span class="summary-value">LED + Buzzer</span>
+            </div>
+          </div>
+
+          <a href="#/" style="display: inline-block;">
+            <button>Go to Dashboard</button>
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    function goToStep(step) {
+      // Hide all pages
+      document.querySelectorAll('.step-page').forEach(function(p) {
+        p.classList.remove('active');
+      });
+
+      // Show target page
+      var targetPage = document.querySelector('.step-page[data-step="' + step + '"]');
+      if (targetPage) targetPage.classList.add('active');
+
+      // Update progress dots
+      document.querySelectorAll('.progress-step').forEach(function(s) {
+        var stepNum = parseInt(s.dataset.step);
+        var dot = s.querySelector('.step-dot');
+        var connector = s.previousElementSibling;
+
+        s.classList.remove('active');
+        dot.classList.remove('active', 'complete');
+
+        if (stepNum < step) {
+          dot.classList.add('complete');
+          if (connector && connector.classList.contains('step-connector')) {
+            connector.classList.add('complete');
+          }
+        } else if (stepNum === step) {
+          s.classList.add('active');
+          dot.classList.add('active');
+        } else {
+          if (connector && connector.classList.contains('step-connector')) {
+            connector.classList.remove('complete');
+          }
+        }
+      });
+    }
+
+    function completeSetup() {
+      // Mark all steps complete
+      document.querySelectorAll('.progress-step').forEach(function(s) {
+        var dot = s.querySelector('.step-dot');
+        dot.classList.add('complete');
+      });
+      document.querySelectorAll('.step-connector').forEach(function(c) {
+        c.classList.add('complete');
+      });
+
+      // Show complete page
+      document.querySelectorAll('.step-page').forEach(function(p) {
+        p.classList.remove('active');
+      });
+      document.querySelector('.step-page[data-step="complete"]').classList.add('active');
+    }
+  </script>
+</body>
+</html>
