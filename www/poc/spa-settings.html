@@ -1,0 +1,914 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings • Boorker Watchdog</title>
+
+  <!-- OAT Core -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-chips/dist/chip.min.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+
+  <style>
+    :root {
+      --background: #fbfafd; --foreground: #1f1f23; --card: #ffffff;
+      --muted: #f0eff4; --muted-foreground: #71717a; --border: #dcdce0;
+      --primary: #0891b2; --primary-hover: #06b6d4; --primary-foreground: #fff;
+      --success: #16a34a; --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c; --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626; --danger-bg: rgba(220, 38, 38, 0.1);
+      --radius: 0.5rem; --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    [data-theme="dark"] {
+      --background: #0f0e13; --foreground: #e4e4e7; --card: #1a191f;
+      --muted: #242329; --muted-foreground: #a1a1aa; --border: #2e2d35;
+      --primary: #22d3ee; --primary-hover: #67e8f9; --primary-foreground: #0f0e13;
+      --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316; --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background); color: var(--foreground); min-height: 100vh;
+    }
+
+    /* Header */
+    .site-header {
+      background: var(--card); border-bottom: 1px solid var(--border);
+      padding: 0 1.25rem; height: 56px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .logo-link { display: flex; align-items: center; gap: 0.625rem; text-decoration: none; color: inherit; }
+    .logo { width: 32px; height: 32px; }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+    .brand-name { font-size: 0.875rem; font-weight: 600; }
+    .node-id { font-size: 0.625rem; color: var(--muted-foreground); font-family: ui-monospace, monospace; }
+    .main-nav { display: flex; gap: 0.25rem; margin-left: 2rem; }
+    .nav-link { padding: 0.5rem 0.75rem; font-size: 0.8125rem; font-weight: 500; color: var(--muted-foreground); text-decoration: none; border-radius: var(--radius); }
+    .nav-link:hover { color: var(--foreground); background: var(--muted); }
+    .nav-link.active { color: var(--primary); background: rgba(34, 211, 238, 0.1); }
+    .header-right { display: flex; align-items: center; gap: 0.625rem; }
+    .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); cursor: pointer; }
+    .icon-btn:hover { color: var(--foreground); border-color: var(--primary); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    /* Main */
+    .main-content { max-width: 800px; margin: 0 auto; padding: 1.5rem; }
+    .page-title { font-size: 1.5rem; font-weight: 600; margin-bottom: 1.5rem; }
+
+    /* Settings sections - collapsible */
+    .settings-section {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); margin-bottom: 1rem; overflow: hidden;
+    }
+
+    .settings-section summary {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 1rem 1.25rem;
+      background: var(--muted); cursor: pointer;
+      list-style: none;
+    }
+    .settings-section summary::-webkit-details-marker { display: none; }
+
+    .settings-section summary svg { width: 20px; height: 20px; color: var(--muted-foreground); flex-shrink: 0; }
+    .settings-section summary h2 { font-size: 0.9375rem; font-weight: 600; flex: 1; margin: 0; }
+
+    .settings-section summary::after {
+      content: ''; width: 0; height: 0;
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 6px solid var(--muted-foreground);
+      transition: transform 0.2s;
+    }
+    .settings-section[open] summary::after { transform: rotate(180deg); }
+    .settings-section[open] summary { border-bottom: 1px solid var(--border); }
+
+    .settings-body { padding: 1rem 1.25rem; }
+
+    /* Settings row */
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.875rem 0; border-bottom: 1px solid var(--border);
+    }
+    .setting-row:last-child { border-bottom: none; }
+
+    .setting-info { flex: 1; }
+    .setting-label { font-size: 0.875rem; font-weight: 500; }
+    .setting-desc { font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.125rem; }
+
+    .setting-value {
+      font-size: 0.875rem; font-family: ui-monospace, monospace;
+      color: var(--muted-foreground); text-align: right;
+    }
+
+    .setting-control { display: flex; align-items: center; gap: 0.75rem; }
+
+    /* Range slider */
+    .range-group { display: flex; align-items: center; gap: 0.75rem; }
+    .range-value { font-size: 0.75rem; color: var(--muted-foreground); min-width: 2.5rem; text-align: right; }
+    input[type="range"] {
+      width: 120px; height: 6px; -webkit-appearance: none; appearance: none;
+      background: var(--muted); border-radius: 3px; cursor: pointer;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 16px; height: 16px;
+      background: var(--primary); border-radius: 50%; cursor: pointer;
+    }
+
+    /* Action buttons section */
+    .actions-section {
+      display: flex; flex-direction: column; gap: 0.75rem;
+      padding: 1.25rem;
+    }
+
+    .action-row {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1rem; background: var(--muted);
+      border-radius: var(--radius);
+    }
+
+    .action-info { flex: 1; }
+    .action-label { font-size: 0.875rem; font-weight: 500; }
+    .action-desc { font-size: 0.75rem; color: var(--muted-foreground); }
+
+    .action-row.danger { background: var(--danger-bg); }
+    .action-row.danger .action-label { color: var(--danger); }
+
+    /* Dialog */
+    dialog { border-radius: var(--radius); border: 1px solid var(--border); max-width: 400px; width: 90%; }
+    dialog::backdrop { background: rgba(0,0,0,0.5); }
+    dialog header { padding: 1.25rem; border-bottom: 1px solid var(--border); }
+    dialog header h3 { font-size: 1.125rem; font-weight: 600; margin: 0; }
+    dialog header p { font-size: 0.875rem; color: var(--muted-foreground); margin: 0.25rem 0 0; }
+    dialog .dialog-body { padding: 1.25rem; }
+    dialog .warning-list { font-size: 0.8125rem; color: var(--muted-foreground); padding-left: 1.25rem; margin: 0.75rem 0; }
+    dialog .warning-list li { margin: 0.375rem 0; }
+    dialog footer { display: flex; gap: 0.75rem; justify-content: flex-end; padding: 1rem 1.25rem; border-top: 1px solid var(--border); background: var(--muted); }
+
+    /* WiFi list */
+    .wifi-item:hover { background: var(--muted); }
+    .wifi-item input[type="radio"] { accent-color: var(--primary); }
+
+    /* Input styling */
+    .settings-body input[type="text"],
+    .settings-body input[type="password"] {
+      padding: 0.5rem 0.75rem; background: var(--muted);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--foreground);
+    }
+    .settings-body input:focus {
+      outline: none; border-color: var(--primary);
+    }
+    .settings-body select {
+      padding: 0.5rem 0.75rem; background: var(--muted);
+      border: 1px solid var(--border); border-radius: var(--radius);
+      color: var(--foreground); font-size: 0.875rem;
+    }
+
+    /* MOTD Banner */
+    .motd-banner {
+      background: rgba(34, 211, 238, 0.1); border-bottom: 1px solid rgba(34, 211, 238, 0.2);
+      padding: 0.5rem 1.25rem; font-size: 0.8125rem;
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .motd-banner a { color: var(--primary); }
+    .motd-banner .dismiss {
+      margin-left: auto; background: none; border: none;
+      color: var(--muted-foreground); cursor: pointer; padding: 0.25rem; font-size: 1rem;
+    }
+    .motd-banner .dismiss:hover { color: var(--foreground); }
+    .motd-banner.hidden { display: none; }
+
+    @media (max-width: 600px) {
+      .main-nav { display: none; }
+      .setting-row { flex-direction: column; align-items: flex-start; gap: 0.75rem; }
+      .setting-control { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-left">
+      <a href="#/" class="logo-link">
+        <svg class="logo" viewBox="0 0 64 64" fill="none">
+          <path d="M32 8L52 28L48 52H16L12 28L32 8Z" fill="var(--muted)"/>
+          <path d="M12 28L4 16L16 24L12 28Z" fill="var(--border)"/>
+          <path d="M52 28L60 16L48 24L52 28Z" fill="var(--border)"/>
+          <path d="M32 18L42 32L32 48L22 32L32 18Z" fill="var(--card)"/>
+          <ellipse cx="32" cy="40" rx="3" ry="2" fill="var(--foreground)"/>
+          <circle cx="24" cy="30" r="4" fill="var(--primary)"/>
+          <circle cx="40" cy="30" r="4" fill="#f59e0b"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">Boorker Watchdog</span>
+          <span class="node-id">boorker-a1b2.local | Coordinator</span>
+        </div>
+      </a>
+      <nav class="main-nav">
+        <a href="#/" class="nav-link">Dashboard</a>
+        <a href="#/sensors" class="nav-link">Sensors</a>
+        <a href="#/mesh" class="nav-link">Mesh</a>
+        <a href="#/history" class="nav-link">History</a>
+        <a href="#/settings" class="nav-link active">Settings</a>
+      </nav>
+    </div>
+    <div class="header-right">
+      <span class="badge success">Online</span>
+
+      <a href="https://github.com/SirPangolin/boorker-watchdog/wiki" target="_blank" class="icon-btn" title="Documentation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </a>
+      <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- MOTD Banner -->
+  <div class="motd-banner" id="motd-banner">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <span>Update available: <strong>v0.8.0</strong> — <a href="https://github.com/SirPangolin/boorker-watchdog/releases" target="_blank">View release notes</a></span>
+    <button class="dismiss" onclick="this.parentElement.classList.add('hidden')" title="Dismiss">&times;</button>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <h1 class="page-title">Settings</h1>
+
+    <!-- Device Info Section (first, open by default) -->
+    <details class="settings-section" open>
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="16" x2="12" y2="12"/>
+          <line x1="12" y1="8" x2="12.01" y2="8"/>
+        </svg>
+        <h2>Device Info</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">Node Name</div></div>
+          <span class="setting-value">boorker-a1b2</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">Firmware Version</div></div>
+          <span class="setting-value">v0.7.0</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">ESP-IDF Version</div></div>
+          <span class="setting-value">v5.5</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">Uptime</div></div>
+          <span class="setting-value">3d 14h 22m</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">Heap Free</div></div>
+          <span class="setting-value">142 KB / 320 KB</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info"><div class="setting-label">PSRAM Free</div></div>
+          <span class="setting-value">6.8 MB / 8 MB</span>
+        </div>
+      </div>
+    </details>
+
+    <!-- Device Actions -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+        <h2>Device Actions</h2>
+      </summary>
+      <div class="actions-section">
+        <div class="action-row">
+          <div class="action-info">
+            <div class="action-label">Reboot Device</div>
+            <div class="action-desc">Restart the device (takes ~10 seconds)</div>
+          </div>
+          <button class="outline" onclick="alert('Rebooting...')">Reboot</button>
+        </div>
+        <div class="action-row">
+          <div class="action-info">
+            <div class="action-label">Check for Updates</div>
+            <div class="action-desc">Look for firmware updates</div>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="outline">Check</button>
+            <button class="ghost small" commandfor="repo-dialog" command="show-modal" title="Configure update source">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="3"/><path d="M12 1v2m0 18v2M4.22 4.22l1.42 1.42m12.72 12.72 1.42 1.42M1 12h2m18 0h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="action-row danger">
+          <div class="action-info">
+            <div class="action-label">Factory Reset</div>
+            <div class="action-desc">Erase all settings and credentials</div>
+          </div>
+          <button data-variant="danger" commandfor="reset-dialog" command="show-modal">Reset</button>
+        </div>
+      </div>
+    </details>
+
+    <!-- WiFi Station Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+          <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+          <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+          <circle cx="12" cy="20" r="1"/>
+        </svg>
+        <h2>WiFi (Station Mode)</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Status</div>
+          </div>
+          <span class="chip small success">Connected</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Network (SSID)</div>
+            <div class="setting-desc">Currently connected network</div>
+          </div>
+          <div class="setting-control">
+            <span class="setting-value">HomeNetwork-5G</span>
+            <button class="outline small" commandfor="wifi-dialog" command="show-modal">Change</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Signal Strength</div>
+          </div>
+          <span class="setting-value">-58 dBm (Good)</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">IP Configuration</div>
+          </div>
+          <div class="setting-control">
+            <select id="ip-mode" style="min-width: 100px;">
+              <option selected>DHCP</option>
+              <option>Static</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">IP Address</div>
+          </div>
+          <span class="setting-value">192.168.1.42</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Gateway</div>
+          </div>
+          <span class="setting-value">192.168.1.1</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">DNS Server</div>
+          </div>
+          <span class="setting-value">192.168.1.1</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">MAC Address</div>
+          </div>
+          <span class="setting-value">AA:BB:CC:DD:EE:FF</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">mDNS Hostname</div>
+            <div class="setting-desc">Access via .local domain</div>
+          </div>
+          <span class="setting-value">boorker-a1b2.local</span>
+        </div>
+      </div>
+    </details>
+
+    <!-- WiFi Access Point Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/>
+        </svg>
+        <h2>WiFi (Access Point Mode)</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">AP Mode</div>
+            <div class="setting-desc">Device acts as WiFi hotspot</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch" id="ap-enabled"> Enabled</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">AP Network Name (SSID)</div>
+            <div class="setting-desc">Name others will see</div>
+          </div>
+          <div class="setting-control">
+            <input type="text" value="Boorker-A1B2-Setup" style="width: 180px; font-size: 0.875rem;">
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">AP Password</div>
+            <div class="setting-desc">Min 8 characters, or leave blank for open</div>
+          </div>
+          <div class="setting-control">
+            <input type="password" value="boorker123" style="width: 140px; font-size: 0.875rem;">
+            <button class="ghost small" onclick="this.previousElementSibling.type = this.previousElementSibling.type === 'password' ? 'text' : 'password'">Show</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Channel</div>
+            <div class="setting-desc">WiFi channel (1-13)</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 80px;">
+              <option>Auto</option>
+              <option>1</option>
+              <option>6</option>
+              <option selected>11</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Max Connections</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 60px;">
+              <option>1</option>
+              <option>2</option>
+              <option selected>4</option>
+              <option>8</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Hidden SSID</div>
+            <div class="setting-desc">Don't broadcast network name</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch"> Hidden</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">AP IP Address</div>
+          </div>
+          <span class="setting-value">192.168.4.1</span>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Connected Clients</div>
+          </div>
+          <span class="setting-value">0</span>
+        </div>
+      </div>
+    </details>
+
+    <!-- LoRa Mesh Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="2"/>
+          <path d="M16.24 7.76a6 6 0 010 8.49m-8.48-.01a6 6 0 010-8.49m11.31-2.82a10 10 0 010 14.14m-14.14 0a10 10 0 010-14.14"/>
+        </svg>
+        <h2>LoRa Mesh Network</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Node Role</div>
+            <div class="setting-desc">Coordinator manages the mesh, Nodes join it</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 130px;">
+              <option selected>Coordinator</option>
+              <option>Node</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Frequency</div>
+            <div class="setting-desc">LoRa radio frequency band</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 120px;">
+              <option>868 MHz (EU)</option>
+              <option selected>915 MHz (US)</option>
+              <option>923 MHz (AS)</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Spreading Factor</div>
+            <div class="setting-desc">Higher = longer range, slower speed</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 80px;">
+              <option selected>SF7</option>
+              <option>SF8</option>
+              <option>SF9</option>
+              <option>SF10</option>
+              <option>SF11</option>
+              <option>SF12</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Bandwidth</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 100px;">
+              <option selected>125 kHz</option>
+              <option>250 kHz</option>
+              <option>500 kHz</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">TX Power</div>
+            <div class="setting-desc">Transmission power in dBm</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 100px;">
+              <option>10 dBm</option>
+              <option>14 dBm</option>
+              <option selected>17 dBm</option>
+              <option>20 dBm</option>
+            </select>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Mesh Channel</div>
+            <div class="setting-desc">All nodes must use same channel</div>
+          </div>
+          <div class="setting-control">
+            <input type="number" value="1" min="1" max="255" style="width: 70px; font-size: 0.875rem;">
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Encryption Key</div>
+            <div class="setting-desc">AES-128 key for mesh traffic</div>
+          </div>
+          <div class="setting-control">
+            <input type="password" value="****************" style="width: 140px; font-size: 0.875rem; font-family: ui-monospace, monospace;">
+            <button class="ghost small">Change</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Connected Nodes</div>
+          </div>
+          <div class="setting-control">
+            <span class="setting-value">3 nodes</span>
+            <a href="#/mesh" class="outline small" style="text-decoration: none;">View Mesh</a>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Bluetooth Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/>
+        </svg>
+        <h2>Bluetooth (BLE)</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Bluetooth</div>
+            <div class="setting-desc">Enable BLE for mobile app pairing</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch" checked id="ble-enabled"> Enabled</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Device Name</div>
+            <div class="setting-desc">Visible name when scanning</div>
+          </div>
+          <div class="setting-control">
+            <input type="text" value="Boorker-A1B2" style="width: 150px; font-size: 0.875rem;">
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Pairing Mode</div>
+            <div class="setting-desc">Allow new devices to pair</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch"> Discoverable</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">PIN Code</div>
+            <div class="setting-desc">Required for pairing</div>
+          </div>
+          <div class="setting-control">
+            <input type="text" value="123456" maxlength="6" style="width: 80px; font-size: 0.875rem; font-family: ui-monospace, monospace; letter-spacing: 0.1em;">
+            <button class="ghost small" onclick="this.previousElementSibling.value = Math.floor(100000 + Math.random() * 900000)">Generate</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Paired Devices</div>
+          </div>
+          <div class="setting-control">
+            <span class="setting-value">1 device</span>
+            <button class="outline small">Manage</button>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">TX Power</div>
+            <div class="setting-desc">Transmission range</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 100px;">
+              <option>Low (-12 dBm)</option>
+              <option selected>Medium (0 dBm)</option>
+              <option>High (+3 dBm)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Remote Access Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <h2>Remote Access</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Tailscale VPN</div>
+            <div class="setting-desc">Secure remote access from anywhere</div>
+          </div>
+          <div class="setting-control">
+            <span class="chip small outline">Disabled</span>
+            <button class="outline small">Configure</button>
+          </div>
+        </div>
+      </div>
+    </details>
+
+    <!-- Notifications Section -->
+    <details class="settings-section">
+      <summary>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+          <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+        </svg>
+        <h2>Notifications</h2>
+      </summary>
+      <div class="settings-body">
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Status LED</div>
+            <div class="setting-desc">Visual status indicator</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch" checked> Enabled</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">LED Brightness</div>
+          </div>
+          <div class="setting-control">
+            <div class="range-group">
+              <input type="range" min="10" max="100" value="80" id="led-brightness"
+                     oninput="document.getElementById('led-val').textContent = this.value + '%'">
+              <span class="range-value" id="led-val">80%</span>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Buzzer</div>
+            <div class="setting-desc">Audio alerts</div>
+          </div>
+          <div class="setting-control">
+            <label><input type="checkbox" role="switch" checked> Enabled</label>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Buzzer Volume</div>
+          </div>
+          <div class="setting-control">
+            <div class="range-group">
+              <input type="range" min="10" max="100" value="60" id="buzzer-vol"
+                     oninput="document.getElementById('buzzer-val').textContent = this.value + '%'">
+              <span class="range-value" id="buzzer-val">60%</span>
+            </div>
+          </div>
+        </div>
+        <div class="setting-row">
+          <div class="setting-info">
+            <div class="setting-label">Alert Sound</div>
+            <div class="setting-desc">Sound pattern for alerts</div>
+          </div>
+          <div class="setting-control">
+            <select style="min-width: 140px;">
+              <option>Continuous</option>
+              <option>Double Beep</option>
+              <option>Chirp</option>
+              <option>Pulse</option>
+            </select>
+            <button class="outline small" onclick="alert('Testing buzzer...')">Test</button>
+          </div>
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <!-- WiFi Network Selection Dialog -->
+  <dialog id="wifi-dialog" closedby="any">
+    <form method="dialog">
+      <header>
+        <h3>Connect to WiFi</h3>
+        <p>Select a network to connect</p>
+      </header>
+      <div class="dialog-body">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+          <span style="font-size: 0.75rem; color: var(--muted-foreground);">Available Networks</span>
+          <button type="button" class="ghost small" onclick="this.textContent='Scanning...'">Scan</button>
+        </div>
+        <div class="wifi-list" style="max-height: 200px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius);">
+          <label class="wifi-item" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--border); cursor: pointer;">
+            <input type="radio" name="wifi" checked>
+            <div style="flex: 1;">
+              <div style="font-size: 0.875rem; font-weight: 500;">HomeNetwork-5G</div>
+              <div style="font-size: 0.6875rem; color: var(--muted-foreground);">-58 dBm • WPA2 • Connected</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--success)" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+          </label>
+          <label class="wifi-item" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--border); cursor: pointer;">
+            <input type="radio" name="wifi">
+            <div style="flex: 1;">
+              <div style="font-size: 0.875rem; font-weight: 500;">HomeNetwork-2.4G</div>
+              <div style="font-size: 0.6875rem; color: var(--muted-foreground);">-52 dBm • WPA2</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+          </label>
+          <label class="wifi-item" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; border-bottom: 1px solid var(--border); cursor: pointer;">
+            <input type="radio" name="wifi">
+            <div style="flex: 1;">
+              <div style="font-size: 0.875rem; font-weight: 500;">Neighbor-WiFi</div>
+              <div style="font-size: 0.6875rem; color: var(--muted-foreground);">-78 dBm • WPA2</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+          </label>
+          <label class="wifi-item" style="display: flex; align-items: center; gap: 0.75rem; padding: 0.75rem; cursor: pointer;">
+            <input type="radio" name="wifi">
+            <div style="flex: 1;">
+              <div style="font-size: 0.875rem; font-weight: 500;">GuestNetwork</div>
+              <div style="font-size: 0.6875rem; color: var(--muted-foreground);">-65 dBm • Open</div>
+            </div>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><circle cx="12" cy="20" r="1"/></svg>
+          </label>
+        </div>
+        <label data-field style="margin-top: 1rem;">
+          Password
+          <input type="password" id="wifi-password" placeholder="Enter network password">
+        </label>
+        <details style="margin-top: 1rem;">
+          <summary style="font-size: 0.8125rem; cursor: pointer; color: var(--muted-foreground);">Manual SSID entry</summary>
+          <label data-field style="margin-top: 0.75rem;">
+            Network Name (SSID)
+            <input type="text" placeholder="Enter hidden network name">
+          </label>
+        </details>
+      </div>
+      <footer>
+        <button type="button" class="outline" commandfor="wifi-dialog" command="close">Cancel</button>
+        <button type="submit">Connect</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Repository Config Dialog -->
+  <dialog id="repo-dialog" closedby="any">
+    <form method="dialog">
+      <header>
+        <h3>Update Source</h3>
+        <p>Configure where firmware updates are fetched from</p>
+      </header>
+      <div class="dialog-body">
+        <label data-field>
+          Repository URL
+          <input type="url" id="repo-url" value="https://github.com/SirPangolin/boorker-watchdog" placeholder="https://github.com/user/repo">
+          <small data-hint>Use your fork's URL for custom builds</small>
+        </label>
+        <label data-field style="margin-top: 1rem;">
+          Release Channel
+          <select id="release-channel">
+            <option value="stable" selected>Stable</option>
+            <option value="beta">Beta</option>
+            <option value="dev">Development</option>
+          </select>
+        </label>
+      </div>
+      <footer>
+        <button type="button" class="outline" commandfor="repo-dialog" command="close">Cancel</button>
+        <button type="submit">Save</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- Factory Reset Dialog -->
+  <dialog id="reset-dialog" closedby="any">
+    <form method="dialog">
+      <header>
+        <h3>⚠️ Factory Reset</h3>
+        <p>This action cannot be undone</p>
+      </header>
+      <div class="dialog-body">
+        <p style="font-size: 0.875rem;">This will permanently:</p>
+        <ul class="warning-list">
+          <li>Clear WiFi credentials</li>
+          <li>Reset password to default</li>
+          <li>Erase all sensor configuration</li>
+          <li>Delete event history</li>
+        </ul>
+        <label data-field style="margin-top: 1rem;">
+          Type <strong>boorker-a1b2</strong> to confirm
+          <input type="text" id="reset-confirm" placeholder="Enter device name">
+        </label>
+      </div>
+      <footer>
+        <button type="button" class="outline" commandfor="reset-dialog" command="close">Cancel</button>
+        <button type="submit" data-variant="danger" disabled id="reset-btn">Factory Reset</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.setAttribute('data-theme', html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+    }
+
+    // Enable reset button only when device name matches
+    document.getElementById('reset-confirm').addEventListener('input', function() {
+      const btn = document.getElementById('reset-btn');
+      btn.disabled = this.value !== 'boorker-a1b2';
+    });
+  </script>
+</body>
+</html>
