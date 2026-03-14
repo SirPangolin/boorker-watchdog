@@ -208,19 +208,18 @@ function updateRefreshText() {
 }
 
 async function loadData() {
-  try {
-    const [status, sensors, events] = await Promise.all([
-      api('GET', '/system/status'),
-      api('GET', '/sensors'),
-      api('GET', '/events'),
-    ]);
-    lastLoadTime = Date.now();
-    updateRefreshText();
-    renderStatGrid(status, sensors);
-    renderSections({ status, sensors, events });
-  } catch (err) {
-    console.error('Dashboard load failed:', err);
-  }
+  const [status, sensors, events] = await Promise.all([
+    api('GET', '/system/status').catch(() => null),
+    api('GET', '/sensors').catch(() => []),
+    api('GET', '/events').catch(() => []),
+  ]);
+  lastLoadTime = Date.now();
+  updateRefreshText();
+  if (!status) return; // Can't render without status
+  const sensorList = Array.isArray(sensors) ? sensors : [];
+  const eventList = Array.isArray(events) ? events : [];
+  renderStatGrid(status, sensorList);
+  renderSections({ status, sensors: sensorList, events: eventList });
 }
 
 // ── Stat Grid ──────────────────────────────────────────────────────
