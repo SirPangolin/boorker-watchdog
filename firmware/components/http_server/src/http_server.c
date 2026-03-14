@@ -14,6 +14,7 @@
 #include "esp_chip_info.h"
 #include "esp_timer.h"
 #include "esp_mac.h"
+#include "esp_wifi.h"
 #include "cJSON.h"
 #include <string.h>
 #include <sys/stat.h>
@@ -531,21 +532,49 @@ static esp_err_t api_system_status(httpd_req_t *req)
 
     // Check all cJSON_Add* return values for NULL (allocation failure)
     bool ok = true;
-    ok = ok && cJSON_AddNumberToObject(json, "uptime", esp_timer_get_time() / 1000000);
-    ok = ok && cJSON_AddNumberToObject(json, "heap_free", esp_get_free_heap_size());
-    ok = ok && cJSON_AddNumberToObject(json, "psram_free", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
+    // Device identity
     const credentials_t *id = credentials_get();
     if (id) {
-        ok = ok && cJSON_AddStringToObject(json, "node_name", id->node_name);
+        ok = ok && cJSON_AddStringToObject(json, "device_name", id->node_name);
     }
 
-    // Add power stub (to be implemented with actual power monitoring)
-    cJSON *power = cJSON_CreateObject();
-    if (power != NULL) {
-        ok = ok && cJSON_AddStringToObject(power, "source", "unknown");
-        ok = ok && cJSON_AddBoolToObject(power, "ac_present", true);
-        ok = ok && cJSON_AddItemToObject(json, "power", power);
+    // Uptime
+    ok = ok && cJSON_AddNumberToObject(json, "uptime_seconds", esp_timer_get_time() / 1000000);
+
+    // Memory: internal heap free/total (separate from PSRAM)
+    ok = ok && cJSON_AddNumberToObject(json, "heap_free",
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+    ok = ok && cJSON_AddNumberToObject(json, "heap_total",
+        heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+    ok = ok && cJSON_AddNumberToObject(json, "psram_free",
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+    ok = ok && cJSON_AddNumberToObject(json, "psram_total",
+        heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
+
+    // WiFi status
+    wifi_ap_record_t ap_info;
+    esp_err_t wifi_err = esp_wifi_sta_get_ap_info(&ap_info);
+    bool wifi_connected = (wifi_err == ESP_OK);
+    ok = ok && cJSON_AddBoolToObject(json, "wifi_connected", wifi_connected);
+    if (wifi_connected) {
+        ok = ok && cJSON_AddStringToObject(json, "wifi_ssid", (const char *)ap_info.ssid);
+        ok = ok && cJSON_AddNumberToObject(json, "wifi_rssi", ap_info.rssi);
+    }
+
+    // IP address
+    char ip_buf[16] = {0};
+    if (wifi_mgr_get_ip(ip_buf, sizeof(ip_buf)) == ESP_OK) {
+        ok = ok && cJSON_AddStringToObject(json, "ip_address", ip_buf);
+    }
+
+    // MAC address
+    uint8_t mac[6];
+    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
+        char mac_str[18];
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+        ok = ok && cJSON_AddStringToObject(json, "mac_address", mac_str);
     }
 
     if (!ok) {
