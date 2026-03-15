@@ -186,6 +186,8 @@ function mountSetPassword() {
     errorEl.hidden = true;
 
     try {
+      // Login first to get session cookie (claim page bypasses login form)
+      await login('admin', generatedPassword);
       await changePassword(generatedPassword, newPassword);
       await login('admin', newPassword);
       clearAuthRedirect();
