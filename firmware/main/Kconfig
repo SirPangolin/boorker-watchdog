@@ -1,0 +1,20 @@
+menu "Board Configuration"
+
+    config BOARD_VEXT_ENABLED
+        bool "Enable Vext power rail"
+        default n
+        help
+            Enable switched 3.3V power rail for external sensors.
+            Required for Heltec V3 where sensors are powered from Vext
+            (isolated from LoRa/OLED/core on the main 3V3 rail).
+            Must be enabled before sensor drivers initialize.
+
+    config BOARD_VEXT_GPIO
+        int "Vext control GPIO"
+        default 36
+        depends on BOARD_VEXT_ENABLED
+        range 0 48
+        help
+            GPIO that controls the Vext power rail. HIGH = sensors powered.
+
+endmenu
