@@ -16,6 +16,10 @@
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_partition.h"
+#include "nvs_flash.h"
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+#include "esp_https_server.h"
+#endif
 #include "cJSON.h"
 #include <string.h>
 #include <sys/stat.h>
@@ -27,6 +31,9 @@ static const char *TAG = "http_server";
 #define WEB_FS_BASE_PATH "/littlefs"
 
 static httpd_handle_t s_server = NULL;
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+static httpd_handle_t s_redirect_server = NULL;
+#endif
 
 // MIME type mapping
 static const char* get_mime_type(const char *path)
@@ -1026,6 +1033,27 @@ static esp_err_t mount_littlefs(void)
     return ESP_OK;
 }
 
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+static esp_err_t redirect_to_https(httpd_req_t *req)
+{
+    char host[64] = {0};
+    if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
+        wifi_mgr_get_ip(host, sizeof(host));
+    }
+    // Strip port from host if present (e.g. "192.168.1.1:80" → "192.168.1.1")
+    char *colon = strchr(host, ':');
+    if (colon) *colon = '\0';
+
+    char location[192];
+    snprintf(location, sizeof(location), "https://%s%s", host, req->uri);
+
+    httpd_resp_set_status(req, "301 Moved Permanently");
+    httpd_resp_set_hdr(req, "Location", location);
+    httpd_resp_send(req, NULL, 0);
+    return ESP_OK;
+}
+#endif
+
 esp_err_t http_server_start(void)
 {
     if (s_server) {
@@ -1039,14 +1067,36 @@ esp_err_t http_server_start(void)
         return ret;
     }
 
-    // Configure server
+    // Configure and start server
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+    const char *cert = credentials_get_tls_cert();
+    const char *pkey = credentials_get_tls_key();
+    if (cert == NULL || pkey == NULL) {
+        ESP_LOGE(TAG, "TLS cert/key not available — cannot start HTTPS");
+        return ESP_FAIL;
+    }
+
+    httpd_ssl_config_t ssl_config = HTTPD_SSL_CONFIG_DEFAULT();
+    ssl_config.servercert = (const uint8_t *)cert;
+    ssl_config.servercert_len = strlen(cert) + 1;
+    ssl_config.prvtkey_pem = (const uint8_t *)pkey;
+    ssl_config.prvtkey_len = strlen(pkey) + 1;
+    ssl_config.httpd.max_open_sockets = CONFIG_HTTP_SERVER_MAX_CONNECTIONS;
+    ssl_config.httpd.max_uri_handlers = 20;
+    ssl_config.httpd.stack_size = CONFIG_HTTP_SERVER_STACK_SIZE;
+    ssl_config.httpd.uri_match_fn = httpd_uri_match_wildcard;
+
+    ret = httpd_ssl_start(&s_server, &ssl_config);
+#else
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = CONFIG_HTTP_SERVER_PORT;
     config.uri_match_fn = httpd_uri_match_wildcard;
     config.max_uri_handlers = 20;
-    config.stack_size = 8192;
+    config.max_open_sockets = CONFIG_HTTP_SERVER_MAX_CONNECTIONS;
+    config.stack_size = CONFIG_HTTP_SERVER_STACK_SIZE;
 
     ret = httpd_start(&s_server, &config);
+#endif
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start server: %s", esp_err_to_name(ret));
         return ret;
@@ -1251,7 +1301,31 @@ esp_err_t http_server_start(void)
         // Server is running but degraded - return success but log warning
     }
 
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+    // Start HTTP redirect server on port 80 (redirects all requests to HTTPS)
+    httpd_config_t redirect_config = HTTPD_DEFAULT_CONFIG();
+    redirect_config.server_port = 80;
+    redirect_config.max_uri_handlers = 1;
+    redirect_config.max_open_sockets = 2;
+    redirect_config.stack_size = 4096;
+
+    ret = httpd_start(&s_redirect_server, &redirect_config);
+    if (ret == ESP_OK) {
+        httpd_uri_t redirect_uri = {
+            .uri = "/*",
+            .method = HTTP_GET,
+            .handler = redirect_to_https,
+        };
+        httpd_register_uri_handler(s_redirect_server, &redirect_uri);
+        ESP_LOGI(TAG, "HTTP redirect server started on port 80");
+    } else {
+        ESP_LOGW(TAG, "Failed to start HTTP redirect server: %s", esp_err_to_name(ret));
+    }
+
+    ESP_LOGI(TAG, "HTTPS server started on port 443");
+#else
     ESP_LOGI(TAG, "Web server started on port %d", CONFIG_HTTP_SERVER_PORT);
+#endif
     return ESP_OK;  // Server is running, even if some handlers failed
 }
 
@@ -1261,9 +1335,17 @@ esp_err_t http_server_stop(void)
         return ESP_OK;
     }
 
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+    if (s_redirect_server) {
+        httpd_stop(s_redirect_server);
+        s_redirect_server = NULL;
+    }
+    esp_err_t ret = httpd_ssl_stop(s_server);
+#else
     esp_err_t ret = httpd_stop(s_server);
+#endif
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "httpd_stop failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "Server stop failed: %s", esp_err_to_name(ret));
     }
     s_server = NULL;
 
