@@ -1,0 +1,5 @@
+[
+  { "type": "warning", "message": "Temperature above normal range", "source": "basement_temp", "timestamp": 1741399800 },
+  { "type": "info", "message": "Mesh node reconnected", "source": "garage_unit", "timestamp": 1741399200 },
+  { "type": "alert", "message": "Vibration threshold exceeded", "source": "pump_vibration", "timestamp": 1741398600 }
+]

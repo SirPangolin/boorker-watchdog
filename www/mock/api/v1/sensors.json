@@ -1,0 +1,22 @@
+[
+  {
+    "id": "basement_temp",
+    "driver": "DHT22",
+    "gpio": 2,
+    "enabled": true,
+    "readings": { "temperature": 20.2, "humidity": 52 },
+    "status": "online",
+    "last_update": 1741400000,
+    "node": "this_device"
+  },
+  {
+    "id": "pump_vibration",
+    "driver": "SW-420",
+    "gpio": 4,
+    "enabled": true,
+    "readings": { "state": "idle" },
+    "status": "online",
+    "last_update": 1741400000,
+    "node": "this_device"
+  }
+]

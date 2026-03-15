@@ -1,0 +1,844 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard • Boorker Watchdog</title>
+
+  <!-- OAT Core + Extensions -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-chips/dist/chip.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-animate/oat-animate.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://unpkg.com/oat-animate/oat-animate.js" defer></script>
+
+  <style>
+    /* ===== THEME ===== */
+    :root {
+      --background: #fbfafd;
+      --foreground: #1f1f23;
+      --card: #ffffff;
+      --card-foreground: #1f1f23;
+      --muted: #f0eff4;
+      --muted-foreground: #71717a;
+      --border: #dcdce0;
+      --primary: #0891b2;
+      --primary-hover: #06b6d4;
+      --primary-foreground: #ffffff;
+      --success: #16a34a;
+      --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c;
+      --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626;
+      --danger-bg: rgba(220, 38, 38, 0.1);
+      --radius: 0.5rem;
+      --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+
+    [data-theme="dark"] {
+      --background: #0f0e13;
+      --foreground: #e4e4e7;
+      --card: #1a191f;
+      --card-foreground: #e4e4e7;
+      --muted: #242329;
+      --muted-foreground: #a1a1aa;
+      --border: #2e2d35;
+      --primary: #22d3ee;
+      --primary-hover: #67e8f9;
+      --primary-foreground: #0f0e13;
+      --success: #22c55e;
+      --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316;
+      --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444;
+      --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+
+    /* OAT variable mappings */
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                   'Noto Sans', Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      min-height: 100vh;
+    }
+
+    /* ===== HEADER ===== */
+    .site-header {
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 0 1.25rem;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-link {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+      text-decoration: none;
+      color: inherit;
+    }
+
+    .logo { width: 32px; height: 32px; }
+
+    .brand-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.2;
+    }
+
+    .brand-name {
+      font-size: 0.875rem;
+      font-weight: 600;
+    }
+
+    .node-id {
+      font-size: 0.625rem;
+      color: var(--muted-foreground);
+      font-family: ui-monospace, monospace;
+    }
+
+    /* Nav */
+    .main-nav {
+      display: flex;
+      gap: 0.25rem;
+      margin-left: 2rem;
+    }
+
+    .nav-link {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--muted-foreground);
+      text-decoration: none;
+      border-radius: var(--radius);
+      transition: all 0.15s;
+    }
+
+    .nav-link:hover {
+      color: var(--foreground);
+      background: var(--muted);
+    }
+
+    .nav-link.active {
+      color: var(--primary);
+      background: rgba(34, 211, 238, 0.1);
+    }
+
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 0.625rem;
+    }
+
+    /* Status chip in header */
+    .chip.status-online {
+      background: var(--success-bg);
+      color: var(--success);
+      gap: 0.375rem;
+    }
+
+    .chip.status-alert {
+      background: var(--danger-bg);
+      color: var(--danger);
+      animation: pulse 1.5s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* Theme toggle */
+    .icon-btn {
+      display: grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      background: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--muted-foreground);
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .icon-btn:hover {
+      color: var(--foreground);
+      border-color: var(--primary);
+    }
+
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    /* User dropdown */
+    .user-dropdown { position: relative; }
+
+    .user-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.375rem 0.625rem 0.375rem 0.375rem;
+      background: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--foreground);
+      font-size: 0.8125rem;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .user-btn:hover { border-color: var(--primary); }
+
+    .user-avatar {
+      width: 24px;
+      height: 24px;
+      background: var(--primary);
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      color: var(--primary-foreground);
+      font-size: 0.6875rem;
+      font-weight: 600;
+    }
+
+    /* ===== ALERT BANNER ===== */
+    .alert-banner {
+      background: var(--danger-bg);
+      border-bottom: 1px solid var(--danger);
+      padding: 0.75rem 1.25rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .alert-banner .chip { flex-shrink: 0; }
+
+    .alert-banner-text {
+      flex: 1;
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .alert-banner-meta {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+    }
+
+    .alert-banner button {
+      flex-shrink: 0;
+    }
+
+    .hidden { display: none !important; }
+
+    /* ===== MAIN ===== */
+    .main-content {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 1.5rem;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+    }
+
+    .page-title {
+      font-size: 1.5rem;
+      font-weight: 600;
+    }
+
+    .refresh-group {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .refresh-text {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+    }
+
+    /* ===== GRID ===== */
+    .grid { display: grid; gap: 1rem; }
+    .grid-4 { grid-template-columns: repeat(4, 1fr); }
+    .grid-2 { grid-template-columns: repeat(2, 1fr); }
+
+    @media (max-width: 900px) {
+      .grid-4 { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 600px) {
+      .grid-4, .grid-2 { grid-template-columns: 1fr; }
+      .main-nav { display: none; }
+    }
+
+    /* ===== STAT CARDS ===== */
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem;
+      box-shadow: var(--shadow);
+    }
+
+    .stat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+    }
+
+    .stat-label {
+      font-size: 0.8125rem;
+      font-weight: 500;
+      color: var(--muted-foreground);
+    }
+
+    .stat-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: var(--radius);
+      display: grid;
+      place-items: center;
+    }
+
+    .stat-icon svg { width: 18px; height: 18px; }
+    .stat-icon.primary { background: rgba(34, 211, 238, 0.15); color: var(--primary); }
+    .stat-icon.success { background: var(--success-bg); color: var(--success); }
+    .stat-icon.warning { background: var(--warning-bg); color: var(--warning); }
+
+    .stat-value {
+      font-size: 1.75rem;
+      font-weight: 600;
+      line-height: 1.2;
+    }
+
+    .stat-unit {
+      font-size: 1rem;
+      font-weight: 400;
+      color: var(--muted-foreground);
+    }
+
+    .stat-meta {
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+      margin-top: 0.25rem;
+    }
+
+    .trend {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.125rem;
+      font-size: 0.6875rem;
+      font-weight: 500;
+      padding: 0.125rem 0.375rem;
+      border-radius: 0.25rem;
+    }
+
+    .trend.up { background: var(--success-bg); color: var(--success); }
+    .trend.down { background: var(--danger-bg); color: var(--danger); }
+
+    /* ===== SECTION CARDS ===== */
+    .section { margin-top: 1.5rem; }
+
+    .section-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .section-title {
+      font-size: 0.9375rem;
+      font-weight: 600;
+    }
+
+    .section-body {
+      padding: 1rem 1.25rem;
+    }
+
+    /* Mesh list */
+    .mesh-list {
+      list-style: none;
+    }
+
+    .mesh-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mesh-item:last-child { border-bottom: none; }
+
+    .mesh-status {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .mesh-status.online { background: var(--success); }
+    .mesh-status.offline { background: var(--danger); }
+
+    .mesh-info { flex: 1; }
+
+    .mesh-name {
+      font-size: 0.875rem;
+      font-weight: 500;
+    }
+
+    .mesh-meta {
+      font-size: 0.6875rem;
+      color: var(--muted-foreground);
+    }
+
+    .mesh-badge {
+      font-size: 0.625rem;
+    }
+
+    /* Event list */
+    .event-list {
+      list-style: none;
+    }
+
+    .event-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.75rem;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .event-item:last-child { border-bottom: none; }
+
+    .event-time {
+      font-size: 0.6875rem;
+      font-family: ui-monospace, monospace;
+      color: var(--muted-foreground);
+      min-width: 3.5rem;
+      padding-top: 0.125rem;
+    }
+
+    .event-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      margin-top: 0.375rem;
+      flex-shrink: 0;
+    }
+
+    .event-dot.alert { background: var(--danger); }
+    .event-dot.info { background: var(--muted-foreground); }
+
+    .event-content { flex: 1; }
+
+    .event-text {
+      font-size: 0.8125rem;
+    }
+
+    .event-source {
+      font-size: 0.6875rem;
+      color: var(--muted-foreground);
+    }
+
+    /* View all link */
+    .view-all {
+      display: block;
+      text-align: center;
+      padding: 0.75rem;
+      font-size: 0.8125rem;
+      color: var(--primary);
+      text-decoration: none;
+      border-top: 1px solid var(--border);
+    }
+
+    .view-all:hover {
+      background: var(--muted);
+    }
+
+    /* ===== FOOTER ===== */
+    .site-footer {
+      max-width: 1200px;
+      margin: 2rem auto 0;
+      padding: 1rem 1.5rem;
+      border-top: 1px solid var(--border);
+      text-align: center;
+      font-size: 0.75rem;
+      color: var(--muted-foreground);
+    }
+
+    .site-footer a {
+      color: var(--primary);
+      text-decoration: none;
+    }
+
+    .site-footer a:hover { text-decoration: underline; }
+
+    /* MOTD Banner */
+    .motd-banner {
+      background: rgba(34, 211, 238, 0.1); border-bottom: 1px solid rgba(34, 211, 238, 0.2);
+      padding: 0.5rem 1.25rem; font-size: 0.8125rem;
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .motd-banner a { color: var(--primary); }
+    .motd-banner .dismiss {
+      margin-left: auto; background: none; border: none;
+      color: var(--muted-foreground); cursor: pointer; padding: 0.25rem; font-size: 1rem;
+    }
+    .motd-banner .dismiss:hover { color: var(--foreground); }
+    .motd-banner.hidden { display: none; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-left">
+      <a href="#/" class="logo-link">
+        <svg class="logo" viewBox="0 0 64 64" fill="none">
+          <path d="M32 8L52 28L48 52H16L12 28L32 8Z" fill="var(--muted)"/>
+          <path d="M12 28L4 16L16 24L12 28Z" fill="var(--border)"/>
+          <path d="M52 28L60 16L48 24L52 28Z" fill="var(--border)"/>
+          <path d="M32 18L42 32L32 48L22 32L32 18Z" fill="var(--card)"/>
+          <ellipse cx="32" cy="40" rx="3" ry="2" fill="var(--foreground)"/>
+          <circle cx="24" cy="30" r="4" fill="var(--primary)"/>
+          <circle cx="25" cy="29" r="1.5" fill="var(--card)"/>
+          <circle cx="40" cy="30" r="4" fill="#f59e0b"/>
+          <circle cx="41" cy="29" r="1.5" fill="var(--card)"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">Boorker Watchdog</span>
+          <span class="node-id">boorker-a1b2.local | Coordinator</span>
+        </div>
+      </a>
+
+      <nav class="main-nav">
+        <a href="#/" class="nav-link active">Dashboard</a>
+        <a href="#/sensors" class="nav-link">Sensors</a>
+        <a href="#/mesh" class="nav-link">Mesh</a>
+        <a href="#/history" class="nav-link">History</a>
+        <a href="#/settings" class="nav-link">Settings</a>
+      </nav>
+    </div>
+
+    <div class="header-right">
+      <span class="chip status-online" id="status-chip">
+        <span class="status-dot"></span>
+        <span id="status-text">Online</span>
+      </span>
+
+      <a href="https://github.com/SirPangolin/boorker-watchdog/wiki" target="_blank" class="icon-btn" title="Documentation">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+        </svg>
+      </a>
+
+      <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+        </svg>
+      </button>
+
+      <ot-dropdown class="user-dropdown">
+        <button class="user-btn" popovertarget="user-menu">
+          <span class="user-avatar">A</span>
+          admin
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
+        <menu popover id="user-menu">
+          <a href="#/password" role="menuitem">Change Password</a>
+          <a href="#/terminal" role="menuitem">Terminal</a>
+          <hr>
+          <button role="menuitem" onclick="logout()">Logout</button>
+        </menu>
+      </ot-dropdown>
+    </div>
+  </header>
+
+  <!-- MOTD Banner -->
+  <div class="motd-banner" id="motd-banner">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <span>Update available: <strong>v0.8.0</strong> — <a href="https://github.com/SirPangolin/boorker-watchdog/releases" target="_blank">View release notes</a></span>
+    <button class="dismiss" onclick="this.parentElement.classList.add('hidden')" title="Dismiss">&times;</button>
+  </div>
+
+  <!-- Alert Banner (toggle visibility with .hidden) -->
+  <div class="alert-banner" id="alert-banner">
+    <span class="chip danger">ALERT</span>
+    <span class="alert-banner-text">Water detected</span>
+    <span class="alert-banner-meta">basement_float • 12 minutes ago</span>
+    <button class="outline small" onclick="ackAlert()">Acknowledge</button>
+  </div>
+
+  <!-- Main Content -->
+  <main class="main-content">
+    <div class="page-header" ot-animate="fade-up">
+      <h1 class="page-title">Dashboard</h1>
+      <div class="refresh-group">
+        <span class="refresh-text">Updated 5s ago</span>
+        <button class="outline small" onclick="refresh(this)">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+          Refresh
+        </button>
+      </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-4">
+      <article class="stat-card" ot-animate="fade-up" style="--ot-delay: 0.05s">
+        <div class="stat-header">
+          <span class="stat-label">Temperature</span>
+          <div class="stat-icon primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M14 4v10.54a4 4 0 1 1-4 0V4a2 2 0 0 1 4 0Z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="stat-value">68.4<span class="stat-unit">°F</span></div>
+        <div class="stat-meta">
+          <span class="trend up">↑ 2.1°</span> from 1hr ago
+        </div>
+      </article>
+
+      <article class="stat-card" ot-animate="fade-up" style="--ot-delay: 0.1s">
+        <div class="stat-header">
+          <span class="stat-label">Humidity</span>
+          <div class="stat-icon success">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"/>
+            </svg>
+          </div>
+        </div>
+        <div class="stat-value">52<span class="stat-unit">%</span></div>
+        <div class="stat-meta">Normal range</div>
+      </article>
+
+      <article class="stat-card" ot-animate="fade-up" style="--ot-delay: 0.15s">
+        <div class="stat-header">
+          <span class="stat-label">Vibration</span>
+          <div class="stat-icon warning">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+          </div>
+        </div>
+        <div class="stat-value">Idle</div>
+        <div class="stat-meta">Last active 2h 15m ago</div>
+      </article>
+
+      <article class="stat-card" ot-animate="fade-up" style="--ot-delay: 0.2s">
+        <div class="stat-header">
+          <span class="stat-label">Uptime</span>
+          <div class="stat-icon primary">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <polyline points="12 6 12 12 16 14"/>
+            </svg>
+          </div>
+        </div>
+        <div class="stat-value">3d 14h</div>
+        <div class="stat-meta">Since last reboot</div>
+      </article>
+    </div>
+
+    <!-- Mesh & Events -->
+    <section class="section">
+      <div class="grid grid-2">
+        <!-- Mesh Status -->
+        <article class="section-card" ot-animate="fade-up" style="--ot-delay: 0.25s">
+          <header class="section-header">
+            <h2 class="section-title">Mesh Network</h2>
+            <span class="chip outline small">3 nodes</span>
+          </header>
+          <div style="display: flex; gap: 1.5rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.75rem;">
+            <div><span style="color: var(--muted-foreground);">Delivery:</span> <strong style="color: var(--success);">98.2%</strong></div>
+            <div><span style="color: var(--muted-foreground);">Avg Latency:</span> <strong>42ms</strong></div>
+            <div><span style="color: var(--muted-foreground);">SF:</span> <strong>7</strong></div>
+          </div>
+          <div class="section-body">
+            <ul class="mesh-list">
+              <li class="mesh-item">
+                <span class="mesh-status online"></span>
+                <div class="mesh-info">
+                  <div class="mesh-name">boorker-a1b2</div>
+                  <div class="mesh-meta">192.168.1.42 • This node</div>
+                </div>
+                <span class="chip small success mesh-badge">This</span>
+              </li>
+              <li class="mesh-item">
+                <span class="mesh-status online"></span>
+                <div class="mesh-info">
+                  <div class="mesh-name">boorker-c3d4</div>
+                  <div class="mesh-meta">192.168.1.87 • Synced 30s ago</div>
+                </div>
+              </li>
+              <li class="mesh-item">
+                <span class="mesh-status offline"></span>
+                <div class="mesh-info">
+                  <div class="mesh-name">boorker-e5f6</div>
+                  <div class="mesh-meta">Last seen 15 minutes ago</div>
+                </div>
+                <span class="chip small danger mesh-badge">Offline</span>
+              </li>
+            </ul>
+          </div>
+          <a href="#/mesh" class="view-all">View all →</a>
+        </article>
+
+        <!-- Recent Events -->
+        <article class="section-card" ot-animate="fade-up" style="--ot-delay: 0.3s">
+          <header class="section-header">
+            <h2 class="section-title">Recent Events</h2>
+            <span class="chip outline small">Today</span>
+          </header>
+          <div class="section-body">
+            <ul class="event-list">
+              <li class="event-item">
+                <span class="event-time">14:32</span>
+                <span class="event-dot alert"></span>
+                <div class="event-content">
+                  <div class="event-text">Water detected</div>
+                  <div class="event-source">basement_float • boorker-a1b2</div>
+                </div>
+              </li>
+              <li class="event-item">
+                <span class="event-time">14:30</span>
+                <span class="event-dot info"></span>
+                <div class="event-content">
+                  <div class="event-text">Pump stopped (ran 45s)</div>
+                  <div class="event-source">pump_vibration • boorker-a1b2</div>
+                </div>
+              </li>
+              <li class="event-item">
+                <span class="event-time">14:29</span>
+                <span class="event-dot info"></span>
+                <div class="event-content">
+                  <div class="event-text">Pump started</div>
+                  <div class="event-source">pump_vibration • boorker-a1b2</div>
+                </div>
+              </li>
+              <li class="event-item">
+                <span class="event-time">12:15</span>
+                <span class="event-dot info"></span>
+                <div class="event-content">
+                  <div class="event-text">Temperature crossed 70°F ↑</div>
+                  <div class="event-source">basement_temp • boorker-a1b2</div>
+                </div>
+              </li>
+              <li class="event-item">
+                <span class="event-time">09:42</span>
+                <span class="event-dot alert"></span>
+                <div class="event-content">
+                  <div class="event-text">Node offline</div>
+                  <div class="event-source">boorker-e5f6</div>
+                </div>
+              </li>
+            </ul>
+          </div>
+          <a href="#/history" class="view-all">View all →</a>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    Boorker Watchdog v0.7.0 • <a href="#">GitHub</a>
+  </footer>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const next = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+    }
+
+    function toggleAlert(show) {
+      const banner = document.getElementById('alert-banner');
+      const chip = document.getElementById('status-chip');
+      const statusText = document.getElementById('status-text');
+      if (show) {
+        banner.classList.remove('hidden');
+        chip.className = 'chip status-alert';
+        statusText.textContent = 'Alert!';
+      } else {
+        banner.classList.add('hidden');
+        chip.className = 'chip status-online';
+        statusText.textContent = 'Online';
+      }
+    }
+
+    function ackAlert() {
+      toggleAlert(false);
+    }
+
+    function refresh(btn) {
+      btn.setAttribute('aria-busy', 'true');
+      setTimeout(() => {
+        btn.removeAttribute('aria-busy');
+      }, 1000);
+    }
+
+    function logout() {
+      alert('Logout (demo)');
+    }
+
+    // Demo: toggle alert banner with keyboard (press 'a' for alert, 'o' for online)
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'a') toggleAlert(true);
+      if (e.key === 'o') toggleAlert(false);
+    });
+  </script>
+</body>
+</html>

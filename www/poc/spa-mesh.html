@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mesh Network • Boorker Watchdog</title>
+
+  <!-- OAT Core + Extensions -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-chips/dist/chip.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-animate/oat-animate.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://unpkg.com/oat-animate/oat-animate.js" defer></script>
+
+  <style>
+    :root {
+      --background: #fbfafd; --foreground: #1f1f23; --card: #ffffff;
+      --muted: #f0eff4; --muted-foreground: #71717a; --border: #dcdce0;
+      --primary: #0891b2; --primary-hover: #06b6d4; --primary-foreground: #fff;
+      --success: #16a34a; --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c; --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626; --danger-bg: rgba(220, 38, 38, 0.1);
+      --radius: 0.5rem; --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    [data-theme="dark"] {
+      --background: #0f0e13; --foreground: #e4e4e7; --card: #1a191f;
+      --muted: #242329; --muted-foreground: #a1a1aa; --border: #2e2d35;
+      --primary: #22d3ee; --primary-hover: #67e8f9; --primary-foreground: #0f0e13;
+      --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316; --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background); color: var(--foreground); min-height: 100vh;
+    }
+
+    /* Header */
+    .site-header {
+      background: var(--card); border-bottom: 1px solid var(--border);
+      padding: 0 1.25rem; height: 56px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .logo-link { display: flex; align-items: center; gap: 0.625rem; text-decoration: none; color: inherit; }
+    .logo { width: 32px; height: 32px; }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+    .brand-name { font-size: 0.875rem; font-weight: 600; }
+    .node-id { font-size: 0.625rem; color: var(--muted-foreground); font-family: ui-monospace, monospace; }
+    .main-nav { display: flex; gap: 0.25rem; margin-left: 2rem; }
+    .nav-link { padding: 0.5rem 0.75rem; font-size: 0.8125rem; font-weight: 500; color: var(--muted-foreground); text-decoration: none; border-radius: var(--radius); }
+    .nav-link:hover { color: var(--foreground); background: var(--muted); }
+    .nav-link.active { color: var(--primary); background: rgba(34, 211, 238, 0.1); }
+    .header-right { display: flex; align-items: center; gap: 0.625rem; }
+    .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); cursor: pointer; }
+    .icon-btn:hover { color: var(--foreground); border-color: var(--primary); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    /* Main */
+    .main-content { max-width: 1000px; margin: 0 auto; padding: 1.5rem; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; }
+    .page-title { font-size: 1.5rem; font-weight: 600; }
+
+    /* This Device Card */
+    .this-device {
+      background: var(--card); border: 2px solid var(--primary);
+      border-radius: var(--radius); padding: 1.25rem; margin-bottom: 1.5rem;
+      display: grid; grid-template-columns: auto 1fr auto; gap: 1rem; align-items: center;
+    }
+    .device-icon {
+      width: 56px; height: 56px; border-radius: var(--radius);
+      background: rgba(34, 211, 238, 0.15); display: grid; place-items: center;
+    }
+    .device-icon svg { width: 28px; height: 28px; color: var(--primary); }
+    .device-info h2 { font-size: 1.125rem; font-weight: 600; margin-bottom: 0.25rem; }
+    .device-meta { font-size: 0.75rem; color: var(--muted-foreground); }
+    .device-meta code { font-family: ui-monospace, monospace; background: var(--muted); padding: 0.125rem 0.375rem; border-radius: 0.25rem; }
+    .device-stats { display: flex; gap: 1.5rem; text-align: right; }
+    .device-stat-value { font-size: 1.25rem; font-weight: 600; font-family: ui-monospace, monospace; }
+    .device-stat-label { font-size: 0.6875rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; }
+
+    /* Section Headers */
+    .section-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 1rem;
+    }
+    .section-title { font-size: 1rem; font-weight: 600; color: var(--muted-foreground); }
+
+    /* Node Grid */
+    .node-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
+
+    .node-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .node-card.offline { opacity: 0.6; }
+
+    .node-card-header {
+      display: flex; align-items: center; gap: 0.75rem;
+      padding: 1rem; border-bottom: 1px solid var(--border);
+    }
+    .node-avatar {
+      width: 40px; height: 40px; border-radius: 50%;
+      background: var(--muted); display: grid; place-items: center;
+      font-size: 0.875rem; font-weight: 600; color: var(--muted-foreground);
+    }
+    .node-avatar.online { background: var(--success-bg); color: var(--success); }
+    .node-name { font-weight: 600; font-size: 0.9375rem; }
+    .node-id-text { font-size: 0.6875rem; color: var(--muted-foreground); font-family: ui-monospace, monospace; }
+    .node-status-chip { margin-left: auto; }
+
+    .node-card-body { padding: 1rem; }
+    .node-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
+    .node-stat { text-align: center; }
+    .node-stat-value { font-size: 1rem; font-weight: 600; font-family: ui-monospace, monospace; }
+    .node-stat-label { font-size: 0.625rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.125rem; }
+
+    /* Signal strength bar */
+    .signal-bar {
+      display: flex; gap: 2px; align-items: flex-end; height: 16px; justify-content: center;
+    }
+    .signal-bar span {
+      width: 4px; background: var(--border); border-radius: 1px;
+    }
+    .signal-bar span:nth-child(1) { height: 4px; }
+    .signal-bar span:nth-child(2) { height: 8px; }
+    .signal-bar span:nth-child(3) { height: 12px; }
+    .signal-bar span:nth-child(4) { height: 16px; }
+    .signal-bar.excellent span { background: var(--success); }
+    .signal-bar.good span:nth-child(-n+3) { background: var(--success); }
+    .signal-bar.fair span:nth-child(-n+2) { background: var(--warning); }
+    .signal-bar.weak span:nth-child(1) { background: var(--danger); }
+
+    .node-card-footer {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1rem; background: var(--muted); border-top: 1px solid var(--border);
+    }
+    .node-last-seen { font-size: 0.75rem; color: var(--muted-foreground); }
+    .node-actions { display: flex; gap: 0.5rem; }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center; padding: 3rem; color: var(--muted-foreground);
+    }
+    .empty-state svg { width: 48px; height: 48px; margin-bottom: 1rem; opacity: 0.5; }
+    .empty-state p { font-size: 0.875rem; }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-left">
+      <a href="#/" class="logo-link">
+        <svg class="logo" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--primary)"/>
+          <path d="M8 16c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="var(--primary-foreground)" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="16" cy="16" r="3" fill="var(--primary-foreground)"/>
+          <path d="M16 19v5M13 24h6" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">Boorker Watchdog</span>
+          <span class="node-id">boorker-a1b2.local | Coordinator</span>
+        </div>
+      </a>
+      <nav class="main-nav">
+        <a href="#/" class="nav-link">Dashboard</a>
+        <a href="#/sensors" class="nav-link">Sensors</a>
+        <a href="#/mesh" class="nav-link active">Mesh</a>
+        <a href="#/history" class="nav-link">History</a>
+        <a href="#/settings" class="nav-link">Settings</a>
+      </nav>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <!-- This Device -->
+    <article class="this-device" ot-animate="fade-up">
+      <div class="device-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="4" width="16" height="16" rx="2"/>
+          <path d="M9 9h6M9 13h6M9 17h4"/>
+        </svg>
+      </div>
+      <div class="device-info">
+        <h2>This Device (Coordinator)</h2>
+        <p class="device-meta">
+          Node ID: <code>boorker-a1b2</code> &bull; LoRa 915MHz &bull; SF7
+        </p>
+      </div>
+      <div class="device-stats">
+        <div>
+          <div class="device-stat-value">3</div>
+          <div class="device-stat-label">Nodes</div>
+        </div>
+        <div>
+          <div class="device-stat-value" style="color: var(--success)">98.2%</div>
+          <div class="device-stat-label">Delivery</div>
+        </div>
+        <div>
+          <div class="device-stat-value">42ms</div>
+          <div class="device-stat-label">Latency</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- Connected Nodes -->
+    <div class="section-header">
+      <h3 class="section-title">Connected Nodes</h3>
+      <button class="outline small" onclick="scanNodes()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 0.25rem;">
+          <path d="M21 12a9 9 0 11-9-9"/>
+          <polyline points="21 3 21 9 15 9"/>
+        </svg>
+        Scan
+      </button>
+    </div>
+
+    <div class="node-grid">
+      <!-- Node 1: Online, excellent signal -->
+      <article class="node-card" ot-animate="fade-up" style="--ot-delay: 0.1s">
+        <div class="node-card-header">
+          <div class="node-avatar online">G1</div>
+          <div>
+            <div class="node-name">Garage Unit</div>
+            <div class="node-id-text">boorker-c3d4</div>
+          </div>
+          <span class="chip success node-status-chip">Online</span>
+        </div>
+        <div class="node-card-body">
+          <div class="node-stats">
+            <div class="node-stat">
+              <div class="signal-bar excellent">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="node-stat-label">Signal</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">-42</div>
+              <div class="node-stat-label">RSSI dBm</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">2</div>
+              <div class="node-stat-label">Sensors</div>
+            </div>
+          </div>
+        </div>
+        <div class="node-card-footer">
+          <span class="node-last-seen">Last seen: 12s ago</span>
+          <div class="node-actions">
+            <button class="outline small">Details</button>
+          </div>
+        </div>
+      </article>
+
+      <!-- Node 2: Online, good signal -->
+      <article class="node-card" ot-animate="fade-up" style="--ot-delay: 0.15s">
+        <div class="node-card-header">
+          <div class="node-avatar online">B1</div>
+          <div>
+            <div class="node-name">Basement Monitor</div>
+            <div class="node-id-text">boorker-e5f6</div>
+          </div>
+          <span class="chip success node-status-chip">Online</span>
+        </div>
+        <div class="node-card-body">
+          <div class="node-stats">
+            <div class="node-stat">
+              <div class="signal-bar good">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="node-stat-label">Signal</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">-67</div>
+              <div class="node-stat-label">RSSI dBm</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">3</div>
+              <div class="node-stat-label">Sensors</div>
+            </div>
+          </div>
+        </div>
+        <div class="node-card-footer">
+          <span class="node-last-seen">Last seen: 28s ago</span>
+          <div class="node-actions">
+            <button class="outline small">Details</button>
+          </div>
+        </div>
+      </article>
+
+      <!-- Node 3: Online, fair signal -->
+      <article class="node-card" ot-animate="fade-up" style="--ot-delay: 0.2s">
+        <div class="node-card-header">
+          <div class="node-avatar online">S1</div>
+          <div>
+            <div class="node-name">Shed Sensor</div>
+            <div class="node-id-text">boorker-g7h8</div>
+          </div>
+          <span class="chip warning node-status-chip">Weak</span>
+        </div>
+        <div class="node-card-body">
+          <div class="node-stats">
+            <div class="node-stat">
+              <div class="signal-bar fair">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="node-stat-label">Signal</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">-89</div>
+              <div class="node-stat-label">RSSI dBm</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">1</div>
+              <div class="node-stat-label">Sensors</div>
+            </div>
+          </div>
+        </div>
+        <div class="node-card-footer">
+          <span class="node-last-seen">Last seen: 1m ago</span>
+          <div class="node-actions">
+            <button class="outline small">Details</button>
+          </div>
+        </div>
+      </article>
+
+      <!-- Node 4: Offline -->
+      <article class="node-card offline" ot-animate="fade-up" style="--ot-delay: 0.25s">
+        <div class="node-card-header">
+          <div class="node-avatar">W1</div>
+          <div>
+            <div class="node-name">Workshop Node</div>
+            <div class="node-id-text">boorker-i9j0</div>
+          </div>
+          <span class="chip secondary node-status-chip">Offline</span>
+        </div>
+        <div class="node-card-body">
+          <div class="node-stats">
+            <div class="node-stat">
+              <div class="signal-bar">
+                <span></span><span></span><span></span><span></span>
+              </div>
+              <div class="node-stat-label">Signal</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">--</div>
+              <div class="node-stat-label">RSSI dBm</div>
+            </div>
+            <div class="node-stat">
+              <div class="node-stat-value">2</div>
+              <div class="node-stat-label">Sensors</div>
+            </div>
+          </div>
+        </div>
+        <div class="node-card-footer">
+          <span class="node-last-seen">Last seen: 2h ago</span>
+          <div class="node-actions">
+            <button class="outline small">Ping</button>
+            <button class="ghost small" data-variant="danger">Remove</button>
+          </div>
+        </div>
+      </article>
+    </div>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+    }
+
+    function scanNodes() {
+      ot.toast('Scanning for nodes...', 'Mesh', { variant: 'info' });
+    }
+  </script>
+</body>
+</html>

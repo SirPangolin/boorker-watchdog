@@ -314,3 +314,6 @@ managed_components/
 firmware/main/secrets.h
 firmware/secrets.h
 secrets.h
+
+# Web SPA — override Python lib/ ignore
+!www/src/lib/

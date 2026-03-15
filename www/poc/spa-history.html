@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>History • Boorker Watchdog</title>
+
+  <!-- OAT Core + Extensions -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-chips/dist/chip.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-animate/oat-animate.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://unpkg.com/oat-animate/oat-animate.js" defer></script>
+
+  <style>
+    :root {
+      --background: #fbfafd; --foreground: #1f1f23; --card: #ffffff;
+      --muted: #f0eff4; --muted-foreground: #71717a; --border: #dcdce0;
+      --primary: #0891b2; --primary-hover: #06b6d4; --primary-foreground: #fff;
+      --success: #16a34a; --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c; --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626; --danger-bg: rgba(220, 38, 38, 0.1);
+      --info: #2563eb; --info-bg: rgba(37, 99, 235, 0.1);
+      --radius: 0.5rem; --shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    [data-theme="dark"] {
+      --background: #0f0e13; --foreground: #e4e4e7; --card: #1a191f;
+      --muted: #242329; --muted-foreground: #a1a1aa; --border: #2e2d35;
+      --primary: #22d3ee; --primary-hover: #67e8f9; --primary-foreground: #0f0e13;
+      --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316; --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.15);
+      --info: #3b82f6; --info-bg: rgba(59, 130, 246, 0.15);
+      --shadow: 0 1px 3px rgba(0,0,0,0.3);
+    }
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--background); color: var(--foreground); min-height: 100vh;
+    }
+
+    /* Header */
+    .site-header {
+      background: var(--card); border-bottom: 1px solid var(--border);
+      padding: 0 1.25rem; height: 56px; display: flex; align-items: center;
+      justify-content: space-between; position: sticky; top: 0; z-index: 100;
+    }
+    .header-left { display: flex; align-items: center; gap: 1rem; }
+    .logo-link { display: flex; align-items: center; gap: 0.625rem; text-decoration: none; color: inherit; }
+    .logo { width: 32px; height: 32px; }
+    .brand-text { display: flex; flex-direction: column; line-height: 1.2; }
+    .brand-name { font-size: 0.875rem; font-weight: 600; }
+    .node-id { font-size: 0.625rem; color: var(--muted-foreground); font-family: ui-monospace, monospace; }
+    .main-nav { display: flex; gap: 0.25rem; margin-left: 2rem; }
+    .nav-link { padding: 0.5rem 0.75rem; font-size: 0.8125rem; font-weight: 500; color: var(--muted-foreground); text-decoration: none; border-radius: var(--radius); }
+    .nav-link:hover { color: var(--foreground); background: var(--muted); }
+    .nav-link.active { color: var(--primary); background: rgba(34, 211, 238, 0.1); }
+    .header-right { display: flex; align-items: center; gap: 0.625rem; }
+    .icon-btn { display: grid; place-items: center; width: 36px; height: 36px; background: var(--muted); border: 1px solid var(--border); border-radius: var(--radius); color: var(--muted-foreground); cursor: pointer; }
+    .icon-btn:hover { color: var(--foreground); border-color: var(--primary); }
+    .icon-btn svg { width: 18px; height: 18px; }
+
+    /* Main */
+    .main-content { max-width: 1100px; margin: 0 auto; padding: 1.5rem; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 1rem; }
+    .page-title { font-size: 1.5rem; font-weight: 600; }
+
+    /* Stats Summary */
+    .stats-row {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem; text-align: center;
+    }
+    .stat-value { font-size: 1.5rem; font-weight: 600; font-family: ui-monospace, monospace; }
+    .stat-value.danger { color: var(--danger); }
+    .stat-value.warning { color: var(--warning); }
+    .stat-value.info { color: var(--info); }
+    .stat-label { font-size: 0.6875rem; color: var(--muted-foreground); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 0.25rem; }
+
+    /* Mini Chart */
+    .mini-chart {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 1rem; margin-bottom: 1.5rem;
+    }
+    .mini-chart-header {
+      display: flex; align-items: center; justify-content: space-between; margin-bottom: 1rem;
+    }
+    .mini-chart-title { font-size: 0.875rem; font-weight: 600; }
+    .chart-placeholder {
+      height: 80px; display: flex; align-items: flex-end; gap: 4px; padding: 0 0.5rem;
+    }
+    .chart-bar {
+      flex: 1; background: var(--primary); border-radius: 2px 2px 0 0;
+      opacity: 0.7; min-height: 4px;
+    }
+    .chart-bar.alert { background: var(--danger); }
+    .chart-bar.warning { background: var(--warning); }
+
+    /* Filters */
+    .filters-row {
+      display: flex; gap: 0.75rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center;
+    }
+    .filter-chips { display: flex; gap: 0.375rem; flex-wrap: wrap; }
+    .filter-input {
+      flex: 1; min-width: 200px; max-width: 300px;
+    }
+    .filter-input input {
+      width: 100%; padding: 0.5rem 0.75rem; font-size: 0.875rem;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--foreground);
+    }
+    .filter-input input::placeholder { color: var(--muted-foreground); }
+
+    /* Events Table */
+    .events-card {
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    .events-table { width: 100%; border-collapse: collapse; font-size: 0.875rem; }
+    .events-table th {
+      text-align: left; padding: 0.75rem 1rem; font-weight: 600;
+      font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted-foreground); background: var(--muted); border-bottom: 1px solid var(--border);
+    }
+    .events-table td {
+      padding: 0.75rem 1rem; border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .events-table tr:last-child td { border-bottom: none; }
+    .events-table tr:hover { background: var(--muted); }
+
+    .event-type-icon {
+      width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+    }
+    .event-type-icon svg { width: 14px; height: 14px; }
+    .event-type-icon.alert { background: var(--danger-bg); color: var(--danger); }
+    .event-type-icon.warning { background: var(--warning-bg); color: var(--warning); }
+    .event-type-icon.info { background: var(--info-bg); color: var(--info); }
+    .event-type-icon.success { background: var(--success-bg); color: var(--success); }
+
+    .event-message { font-weight: 500; }
+    .event-source { font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.125rem; }
+    .event-time { font-size: 0.8125rem; color: var(--muted-foreground); font-family: ui-monospace, monospace; white-space: nowrap; }
+
+    /* Pagination */
+    .pagination {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1rem; background: var(--muted); border-top: 1px solid var(--border);
+    }
+    .pagination-info { font-size: 0.8125rem; color: var(--muted-foreground); }
+    .pagination-controls { display: flex; gap: 0.25rem; }
+
+    @media (max-width: 768px) {
+      .stats-row { grid-template-columns: repeat(2, 1fr); }
+      .events-table th:nth-child(3), .events-table td:nth-child(3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-left">
+      <a href="#/" class="logo-link">
+        <svg class="logo" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--primary)"/>
+          <path d="M8 16c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="var(--primary-foreground)" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="16" cy="16" r="3" fill="var(--primary-foreground)"/>
+          <path d="M16 19v5M13 24h6" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <div class="brand-text">
+          <span class="brand-name">Boorker Watchdog</span>
+          <span class="node-id">boorker-a1b2.local | Coordinator</span>
+        </div>
+      </a>
+      <nav class="main-nav">
+        <a href="#/" class="nav-link">Dashboard</a>
+        <a href="#/sensors" class="nav-link">Sensors</a>
+        <a href="#/mesh" class="nav-link">Mesh</a>
+        <a href="#/history" class="nav-link active">History</a>
+        <a href="#/settings" class="nav-link">Settings</a>
+      </nav>
+    </div>
+    <div class="header-right">
+      <button class="icon-btn" onclick="toggleTheme()" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+        </svg>
+      </button>
+    </div>
+  </header>
+
+  <main class="main-content">
+    <div class="page-header">
+      <h1 class="page-title">Event History</h1>
+      <button class="outline small">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 0.25rem;">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/>
+        </svg>
+        Export CSV
+      </button>
+    </div>
+
+    <!-- Stats Summary -->
+    <div class="stats-row" ot-animate="fade-up">
+      <div class="stat-card">
+        <div class="stat-value">247</div>
+        <div class="stat-label">Total Events</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value danger">3</div>
+        <div class="stat-label">Alerts (24h)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value warning">12</div>
+        <div class="stat-label">Warnings (24h)</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value info">42</div>
+        <div class="stat-label">Info (24h)</div>
+      </div>
+    </div>
+
+    <!-- Mini Chart -->
+    <div class="mini-chart" ot-animate="fade-up" style="--ot-delay: 0.05s">
+      <div class="mini-chart-header">
+        <span class="mini-chart-title">Events (Last 24 Hours)</span>
+        <div class="filter-chips">
+          <button class="chip small" aria-pressed="true">All</button>
+          <button class="chip small outline">Alerts</button>
+          <button class="chip small outline">Warnings</button>
+        </div>
+      </div>
+      <div class="chart-placeholder">
+        <div class="chart-bar" style="height: 20%"></div>
+        <div class="chart-bar" style="height: 35%"></div>
+        <div class="chart-bar" style="height: 25%"></div>
+        <div class="chart-bar alert" style="height: 65%"></div>
+        <div class="chart-bar" style="height: 40%"></div>
+        <div class="chart-bar" style="height: 30%"></div>
+        <div class="chart-bar warning" style="height: 50%"></div>
+        <div class="chart-bar" style="height: 45%"></div>
+        <div class="chart-bar" style="height: 35%"></div>
+        <div class="chart-bar" style="height: 20%"></div>
+        <div class="chart-bar" style="height: 55%"></div>
+        <div class="chart-bar" style="height: 40%"></div>
+        <div class="chart-bar alert" style="height: 80%"></div>
+        <div class="chart-bar" style="height: 30%"></div>
+        <div class="chart-bar" style="height: 25%"></div>
+        <div class="chart-bar" style="height: 45%"></div>
+        <div class="chart-bar" style="height: 35%"></div>
+        <div class="chart-bar" style="height: 50%"></div>
+        <div class="chart-bar warning" style="height: 60%"></div>
+        <div class="chart-bar" style="height: 40%"></div>
+        <div class="chart-bar" style="height: 30%"></div>
+        <div class="chart-bar" style="height: 25%"></div>
+        <div class="chart-bar" style="height: 35%"></div>
+        <div class="chart-bar" style="height: 15%"></div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="filters-row" ot-animate="fade-up" style="--ot-delay: 0.1s">
+      <div class="filter-chips">
+        <button class="chip" aria-pressed="true">All</button>
+        <button class="chip outline danger">Alerts</button>
+        <button class="chip outline warning">Warnings</button>
+        <button class="chip outline">Info</button>
+      </div>
+      <div class="filter-input">
+        <input type="text" placeholder="Search events...">
+      </div>
+      <select style="padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 0.875rem;">
+        <option>All Nodes</option>
+        <option>This Device</option>
+        <option>Garage Unit</option>
+        <option>Basement Monitor</option>
+        <option>Shed Sensor</option>
+      </select>
+      <select style="padding: 0.5rem; border-radius: var(--radius); border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 0.875rem;">
+        <option>Last 24 hours</option>
+        <option>Last 7 days</option>
+        <option>Last 30 days</option>
+        <option>All time</option>
+      </select>
+    </div>
+
+    <!-- Events Table -->
+    <div class="events-card" ot-animate="fade-up" style="--ot-delay: 0.15s">
+      <table class="events-table">
+        <thead>
+          <tr>
+            <th style="width: 44px">Type</th>
+            <th>Event</th>
+            <th>Source</th>
+            <th style="width: 140px">Time</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="event-type-icon alert">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Vibration threshold exceeded</div>
+              <div class="event-source">SW-420 Sensor</div>
+            </td>
+            <td><span class="chip small">Garage Unit</span></td>
+            <td class="event-time">Today 14:32:18</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon warning">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Temperature above normal range</div>
+              <div class="event-source">DHT22 (basement_temp)</div>
+            </td>
+            <td><span class="chip small secondary">This Device</span></td>
+            <td class="event-time">Today 14:28:05</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Mesh node reconnected</div>
+              <div class="event-source">boorker-e5f6</div>
+            </td>
+            <td><span class="chip small">Basement Monitor</span></td>
+            <td class="event-time">Today 14:15:42</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon success">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="20 6 9 17 4 12"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Alert acknowledged by user</div>
+              <div class="event-source">Web Interface</div>
+            </td>
+            <td><span class="chip small secondary">This Device</span></td>
+            <td class="event-time">Today 13:45:20</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon alert">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Float switch triggered - water detected</div>
+              <div class="event-source">Float Switch</div>
+            </td>
+            <td><span class="chip small">Basement Monitor</span></td>
+            <td class="event-time">Today 13:42:08</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon info">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">System startup complete</div>
+              <div class="event-source">System</div>
+            </td>
+            <td><span class="chip small secondary">This Device</span></td>
+            <td class="event-time">Today 08:00:12</td>
+          </tr>
+          <tr>
+            <td>
+              <div class="event-type-icon warning">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+                </svg>
+              </div>
+            </td>
+            <td>
+              <div class="event-message">Weak signal from mesh node</div>
+              <div class="event-source">boorker-g7h8</div>
+            </td>
+            <td><span class="chip small">Shed Sensor</span></td>
+            <td class="event-time">Yesterday 22:15:33</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div class="pagination">
+        <div class="pagination-info">Showing 1-7 of 247 events</div>
+        <div class="pagination-controls">
+          <button class="outline small" disabled>Previous</button>
+          <button class="outline small">Next</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+    }
+  </script>
+</body>
+</html>

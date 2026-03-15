@@ -1,0 +1,9 @@
+[
+  {
+    "id": 1,
+    "source": "ota",
+    "message": "Update available: v0.8.0",
+    "priority": "info",
+    "timestamp": 1741400000
+  }
+]
