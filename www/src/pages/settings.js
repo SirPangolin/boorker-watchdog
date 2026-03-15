@@ -1,4 +1,5 @@
 import { api } from '../lib/api.js';
+import { signalBarsSvg, signalLabel, signalColor, wifiArcsSvg, wifiTooltip } from '../lib/format.js';
 
 let otaPollTimer = null;
 let deviceName = '';
@@ -62,7 +63,6 @@ export function render() {
           <progress id="ota-progress-bar" value="0" max="100"></progress>
           <small id="ota-progress-text">Preparing...</small>
         </div>
-        <hr>
         <div class="settings-row">
           <div>
             <strong>Manual Upload</strong>
@@ -76,7 +76,7 @@ export function render() {
 
     <!-- Section 4: WiFi -->
     <details name="settings">
-      <summary>WiFi</summary>
+      <summary><span style="display:flex;align-items:center;gap:0.5rem;">WiFi <span id="wifi-summary-icon"></span></span></summary>
       <div class="settings-body" id="wifi-info" aria-busy="true" data-spinner="small"></div>
     </details>
 
@@ -310,6 +310,14 @@ async function loadWifiInfo() {
   try {
     const status = await api('GET', '/system/status');
 
+    // Update summary icon for quick-reference
+    const summaryIcon = document.getElementById('wifi-summary-icon');
+    if (summaryIcon) {
+      summaryIcon.innerHTML = wifiArcsSvg(status.wifi_connected ? status.wifi_rssi : null, 16);
+      summaryIcon.dataset.tooltip = wifiTooltip(status.wifi_ssid, status.wifi_connected ? status.wifi_rssi : null);
+      summaryIcon.style.cursor = 'default';
+    }
+
     // Build WiFi info using DOM methods for safety
     el.removeAttribute('aria-busy');
     el.removeAttribute('data-spinner');
@@ -330,7 +338,22 @@ async function loadWifiInfo() {
 
     // Remaining rows via DOM
     appendInfoRow(el, 'Network', status.wifi_ssid || 'N/A');
-    appendInfoRow(el, 'Signal', status.wifi_rssi != null ? status.wifi_rssi + ' dBm' : 'N/A');
+    if (status.wifi_rssi != null) {
+      const signalRow = document.createElement('div');
+      signalRow.className = 'settings-row';
+      const label = document.createElement('strong');
+      label.textContent = 'Signal';
+      const value = document.createElement('span');
+      value.style.display = 'inline-flex';
+      value.style.alignItems = 'center';
+      value.style.gap = '0.5rem';
+      value.innerHTML = `${signalBarsSvg(status.wifi_rssi, 16, 3)} <span style="color:${signalColor(status.wifi_rssi)}">${signalLabel(status.wifi_rssi)}</span> <span style="color:var(--muted-foreground);font-size:0.8rem">(${status.wifi_rssi} dBm)</span>`;
+      signalRow.appendChild(label);
+      signalRow.appendChild(value);
+      el.appendChild(signalRow);
+    } else {
+      appendInfoRow(el, 'Signal', 'N/A');
+    }
     appendInfoRow(el, 'IP Address', status.ip_address || 'N/A');
   } catch (err) {
     el.textContent = 'Failed to load WiFi info.';
@@ -385,12 +408,12 @@ function bindActions() {
       rebootBtn.disabled = true;
       try {
         await api('POST', '/system/reboot');
-        showToast('Rebooting device...');
         const dialog = document.getElementById('reboot-dialog');
         if (dialog) dialog.close();
+        showToast('Rebooting device... Redirecting to login in 10s.');
+        setTimeout(() => { window.location.replace('#login'); }, 10000);
       } catch (err) {
         showToast('Reboot failed: ' + err.message);
-      } finally {
         rebootBtn.removeAttribute('aria-busy');
         rebootBtn.disabled = false;
       }
@@ -410,9 +433,10 @@ function bindActions() {
       resetBtn.disabled = true;
       try {
         await api('POST', '/system/factory-reset');
-        showToast('Factory reset complete, rebooting...');
         const dialog = document.getElementById('reset-dialog');
         if (dialog) dialog.close();
+        showToast('Factory reset complete. Redirecting to login in 10s.');
+        setTimeout(() => { window.location.replace('#login'); }, 10000);
       } catch (err) {
         showToast('Factory reset failed: ' + err.message);
       } finally {

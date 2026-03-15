@@ -1,4 +1,5 @@
 import { api } from '../lib/api.js';
+import { signalBarsSvg, signalLabel, signalColor, wifiArcsSvg, wifiTooltip, formatSignal } from '../lib/format.js';
 
 let pollTimer = null;
 let lastLoadTime = null;
@@ -76,8 +77,8 @@ const READING_TYPES = {
     label: 'WiFi Signal',
     icon: ICONS.wifi,
     iconColor: 'success',
-    format: (v) => `${v}<span class="stat-unit">dBm</span>`,
-    meta: (_, status) => status.wifi_ssid || '',
+    format: (v) => `<span style="display:inline-flex;align-items:center;gap:0.5rem">${signalBarsSvg(v, 28, 5)} <span style="color:${signalColor(v)}">${signalLabel(v)}</span></span>`,
+    meta: (_, status) => `${status.wifi_ssid || ''} (${status.wifi_rssi} dBm)`,
     system: true,
   },
 };
@@ -213,13 +214,43 @@ async function loadData() {
     api('GET', '/sensors').catch(() => []),
     api('GET', '/events').catch(() => []),
   ]);
+  if (!status) {
+    // Device unreachable — update header to show offline
+    markOffline();
+    return;
+  }
   lastLoadTime = Date.now();
   updateRefreshText();
-  if (!status) return; // Can't render without status
+  markOnline(status);
   const sensorList = Array.isArray(sensors) ? sensors : [];
   const eventList = Array.isArray(events) ? events : [];
   renderStatGrid(status, sensorList);
   renderSections({ status, sensors: sensorList, events: eventList });
+}
+
+function markOffline() {
+  const dot = document.querySelector('#node-id .status-dot');
+  if (dot) dot.className = 'status-dot offline';
+  const wifiEl = document.getElementById('conn-wifi');
+  if (wifiEl) {
+    wifiEl.classList.add('inactive');
+    wifiEl.classList.remove('active');
+    wifiEl.dataset.tooltip = 'WiFi: unreachable';
+    delete wifiEl.dataset.strength;
+  }
+  const refreshEl = document.getElementById('refresh-text');
+  if (refreshEl) refreshEl.textContent = 'Device unreachable';
+}
+
+function markOnline(status) {
+  const dot = document.querySelector('#node-id .status-dot');
+  if (dot) dot.className = 'status-dot online';
+  const wifiEl = document.getElementById('conn-wifi');
+  if (wifiEl && status.wifi_connected) {
+    wifiEl.classList.remove('inactive');
+    wifiEl.innerHTML = wifiArcsSvg(status.wifi_rssi);
+    wifiEl.dataset.tooltip = wifiTooltip(status.wifi_ssid, status.wifi_rssi);
+  }
 }
 
 // ── Stat Grid ──────────────────────────────────────────────────────
@@ -303,7 +334,7 @@ function renderSystemHealth(data) {
     {
       label: 'WiFi',
       value: s.wifi_connected
-        ? `${s.wifi_rssi} dBm`
+        ? formatSignal(s.wifi_rssi)
         : 'Disconnected',
       sub: s.wifi_ssid || null,
     },
