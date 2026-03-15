@@ -93,7 +93,6 @@ const TRANSPORT_ICONS = {
   </svg>`,
 };
 
-const VERSION = '0.7.0';
 const GITHUB_URL = 'https://github.com/SirPangolin/boorker-watchdog';
 
 const routes = {
@@ -162,7 +161,7 @@ function renderShell(pageHtml, showNav) {
       ${pageHtml}
     </main>
     <footer class="app-footer">
-      <span>Boorker Watchdog v${VERSION}</span>
+      <span id="footer-version">Boorker Watchdog</span>
       <span class="footer-sep">&middot;</span>
       <a href="${GITHUB_URL}" target="_blank" rel="noopener noreferrer">SirPangolin/boorker-watchdog</a>
       <span class="footer-sep">&middot;</span>
@@ -283,6 +282,12 @@ async function loadShellStatus() {
         wifiEl.dataset.tooltip = 'WiFi: disconnected';
         delete wifiEl.dataset.strength;
       }
+    }
+
+    // Update footer version from firmware
+    const footerEl = document.getElementById('footer-version');
+    if (footerEl && status.firmware_version) {
+      footerEl.textContent = `Boorker Watchdog v${status.firmware_version}`;
     }
 
     // Future: update other transports from status data when available

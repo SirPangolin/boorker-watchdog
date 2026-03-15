@@ -1,6 +1,13 @@
 const API_BASE = '/api/v1';
 
+// Prevents request storms after session expiry (e.g., post-flash reboot)
+let authRedirectPending = false;
+
 export async function api(method, path, body) {
+  if (authRedirectPending) {
+    throw new ApiError('Session expired', 401, {});
+  }
+
   const opts = {
     method,
     headers: {},
@@ -21,9 +28,12 @@ export async function api(method, path, body) {
   }
 
   if (res.status === 401) {
-    // Only redirect if we're not already on the login page
-    if (window.location.hash !== '#login') {
-      window.location.hash = '#login';
+    if (!authRedirectPending) {
+      authRedirectPending = true;
+      // Use replaceState to avoid polluting history
+      if (window.location.hash !== '#login') {
+        window.location.replace('#login');
+      }
     }
     throw new ApiError(data.message || 'Session expired', 401, data);
   }
@@ -33,6 +43,11 @@ export async function api(method, path, body) {
   }
 
   return data;
+}
+
+/** Reset auth gate after successful login */
+export function clearAuthRedirect() {
+  authRedirectPending = false;
 }
 
 export class ApiError extends Error {
