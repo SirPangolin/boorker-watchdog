@@ -29,7 +29,14 @@ CONFIG_LED_DRIVER_EXTERNAL_GPIO_B=3
 # HTTPS - 2 connections (no PSRAM, each TLS conn ~40-50KB)
 CONFIG_HTTP_SERVER_MAX_CONNECTIONS=2
 
+# Buzzer volumes (50% for audible testing, default 2% is inaudible)
+CONFIG_STATUS_BUZZER_VOLUME_CHIRP=50
+CONFIG_STATUS_BUZZER_VOLUME_DOUBLE_BEEP=50
+CONFIG_STATUS_BUZZER_VOLUME_TRIPLE_BEEP=50
+CONFIG_STATUS_BUZZER_VOLUME_ALARM=50
+CONFIG_STATUS_BUZZER_VOLUME_SOLID=50
+
 # Vext power rail - GPIO36 controls 3.3V to external sensors
-# Must be enabled before sensor drivers init
+# Active LOW (P-channel MOSFET) — LOW = sensors powered
 CONFIG_BOARD_VEXT_ENABLED=y
 CONFIG_BOARD_VEXT_GPIO=36
