@@ -533,4 +533,3 @@ function bindActions() {
   }
 }
 
-// showToast imported from lib/toast.js
