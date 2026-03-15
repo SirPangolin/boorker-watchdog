@@ -497,7 +497,7 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     if (keys_part != NULL) {
         err = esp_partition_erase_range(keys_part, 0, keys_part->size);
         if (err != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to erase nvs_keys: %s — old encryption key retained",
+            ESP_LOGE(TAG, "Failed to erase nvs_keys: %s — will be regenerated on reboot",
                      esp_err_to_name(err));
         } else {
             ESP_LOGI(TAG, "NVS encryption keys erased");
@@ -1337,14 +1337,16 @@ esp_err_t http_server_start(void)
     if (ret == ESP_OK) {
         // Register redirect for all methods the HTTPS server handles
         const httpd_method_t methods[] = {HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE};
+        const char *method_names[] = {"GET", "POST", "PUT", "DELETE"};
         bool handler_ok = true;
-        for (int i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
+        for (size_t i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
             httpd_uri_t redirect_uri = {
                 .uri = "/*",
                 .method = methods[i],
                 .handler = redirect_to_https,
             };
             if (httpd_register_uri_handler(s_redirect_server, &redirect_uri) != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to register redirect for %s", method_names[i]);
                 handler_ok = false;
             }
         }
