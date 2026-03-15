@@ -138,7 +138,8 @@ static bool find_sha256_in_body(const char *body, const char *asset_name,
         search_start = asset_line;
     }
 
-    /* Try from preferred start, then fall back to full body */
+    /* Try from preferred start (near asset name), then fall back to full body.
+     * On the preferred pass, limit to the same line as the asset name. */
     for (int pass = 0; pass < 2; pass++) {
         const char *p = (pass == 0) ? search_start : body;
         /* On second pass, skip if we already searched from the start */
@@ -147,6 +148,10 @@ static bool find_sha256_in_body(const char *body, const char *asset_name,
         }
 
         while (*p != '\0') {
+            /* On pass 0, stop at end of line to prefer same-line matches */
+            if (pass == 0 && (*p == '\n' || *p == '\r')) {
+                break;
+            }
             if (!isxdigit((unsigned char)*p)) {
                 p++;
                 continue;
@@ -160,6 +165,9 @@ static bool find_sha256_in_body(const char *body, const char *asset_name,
             if (count == 64) {
                 memcpy(sha256_out, start, 64);
                 sha256_out[64] = '\0';
+                if (pass == 1) {
+                    ESP_LOGW("ota_github", "SHA-256 found via heuristic (not on same line as asset)");
+                }
                 return true;
             }
         }
@@ -168,8 +176,13 @@ static bool find_sha256_in_body(const char *body, const char *asset_name,
     return false;
 }
 
-esp_err_t ota_github_check_releases(void)
+esp_err_t ota_github_check_releases(ota_update_info_t *out_info, bool *out_available)
 {
+    if (out_info == NULL || out_available == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    *out_available = false;
+
     esp_err_t ret = ESP_FAIL;
     esp_http_client_handle_t client = NULL;
     char *response_buf = NULL;
@@ -224,11 +237,13 @@ esp_err_t ota_github_check_releases(void)
 
     if (status == 403 || status == 429) {
         ESP_LOGW(TAG, "GitHub API rate limited (HTTP %d)", status);
+        ret = ESP_ERR_TIMEOUT;
         goto cleanup;
     }
 
     if (status != 200) {
         ESP_LOGW(TAG, "GitHub API returned HTTP %d", status);
+        ret = ESP_FAIL;
         goto cleanup;
     }
 
@@ -240,12 +255,13 @@ esp_err_t ota_github_check_releases(void)
     response_buf = heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
     if (response_buf == NULL) {
         ESP_LOGE(TAG, "Failed to allocate %d bytes from PSRAM", buf_size);
+        ret = ESP_ERR_NO_MEM;
         goto cleanup;
     }
 
     /* Read response body */
     int total_read = 0;
-    int read_len;
+    int read_len = 0;
     while (total_read < buf_size - 1) {
         read_len = esp_http_client_read(client, response_buf + total_read,
                                         buf_size - 1 - total_read);
@@ -258,8 +274,15 @@ esp_err_t ota_github_check_releases(void)
 
     esp_http_client_close(client);
 
+    if (read_len < 0) {
+        ESP_LOGW(TAG, "HTTP read error during response body");
+        ret = ESP_FAIL;
+        goto cleanup;
+    }
+
     if (total_read == 0) {
         ESP_LOGW(TAG, "Empty response body");
+        ret = ESP_FAIL;
         goto cleanup;
     }
 
@@ -298,9 +321,8 @@ esp_err_t ota_github_check_releases(void)
      * Note: /releases/latest already excludes prereleases by definition,
      * so this check is defensive.  When prerelease channel support is
      * needed, switch to the /releases endpoint and iterate the array. */
-    if (g_ota.channel == 0 && is_prerelease) {
+    if (g_ota.channel == OTA_CHANNEL_STABLE && is_prerelease) {
         ESP_LOGI(TAG, "Skipping prerelease on stable channel");
-        g_ota.update_available = false;
         ret = ESP_OK;
         goto cleanup;
     }
@@ -309,7 +331,6 @@ esp_err_t ota_github_check_releases(void)
     if (!ota_github_version_newer(BOORKER_VERSION_STRING, version)) {
         ESP_LOGI(TAG, "No newer version (current=%s, latest=%s)",
                  BOORKER_VERSION_STRING, version);
-        g_ota.update_available = false;
         ret = ESP_OK;
         goto cleanup;
     }
@@ -317,7 +338,6 @@ esp_err_t ota_github_check_releases(void)
     /* ----- Find .bin asset ----------------------------------------------- */
     if (!cJSON_IsArray(assets_json)) {
         ESP_LOGI(TAG, "No assets array in release");
-        g_ota.update_available = false;
         ret = ESP_OK;
         goto cleanup;
     }
@@ -349,39 +369,40 @@ esp_err_t ota_github_check_releases(void)
 
     if (bin_url == NULL) {
         ESP_LOGI(TAG, "No .bin asset found in release");
-        g_ota.update_available = false;
         ret = ESP_OK;
         goto cleanup;
     }
 
     ESP_LOGI(TAG, "Found asset: %s (%lu bytes)", bin_name, (unsigned long)bin_size);
 
-    /* ----- Populate update_info ------------------------------------------ */
-    memset(&g_ota.update_info, 0, sizeof(g_ota.update_info));
+    /* ----- Populate output info ------------------------------------------ */
+    memset(out_info, 0, sizeof(*out_info));
 
-    strncpy(g_ota.update_info.version, version,
-            sizeof(g_ota.update_info.version) - 1);
-    strncpy(g_ota.update_info.tag_name, tag_name,
-            sizeof(g_ota.update_info.tag_name) - 1);
-    strncpy(g_ota.update_info.download_url, bin_url,
-            sizeof(g_ota.update_info.download_url) - 1);
-    strncpy(g_ota.update_info.release_notes, body_text,
-            sizeof(g_ota.update_info.release_notes) - 1);
+    strncpy(out_info->version, version,
+            sizeof(out_info->version) - 1);
+    strncpy(out_info->tag_name, tag_name,
+            sizeof(out_info->tag_name) - 1);
+    strncpy(out_info->download_url, bin_url,
+            sizeof(out_info->download_url) - 1);
+    strncpy(out_info->release_notes, body_text,
+            sizeof(out_info->release_notes) - 1);
 
-    g_ota.update_info.is_prerelease = is_prerelease;
-    g_ota.update_info.size_bytes = bin_size;
+    out_info->is_prerelease = is_prerelease;
+    out_info->size_bytes = bin_size;
 
     /* Try to find SHA-256 hash in release body */
     if (!find_sha256_in_body(body_text, bin_name,
-                             g_ota.update_info.sha256,
-                             sizeof(g_ota.update_info.sha256))) {
-        ESP_LOGI(TAG, "No SHA-256 hash found in release notes");
-        g_ota.update_info.sha256[0] = '\0';
+                             out_info->sha256,
+                             sizeof(out_info->sha256))) {
+        ESP_LOGW(TAG, "No SHA-256 hash found in release notes — integrity will NOT be verified");
+        out_info->sha256[0] = '\0';
+        out_info->has_sha256 = false;
     } else {
-        ESP_LOGI(TAG, "SHA-256: %.16s...", g_ota.update_info.sha256);
+        ESP_LOGI(TAG, "SHA-256: %.16s...", out_info->sha256);
+        out_info->has_sha256 = true;
     }
 
-    g_ota.update_available = true;
+    *out_available = true;
     ret = ESP_OK;
 
     ESP_LOGI(TAG, "Update available: %s -> %s", BOORKER_VERSION_STRING, version);

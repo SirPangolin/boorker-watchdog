@@ -4,6 +4,8 @@
 #include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "version.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <inttypes.h>
 #include <string.h>
 
@@ -78,9 +80,16 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
                  content_length, info->size_bytes);
     }
 
-    /* Step 3: Read and flash in chunks */
+    /* Step 3: Read and flash in chunks (5 minute total timeout) */
+    const TickType_t download_start = xTaskGetTickCount();
+    const TickType_t max_download_ticks = pdMS_TO_TICKS(5 * 60 * 1000);
     int bytes_read;
     while ((bytes_read = esp_http_client_read(client, buf, buf_size)) > 0) {
+        if ((xTaskGetTickCount() - download_start) > max_download_ticks) {
+            ESP_LOGE(TAG, "Download timeout exceeded (5 minutes)");
+            ret = ESP_ERR_TIMEOUT;
+            goto cleanup;
+        }
         ret = ota_flash_write(buf, bytes_read);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "ota_flash_write failed: %s", esp_err_to_name(ret));
@@ -99,13 +108,15 @@ esp_err_t ota_download_start(const ota_update_info_t *info, ota_progress_cb_t cb
     }
 
     /* Step 4: Verify hash if provided */
-    if (info->sha256[0] != '\0') {
+    if (info->has_sha256) {
         ret = ota_flash_verify_hash(info->sha256);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Hash verification failed: %s", esp_err_to_name(ret));
             goto cleanup;
         }
         ESP_LOGI(TAG, "SHA-256 hash verified");
+    } else {
+        ESP_LOGW(TAG, "No SHA-256 hash available — firmware integrity NOT verified");
     }
 
     /* Finalize: validate image and set boot partition */

@@ -825,7 +825,7 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
             ok = ok && cJSON_AddStringToObject(upd, "release_notes", update.release_notes);
             ok = ok && cJSON_AddNumberToObject(upd, "size_bytes", update.size_bytes);
             ok = ok && cJSON_AddBoolToObject(upd, "is_prerelease", update.is_prerelease);
-            ok = ok && cJSON_AddBoolToObject(upd, "has_sha256", update.sha256[0] != '\0');
+            ok = ok && cJSON_AddBoolToObject(upd, "has_sha256", update.has_sha256);
             ok = ok && cJSON_AddItemToObject(json, "update", upd);
         } else {
             ok = false;
