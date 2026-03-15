@@ -518,20 +518,24 @@ function bindActions() {
         // Step 1: Read file into buffer
         const buffer = await file.arrayBuffer();
 
-        // Step 2: Compute SHA-256 client-side for integrity verification
-        if (progressText) progressText.textContent = 'Computing SHA-256...';
-        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
-        const sha256Hex = [...new Uint8Array(hashBuffer)]
-          .map(b => b.toString(16).padStart(2, '0')).join('');
+        // Step 2: Compute SHA-256 if available (requires secure context — HTTPS or localhost)
+        let sha256Hex = null;
+        if (globalThis.crypto?.subtle) {
+          if (progressText) progressText.textContent = 'Computing SHA-256...';
+          const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+          sha256Hex = [...new Uint8Array(hashBuffer)]
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+        } else {
+          console.warn('Web Crypto API unavailable (not a secure context) — skipping SHA-256 verification');
+        }
 
-        // Step 3: Upload with SHA-256 header for firmware-side verification
+        // Step 3: Upload with optional SHA-256 header for firmware-side verification
         if (progressText) progressText.textContent = `Uploading firmware (${(file.size / 1024 / 1024).toFixed(1)} MB)...`;
+        const headers = { 'Content-Type': 'application/octet-stream' };
+        if (sha256Hex) headers['X-SHA256'] = sha256Hex;
         const res = await fetch('/api/v1/ota', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/octet-stream',
-            'X-SHA256': sha256Hex,
-          },
+          headers,
           body: buffer,
         });
         if (res.status === 401) {
@@ -542,7 +546,9 @@ function bindActions() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.message || `Upload failed (${res.status})`);
         }
-        showToast('Firmware uploaded and verified. Reboot to apply.');
+        showToast(sha256Hex
+          ? 'Firmware uploaded and verified. Reboot to apply.'
+          : 'Firmware uploaded (no SHA-256 verification). Reboot to apply.');
       } catch (err) {
         showToast('Upload failed: ' + err.message);
       } finally {
