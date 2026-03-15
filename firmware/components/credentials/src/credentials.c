@@ -5,7 +5,9 @@
 #include "nvs_flash.h"
 #include "nvs.h"
 #include "mbedtls/pk.h"
+#include "mbedtls/x509.h"
 #include "mbedtls/x509_crt.h"
+#include "mbedtls/asn1.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
@@ -125,6 +127,23 @@ static esp_err_t generate_tls_cert(const char *cn)
 
     // No expiry (no NTP on device)
     ret = mbedtls_x509write_crt_set_validity(&crt, "20250101000000", "99991231235959");
+    if (ret != 0) goto cleanup;
+
+    // SAN extension — required by modern browsers (Chrome 58+) to show "proceed" option
+    char dns_name[48];
+    snprintf(dns_name, sizeof(dns_name), "%s.local", cn);
+    mbedtls_x509_san_list san = {
+        .node = {
+            .type = MBEDTLS_X509_SAN_DNS_NAME,
+            .san = { .unstructured_name = {
+                .tag = MBEDTLS_ASN1_IA5_STRING,
+                .len = strlen(dns_name),
+                .p = (unsigned char *)dns_name,
+            }},
+        },
+        .next = NULL,
+    };
+    ret = mbedtls_x509write_crt_set_subject_alternative_name(&crt, &san);
     if (ret != 0) goto cleanup;
 
     // Write cert PEM
