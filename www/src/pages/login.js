@@ -1,5 +1,5 @@
 import { login, changePassword } from '../lib/auth.js';
-import { ApiError } from '../lib/api.js';
+import { ApiError, clearAuthRedirect } from '../lib/api.js';
 
 let mode = 'login'; // 'login' or 'set-password'
 let keepMode = false; // prevent unmount from resetting mode during re-render
@@ -27,11 +27,11 @@ function renderLogin() {
         <form id="login-form" autocomplete="on">
           <label data-field>
             <span>Username</span>
-            <input type="text" value="admin" readonly>
+            <input type="text" id="username-input" name="username" value="admin" readonly autocomplete="username">
           </label>
           <label data-field>
             <span>Password</span>
-            <input id="password-input" type="password" required autofocus>
+            <input id="password-input" name="password" type="password" required autofocus autocomplete="current-password">
           </label>
           <div id="login-error" role="alert" data-variant="error" hidden></div>
           <button id="login-btn" type="submit" class="btn btn-primary" style="width:100%;margin-top:0.5rem;">Sign In</button>
@@ -51,16 +51,16 @@ function renderSetPassword() {
         <form id="set-password-form" autocomplete="off">
           <label data-field>
             <span>Generated Password</span>
-            <input id="generated-password" type="password" placeholder="From device label or OLED" required>
+            <input id="current-password" name="current-password" type="password" placeholder="From device label or OLED" required autocomplete="current-password">
             <small>Check the label on your device or the OLED display</small>
           </label>
           <label data-field>
             <span>New Password</span>
-            <input id="new-password" type="password" minlength="8" placeholder="Min 8 characters" required>
+            <input id="new-password" name="new-password" type="password" minlength="8" placeholder="Min 8 characters" required autocomplete="new-password">
           </label>
           <label data-field>
             <span>Confirm Password</span>
-            <input id="confirm-password" type="password" placeholder="Re-enter new password" required>
+            <input id="confirm-password" name="confirm-password" type="password" placeholder="Re-enter new password" required autocomplete="new-password">
             <small id="confirm-hint"></small>
           </label>
           <div id="set-password-error" role="alert" data-variant="error" hidden></div>
@@ -108,7 +108,8 @@ function mountLogin() {
         return;
       }
 
-      // Success — update session and navigate to dashboard
+      // Success — clear auth gate and navigate to dashboard
+      clearAuthRedirect();
       const { setSession } = await import('../app.js');
       setSession({ authenticated: true, claimed: true });
       window.location.hash = '#dashboard';
@@ -133,7 +134,7 @@ function mountLogin() {
 
 function mountSetPassword() {
   const form = document.getElementById('set-password-form');
-  const generatedInput = document.getElementById('generated-password');
+  const generatedInput = document.getElementById('current-password');
   const newInput = document.getElementById('new-password');
   const confirmInput = document.getElementById('confirm-password');
   const hint = document.getElementById('confirm-hint');
@@ -187,6 +188,7 @@ function mountSetPassword() {
     try {
       await changePassword(generatedPassword, newPassword);
       await login('admin', newPassword);
+      clearAuthRedirect();
       const { setSession } = await import('../app.js');
       setSession({ authenticated: true, claimed: true });
       window.location.hash = '#dashboard';

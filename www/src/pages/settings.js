@@ -68,7 +68,8 @@ export function render() {
             <strong>Upload Firmware</strong>
             <small>Manually upload a .bin firmware file.</small>
           </div>
-          <input type="file" id="ota-file-input" accept=".bin">
+          <input type="file" id="ota-file-input" name="firmware" accept=".bin">
+          <button id="ota-upload-btn" class="outline file-upload-btn" type="button">Upload File</button>
         </div>
       </div>
     </details>
@@ -116,7 +117,7 @@ export function render() {
         </header>
         <div style="padding: 0 1rem;">
           <label for="reset-confirm-input">Type the device name to confirm:</label>
-          <input type="text" id="reset-confirm-input" autocomplete="off" placeholder="Device name">
+          <input type="text" id="reset-confirm-input" name="reset-confirm" autocomplete="off" placeholder="Device name">
         </div>
         <footer>
           <button type="button" id="reset-cancel-btn" class="outline">Cancel</button>
@@ -191,7 +192,7 @@ async function loadDeviceInfo() {
     const rows = [
       settingsRow('Device Name', status.device_name || 'Unknown'),
       settingsRow('Firmware', 'v' + (info.version || '?')),
-      settingsRow('ESP-IDF', 'v' + (info.idf_version || '?')),
+      settingsRow('ESP-IDF', info.idf_version || '?'),
       settingsRow('Uptime', formatUptime(status.uptime_seconds)),
       settingsRow('Heap Free', formatBytes(status.heap_free, 'KB') + ' / ' + formatBytes(status.heap_total, 'KB')),
       settingsRow('PSRAM Free', formatBytes(status.psram_free, 'MB') + ' / ' + formatBytes(status.psram_total, 'MB')),
@@ -457,8 +458,12 @@ function bindActions() {
     });
   }
 
-  // OTA Upload firmware
+  // OTA Upload firmware — styled button triggers hidden file input
   const fileInput = document.getElementById('ota-file-input');
+  const uploadBtn = document.getElementById('ota-upload-btn');
+  if (uploadBtn && fileInput) {
+    uploadBtn.addEventListener('click', () => fileInput.click());
+  }
   if (fileInput) {
     fileInput.addEventListener('change', async () => {
       const file = fileInput.files[0];

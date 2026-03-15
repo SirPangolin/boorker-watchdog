@@ -533,6 +533,9 @@ static esp_err_t api_system_status(httpd_req_t *req)
     // Check all cJSON_Add* return values for NULL (allocation failure)
     bool ok = true;
 
+    // Firmware version
+    ok = ok && cJSON_AddStringToObject(json, "firmware_version", BOORKER_VERSION_STRING);
+
     // Device identity
     const credentials_t *id = credentials_get();
     if (id) {

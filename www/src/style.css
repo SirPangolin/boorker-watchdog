@@ -539,6 +539,17 @@ details[name="settings"][open] summary {
   margin-top: 0.125rem;
 }
 
+.settings-row button,
+.settings-row .file-upload-btn {
+  min-width: 10rem;
+  flex-shrink: 0;
+}
+
+/* Hide native file input, use styled button trigger */
+.settings-row input[type="file"] {
+  display: none;
+}
+
 /* ===== OTA PROGRESS ===== */
 #ota-progress { padding: 1rem 0; }
 #ota-progress progress { width: 100%; }
