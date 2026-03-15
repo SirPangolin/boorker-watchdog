@@ -325,11 +325,12 @@ void app_main(void)
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     // Enable Vext power rail for external sensors (Heltec V3)
+    // Active LOW — P-channel MOSFET, GPIO LOW = Vext ON
     // Must happen before any sensor driver init
 #if CONFIG_BOARD_VEXT_ENABLED
     gpio_set_direction(CONFIG_BOARD_VEXT_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 1);
-    ESP_LOGI(TAG, "Vext enabled on GPIO %d", CONFIG_BOARD_VEXT_GPIO);
+    gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 0);  // LOW = Vext ON
+    ESP_LOGI(TAG, "Vext enabled on GPIO %d (active LOW)", CONFIG_BOARD_VEXT_GPIO);
 #endif
 
     // Initialize device state early (others depend on claimed status)

@@ -15,6 +15,7 @@ menu "Board Configuration"
         depends on BOARD_VEXT_ENABLED
         range 0 48
         help
-            GPIO that controls the Vext power rail. HIGH = sensors powered.
+            GPIO that controls the Vext power rail.
+            Active LOW — P-channel MOSFET. LOW = sensors powered.
 
 endmenu
