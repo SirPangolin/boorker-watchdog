@@ -515,10 +515,23 @@ function bindActions() {
       if (progressText) progressText.textContent = 'Uploading firmware...';
 
       try {
+        // Step 1: Read file into buffer
         const buffer = await file.arrayBuffer();
+
+        // Step 2: Compute SHA-256 client-side for integrity verification
+        if (progressText) progressText.textContent = 'Computing SHA-256...';
+        const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
+        const sha256Hex = [...new Uint8Array(hashBuffer)]
+          .map(b => b.toString(16).padStart(2, '0')).join('');
+
+        // Step 3: Upload with SHA-256 header for firmware-side verification
+        if (progressText) progressText.textContent = `Uploading firmware (${(file.size / 1024 / 1024).toFixed(1)} MB)...`;
         const res = await fetch('/api/v1/ota', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/octet-stream' },
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-SHA256': sha256Hex,
+          },
           body: buffer,
         });
         if (res.status === 401) {
@@ -529,7 +542,7 @@ function bindActions() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.message || `Upload failed (${res.status})`);
         }
-        showToast('Firmware uploaded. Reboot to apply.');
+        showToast('Firmware uploaded and verified. Reboot to apply.');
       } catch (err) {
         showToast('Upload failed: ' + err.message);
       } finally {
