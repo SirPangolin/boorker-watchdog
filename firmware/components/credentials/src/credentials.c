@@ -6,7 +6,6 @@
 #include "nvs.h"
 #include "mbedtls/pk.h"
 #include "mbedtls/x509_crt.h"
-#include "mbedtls/x509write_crt.h"
 #include "mbedtls/entropy.h"
 #include "mbedtls/ctr_drbg.h"
 #include "mbedtls/error.h"
@@ -84,14 +83,13 @@ static esp_err_t generate_tls_cert(const char *cn)
     mbedtls_x509write_cert crt;
     mbedtls_entropy_context entropy;
     mbedtls_ctr_drbg_context ctr_drbg;
-    mbedtls_mpi serial;
+    unsigned char serial[8];
     char subject[64];
 
     mbedtls_pk_init(&key);
     mbedtls_x509write_crt_init(&crt);
     mbedtls_entropy_init(&entropy);
     mbedtls_ctr_drbg_init(&ctr_drbg);
-    mbedtls_mpi_init(&serial);
 
     ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
     if (ret != 0) goto cleanup;
@@ -116,9 +114,9 @@ static esp_err_t generate_tls_cert(const char *cn)
     if (ret != 0) goto cleanup;
 
     // Random serial number
-    ret = mbedtls_mpi_fill_random(&serial, 8, mbedtls_ctr_drbg_random, &ctr_drbg);
+    ret = mbedtls_ctr_drbg_random(&ctr_drbg, serial, sizeof(serial));
     if (ret != 0) goto cleanup;
-    ret = mbedtls_x509write_crt_set_serial(&crt, &serial);
+    ret = mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial));
     if (ret != 0) goto cleanup;
 
     // No expiry (no NTP on device)
@@ -137,7 +135,6 @@ static esp_err_t generate_tls_cert(const char *cn)
     ESP_LOGI(TAG, "TLS certificate generated (ECDSA P-256, CN=%s)", cn);
 
 cleanup:
-    mbedtls_mpi_free(&serial);
     mbedtls_ctr_drbg_free(&ctr_drbg);
     mbedtls_entropy_free(&entropy);
     mbedtls_x509write_crt_free(&crt);
