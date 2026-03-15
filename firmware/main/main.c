@@ -32,7 +32,7 @@ static const char *TAG = "boorker";
 #if CONFIG_TS_MGR_ENABLED
 static void tailscale_callback(ts_mgr_event_t event, void *ctx)
 {
-    char ip[16];
+    char ip[16] = {0};
     switch (event) {
         case TS_MGR_EVENT_CONNECTED:
             event_bus_clear_state(EVENT_TAILSCALE_CONNECTING);
@@ -223,7 +223,11 @@ static esp_err_t nvs_full_wipe_and_reinit(const esp_partition_t *keys_part)
         return ret;
     }
 
-    return nvs_flash_secure_init(&sec_cfg);
+    ret = nvs_flash_secure_init(&sec_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS secure init failed after full wipe: %s", esp_err_to_name(ret));
+    }
+    return ret;
 }
 
 static esp_err_t init_nvs_encrypted(void)
@@ -233,7 +237,13 @@ static esp_err_t init_nvs_encrypted(void)
     if (keys_part == NULL) {
         ESP_LOGE(TAG, "nvs_keys partition not found — check partition table!");
         ESP_LOGW(TAG, "Falling back to UNENCRYPTED NVS — credentials stored in plaintext");
-        return nvs_flash_init();
+        esp_err_t ret = nvs_flash_init();
+        if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+            ESP_LOGW(TAG, "NVS needs erase (%s)", esp_err_to_name(ret));
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_init();
+        }
+        return ret;
     }
 
     nvs_sec_cfg_t sec_cfg;
@@ -412,7 +422,7 @@ void app_main(void)
                         pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Get WiFi IP address
-    char ip[16];
+    char ip[16] = {0};
     if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }

@@ -148,6 +148,8 @@ cleanup:
         char err_buf[128];
         mbedtls_strerror(ret, err_buf, sizeof(err_buf));
         ESP_LOGE(TAG, "TLS cert generation failed: %s (-0x%04X)", err_buf, -ret);
+        memset(s_tls_cert, 0, sizeof(s_tls_cert));
+        memset(s_tls_key, 0, sizeof(s_tls_key));
         return ESP_FAIL;
     }
     return ESP_OK;
@@ -298,6 +300,16 @@ static esp_err_t load_or_generate_credentials(void)
             s_tls_key[0] = '\0';
         }
 
+        // Detect cert/key mismatch (partial NVS corruption)
+        bool have_cert = (s_tls_cert[0] != '\0');
+        bool have_key = (s_tls_key[0] != '\0');
+        if (have_cert != have_key) {
+            ESP_LOGE(TAG, "TLS cert/key mismatch (cert=%s, key=%s) — clearing both",
+                     have_cert ? "found" : "missing", have_key ? "found" : "missing");
+            memset(s_tls_cert, 0, sizeof(s_tls_cert));
+            memset(s_tls_key, 0, sizeof(s_tls_key));
+        }
+
         ESP_LOGI(TAG, "Credentials loaded and validated for %s", s_cred.node_name);
         ret = ESP_OK;  // Ensure success return
     } else {
@@ -411,7 +423,8 @@ esp_err_t credentials_regenerate(void)
 
     nvs_close(handle);
 
-    // Scrub sensitive material before regeneration
+    // Scrub all sensitive material before regeneration
+    memset(&s_cred, 0, sizeof(s_cred));
     memset(s_tls_key, 0, sizeof(s_tls_key));
     memset(s_tls_cert, 0, sizeof(s_tls_cert));
 
