@@ -1,0 +1,20 @@
+{
+  "name": "boorker-watchdog-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:mock": "VITE_MOCK=true vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "bash scripts/deploy.sh"
+  },
+  "dependencies": {
+    "@knadh/oat": "^0.4.2",
+    "@someshkar/oat-chips": "^1.0.1",
+    "oat-animate": "^1.2.1"
+  },
+  "devDependencies": {
+    "vite": "^7.3.1"
+  }
+}

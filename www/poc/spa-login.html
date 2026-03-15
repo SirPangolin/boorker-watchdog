@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sign In • Boorker Watchdog</title>
+
+  <!-- OAT Core + Extensions -->
+  <link rel="stylesheet" href="https://unpkg.com/@knadh/oat/oat.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/oat-animate/oat-animate.css">
+  <script src="https://unpkg.com/@knadh/oat/oat.min.js" defer></script>
+  <script src="https://unpkg.com/oat-animate/oat-animate.js" defer></script>
+
+  <style>
+    /* ===== THEME (consistent with other SPA pages) ===== */
+    :root {
+      --background: #fbfafd; --foreground: #1f1f23; --card: #ffffff;
+      --card-foreground: #1f1f23; --muted: #f0eff4; --muted-foreground: #71717a;
+      --border: #dcdce0; --primary: #0891b2; --primary-hover: #06b6d4;
+      --primary-foreground: #ffffff; --success: #16a34a; --success-bg: rgba(22, 163, 74, 0.1);
+      --warning: #ea580c; --warning-bg: rgba(234, 88, 12, 0.1);
+      --danger: #dc2626; --danger-bg: rgba(220, 38, 38, 0.1);
+      --radius: 0.5rem; --shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
+    }
+    [data-theme="dark"] {
+      --background: #0f0e13; --foreground: #e4e4e7; --card: #1a191f;
+      --card-foreground: #e4e4e7; --muted: #242329; --muted-foreground: #a1a1aa;
+      --border: #2e2d35; --primary: #22d3ee; --primary-hover: #67e8f9;
+      --primary-foreground: #0f0e13; --success: #22c55e; --success-bg: rgba(34, 197, 94, 0.15);
+      --warning: #f97316; --warning-bg: rgba(249, 115, 22, 0.15);
+      --danger: #ef4444; --danger-bg: rgba(239, 68, 68, 0.15);
+      --shadow: 0 4px 32px rgba(0,0,0,0.4), 0 1px 4px rgba(0,0,0,0.2);
+    }
+    :root {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #ffffff;
+    }
+    [data-theme="dark"] {
+      --secondary: var(--muted);
+      --secondary-foreground: var(--foreground);
+      --danger-foreground: #0f0e13;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; }
+    body, h1, h2, h3, h4, p, ul, ol { margin: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+                   'Noto Sans', Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+      background: var(--background);
+      color: var(--foreground);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      background-image: radial-gradient(ellipse at top, rgba(34, 211, 238, 0.03) 0%, transparent 50%);
+    }
+
+    /* Theme toggle */
+    .theme-toggle {
+      position: fixed; top: 1rem; right: 1rem;
+      display: grid; place-items: center; width: 40px; height: 40px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer;
+      color: var(--muted-foreground); transition: all 0.15s;
+    }
+    .theme-toggle:hover { color: var(--foreground); border-color: var(--primary); }
+    .theme-toggle svg { width: 18px; height: 18px; }
+
+    /* Page switcher (for POC demo) */
+    .page-switcher {
+      position: fixed; top: 1rem; left: 1rem;
+      display: flex; gap: 0.25rem; background: var(--card);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 0.25rem;
+    }
+    .page-switcher button {
+      padding: 0.375rem 0.75rem; font-size: 0.75rem; font-weight: 500;
+      background: transparent; border: none; border-radius: calc(var(--radius) - 2px);
+      color: var(--muted-foreground); cursor: pointer; transition: all 0.15s;
+    }
+    .page-switcher button:hover { color: var(--foreground); }
+    .page-switcher button.active { background: var(--primary); color: var(--primary-foreground); }
+
+    /* Help link */
+    .help-link {
+      position: fixed; top: 1rem; right: 4rem;
+      display: grid; place-items: center; width: 40px; height: 40px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); cursor: pointer;
+      color: var(--muted-foreground); transition: all 0.15s; text-decoration: none;
+    }
+    .help-link:hover { color: var(--foreground); border-color: var(--primary); }
+    .help-link svg { width: 18px; height: 18px; }
+
+    /* MOTD Banner */
+    .motd-banner {
+      position: fixed; top: 0; left: 0; right: 0;
+      background: rgba(34, 211, 238, 0.1); border-bottom: 1px solid rgba(34, 211, 238, 0.3);
+      padding: 0.5rem 1rem; font-size: 0.8125rem; text-align: center;
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .motd-banner a { color: var(--primary); }
+    .motd-banner .dismiss {
+      position: absolute; right: 0.75rem; background: none; border: none;
+      color: var(--muted-foreground); cursor: pointer; padding: 0.25rem;
+    }
+    .motd-banner .dismiss:hover { color: var(--foreground); }
+    .motd-banner.hidden { display: none; }
+
+    /* Logo */
+    .logo-section {
+      display: flex; flex-direction: column; align-items: center;
+      margin-bottom: 2rem;
+    }
+    .logo { width: 56px; height: 56px; }
+    .brand-name {
+      font-size: 0.6875rem; font-weight: 600; letter-spacing: 0.15em;
+      text-transform: uppercase; color: var(--muted-foreground); margin-top: 0.75rem;
+    }
+
+    /* Auth card */
+    .auth-card {
+      width: 100%; max-width: 400px;
+      background: var(--card); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 2rem;
+      box-shadow: var(--shadow);
+    }
+    .auth-card h1 {
+      font-size: 1.375rem; font-weight: 600; text-align: center;
+      margin-bottom: 0.25rem;
+    }
+    .auth-card .subtitle {
+      font-size: 0.875rem; text-align: center;
+      color: var(--muted-foreground); margin-bottom: 1.5rem;
+    }
+
+    /* Form fields */
+    .field { margin-bottom: 1.25rem; }
+    .field label {
+      display: block; font-size: 0.8125rem; font-weight: 500;
+      margin-bottom: 0.5rem;
+    }
+    .field input {
+      width: 100%; padding: 0.75rem 1rem; font-size: 0.9375rem;
+      background: var(--muted); border: 1px solid var(--border);
+      border-radius: var(--radius); color: var(--foreground);
+      transition: all 0.15s;
+    }
+    .field input:focus {
+      outline: none; border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.12); background: var(--card);
+    }
+    .field input::placeholder { color: var(--muted-foreground); }
+    .field input[readonly] { opacity: 0.6; cursor: not-allowed; }
+    .field .hint {
+      font-size: 0.75rem; color: var(--muted-foreground); margin-top: 0.375rem;
+    }
+
+    /* Divider */
+    .divider {
+      height: 1px; margin: 1.5rem 0;
+      background: linear-gradient(90deg, transparent, var(--border), transparent);
+    }
+
+    /* Primary submit button */
+    .btn-submit {
+      width: 100%; padding: 0.75rem 1rem; font-size: 0.9375rem; font-weight: 500;
+      background: var(--primary); color: var(--primary-foreground);
+      border: none; border-radius: var(--radius); cursor: pointer;
+      transition: all 0.15s; display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+    }
+    .btn-submit:hover { background: var(--primary-hover); transform: translateY(-1px); }
+    .btn-submit:active { transform: translateY(0); }
+    .btn-submit:disabled { opacity: 0.7; cursor: not-allowed; transform: none; }
+    .btn-submit .spinner {
+      width: 16px; height: 16px; border: 2px solid transparent;
+      border-top-color: currentColor; border-radius: 50%;
+      animation: spin 0.6s linear infinite; display: none;
+    }
+    .btn-submit.loading .spinner { display: block; }
+    .btn-submit.loading .btn-text { display: none; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Alerts */
+    .alert {
+      display: none; align-items: center; gap: 0.5rem;
+      padding: 0.75rem 1rem; font-size: 0.875rem;
+      border-radius: var(--radius); margin-bottom: 1.25rem;
+    }
+    .alert.visible { display: flex; }
+    .alert svg { flex-shrink: 0; width: 16px; height: 16px; }
+    .alert.danger { background: var(--danger-bg); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); }
+    .alert.success { background: var(--success-bg); border: 1px solid rgba(34, 197, 94, 0.3); color: var(--success); }
+
+    /* Footer link */
+    .footer-link { text-align: center; margin-top: 1.5rem; }
+    .footer-link a {
+      font-size: 0.875rem; color: var(--primary); text-decoration: none;
+    }
+    .footer-link a:hover { text-decoration: underline; }
+
+    /* Status indicator */
+    .status-footer {
+      position: fixed; bottom: 1rem;
+      display: flex; align-items: center; gap: 0.5rem;
+      font-size: 0.75rem; color: var(--muted-foreground);
+    }
+    .status-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--success); box-shadow: 0 0 6px var(--success);
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+
+    /* Page visibility */
+    .page { display: none; }
+    .page.active { display: block; }
+  </style>
+</head>
+<body>
+  <!-- MOTD Banner -->
+  <div class="motd-banner" id="motd-banner">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
+    </svg>
+    <span>Update available: <strong>v0.8.0</strong> — <a href="https://github.com/SirPangolin/boorker-watchdog/releases" target="_blank">View release notes</a></span>
+    <button class="dismiss" onclick="dismissMotd()" title="Dismiss">&times;</button>
+  </div>
+
+  <!-- Help link -->
+  <a href="https://github.com/SirPangolin/boorker-watchdog/wiki" target="_blank" class="help-link" title="Documentation">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+    </svg>
+  </a>
+
+  <!-- Theme toggle -->
+  <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+    </svg>
+  </button>
+
+  <!-- Page switcher (POC demo only) -->
+  <nav class="page-switcher">
+    <button class="active" onclick="showPage('login')">Login</button>
+    <button onclick="showPage('change')">Change Password</button>
+  </nav>
+
+  <!-- Logo -->
+  <div class="logo-section" ot-animate="fade-down">
+    <svg class="logo" viewBox="0 0 32 32" fill="none">
+      <rect width="32" height="32" rx="8" fill="currentColor" style="color: var(--primary)"/>
+      <path d="M8 16c0-4.4 3.6-8 8-8s8 3.6 8 8" stroke="var(--primary-foreground)" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="16" cy="16" r="3" fill="var(--primary-foreground)"/>
+      <path d="M16 19v5M13 24h6" stroke="var(--primary-foreground)" stroke-width="2" stroke-linecap="round"/>
+    </svg>
+    <span class="brand-name">Boorker Watchdog</span>
+  </div>
+
+  <!-- Login Page -->
+  <article class="auth-card page active" id="login-page" ot-animate="fade-up" style="--ot-delay: 0.1s">
+    <h1>Welcome back</h1>
+    <p class="subtitle">Sign in to access your device</p>
+
+    <div class="alert danger" id="login-error">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span>Invalid password. Please try again.</span>
+    </div>
+
+    <form id="login-form">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" id="username" value="admin" readonly>
+      </div>
+
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" id="password" placeholder="Enter your password" autofocus>
+      </div>
+
+      <button type="submit" class="btn-submit" id="login-btn">
+        <span class="btn-text">Sign in</span>
+        <span class="spinner"></span>
+      </button>
+    </form>
+  </article>
+
+  <!-- Change Password Page -->
+  <article class="auth-card page" id="change-page" ot-animate="fade-up" style="--ot-delay: 0.1s">
+    <h1>Change Password</h1>
+    <p class="subtitle">Enter your current password and choose a new one</p>
+
+    <div class="alert danger" id="change-error">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <span>Passwords do not match</span>
+    </div>
+
+    <div class="alert success" id="change-success">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <polyline points="20 6 9 17 4 12"/>
+      </svg>
+      <span>Password changed successfully!</span>
+    </div>
+
+    <form id="change-form">
+      <div class="field">
+        <label for="change-username">Username</label>
+        <input type="text" id="change-username" value="admin" readonly>
+      </div>
+
+      <div class="field">
+        <label for="current-password">Current password</label>
+        <input type="password" id="current-password" placeholder="Enter current password">
+        <div class="hint">First boot? Use the password from device label</div>
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="field">
+        <label for="new-password">New password</label>
+        <input type="password" id="new-password" placeholder="Choose your password">
+        <div class="hint">Must be at least 8 characters</div>
+      </div>
+
+      <div class="field">
+        <label for="confirm-password">Confirm new password</label>
+        <input type="password" id="confirm-password" placeholder="Re-enter new password">
+        <div class="hint mismatch" id="mismatch-warning" style="color: var(--danger); display: none;">Passwords do not match</div>
+      </div>
+
+      <button type="submit" class="btn-submit" id="change-btn">
+        <span class="btn-text">Change password</span>
+        <span class="spinner"></span>
+      </button>
+    </form>
+
+    <div class="footer-link">
+      <a href="#" onclick="showPage('login'); return false;">Back to login</a>
+    </div>
+  </article>
+
+  <!-- Status indicator -->
+  <div class="status-footer">
+    <span class="status-dot"></span>
+    <span>boorker-a1b2 • online</span>
+  </div>
+
+  <script>
+    function showPage(page) {
+      document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+      document.querySelectorAll('.page-switcher button').forEach(b => b.classList.remove('active'));
+      document.getElementById(page + '-page').classList.add('active');
+      document.querySelector(`.page-switcher button[onclick*="${page}"]`).classList.add('active');
+    }
+
+    function toggleTheme() {
+      const html = document.documentElement;
+      html.dataset.theme = html.dataset.theme === 'dark' ? 'light' : 'dark';
+    }
+
+    function dismissMotd() {
+      document.getElementById('motd-banner').classList.add('hidden');
+      document.body.style.paddingTop = '1rem';
+    }
+
+    // Adjust body padding for MOTD
+    if (!document.getElementById('motd-banner').classList.contains('hidden')) {
+      document.body.style.paddingTop = '3rem';
+    }
+
+    // Demo form handlers
+    document.getElementById('login-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('login-btn');
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      await new Promise(r => setTimeout(r, 1000));
+
+      btn.classList.remove('loading');
+      btn.disabled = false;
+
+      const error = document.getElementById('login-error');
+      error.classList.add('visible');
+      setTimeout(() => error.classList.remove('visible'), 3000);
+    });
+
+    // Real-time password match validation
+    const newPwField = document.getElementById('new-password');
+    const confirmPwField = document.getElementById('confirm-password');
+    const mismatchWarning = document.getElementById('mismatch-warning');
+
+    function checkPasswordMatch() {
+      const newPw = newPwField.value;
+      const confirmPw = confirmPwField.value;
+      if (confirmPw.length > 0 && newPw !== confirmPw) {
+        mismatchWarning.style.display = 'block';
+        confirmPwField.style.borderColor = 'var(--danger)';
+      } else {
+        mismatchWarning.style.display = 'none';
+        confirmPwField.style.borderColor = '';
+      }
+    }
+
+    newPwField.addEventListener('input', checkPasswordMatch);
+    confirmPwField.addEventListener('input', checkPasswordMatch);
+
+    document.getElementById('change-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('change-btn');
+      const error = document.getElementById('change-error');
+
+      const currentPw = document.getElementById('current-password').value;
+      const newPw = document.getElementById('new-password').value;
+      const confirmPw = document.getElementById('confirm-password').value;
+
+      // Validate before submitting
+      if (!currentPw) {
+        error.querySelector('span').textContent = 'Enter your current password';
+        error.classList.add('visible');
+        setTimeout(() => error.classList.remove('visible'), 3000);
+        return;
+      }
+
+      if (newPw.length < 8) {
+        error.querySelector('span').textContent = 'New password must be at least 8 characters';
+        error.classList.add('visible');
+        setTimeout(() => error.classList.remove('visible'), 3000);
+        return;
+      }
+
+      if (newPw !== confirmPw) {
+        error.querySelector('span').textContent = 'Passwords do not match';
+        error.classList.add('visible');
+        setTimeout(() => error.classList.remove('visible'), 3000);
+        return;
+      }
+
+      btn.classList.add('loading');
+      btn.disabled = true;
+
+      await new Promise(r => setTimeout(r, 1000));
+
+      btn.classList.remove('loading');
+      btn.disabled = false;
+
+      // Demo: simulate success
+      const success = document.getElementById('change-success');
+      success.classList.add('visible');
+      setTimeout(() => {
+        success.classList.remove('visible');
+        showPage('login');
+      }, 2000);
+    });
+  </script>
+</body>
+</html>

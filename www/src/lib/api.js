@@ -1,0 +1,73 @@
+const API_BASE = '/api/v1';
+
+// Prevents request storms after session expiry (e.g., post-flash reboot)
+let authRedirectPending = false;
+
+export async function api(method, path, body) {
+  if (authRedirectPending) {
+    throw new ApiError('Session expired', 401, {});
+  }
+
+  const opts = {
+    method,
+    headers: {},
+  };
+
+  if (body !== undefined) {
+    opts.headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
+
+  const res = await fetch(`${API_BASE}${path}`, opts);
+
+  // Parse response — try JSON first, fall back to raw text for error context
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text ? { _rawBody: text } : {};
+  }
+
+  if (res.status === 401) {
+    // Don't gate auth redirects for login attempts — 401 is expected for wrong password
+    const isLoginAttempt = path === '/auth/login' || path === '/auth/password';
+    if (!isLoginAttempt && !authRedirectPending) {
+      authRedirectPending = true;
+      // Show session expired banner via the unified banner system
+      import('./banner.js').then(({ showBanner, BANNER_PRIORITY }) => {
+        showBanner('session-expired', BANNER_PRIORITY.SESSION_EXPIRED, {
+          message: 'Session expired \u2014 redirecting to login...',
+          variant: 'warning',
+          dismissable: false,
+        });
+      }).catch((err) => console.error('Failed to load banner module:', err));
+      setTimeout(() => {
+        if (window.location.hash !== '#login') {
+          window.location.replace('#login');
+        }
+      }, 2000);
+    }
+    throw new ApiError(data.message || 'Session expired', 401, data);
+  }
+
+  if (!res.ok) {
+    throw new ApiError(data.message || data.error || data._rawBody || `Request failed (${res.status})`, res.status, data);
+  }
+
+  return data;
+}
+
+/** Reset auth gate after successful login */
+export function clearAuthRedirect() {
+  authRedirectPending = false;
+}
+
+export class ApiError extends Error {
+  constructor(message, status, data) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+    this.data = data;
+  }
+}
