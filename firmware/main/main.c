@@ -415,7 +415,11 @@ void app_main(void)
             // Continue without web server
         } else {
             if (ip[0] != '\0') {
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+                ESP_LOGI(TAG, "Web server running at https://%s/", ip);
+#else
                 ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+#endif
             } else {
                 ESP_LOGI(TAG, "Web server started");
             }
