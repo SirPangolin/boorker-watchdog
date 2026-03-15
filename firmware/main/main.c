@@ -7,6 +7,9 @@
 #include "esp_console.h"
 #include "nvs_flash.h"
 #include "esp_partition.h"
+#if CONFIG_BOARD_VEXT_ENABLED
+#include "driver/gpio.h"
+#endif
 
 #include "version.h"
 #include "wifi_manager.h"
@@ -320,6 +323,14 @@ void app_main(void)
     ESP_ERROR_CHECK(init_nvs_encrypted());
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+    // Enable Vext power rail for external sensors (Heltec V3)
+    // Must happen before any sensor driver init
+#if CONFIG_BOARD_VEXT_ENABLED
+    gpio_set_direction(CONFIG_BOARD_VEXT_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 1);
+    ESP_LOGI(TAG, "Vext enabled on GPIO %d", CONFIG_BOARD_VEXT_GPIO);
+#endif
 
     // Initialize device state early (others depend on claimed status)
     esp_err_t ret = system_state_init();
