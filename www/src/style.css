@@ -166,11 +166,6 @@
 
 .conn-item.active { color: var(--success); }
 
-/* WiFi signal strength coloring */
-.conn-item[data-strength="strong"] { color: var(--success); }
-.conn-item[data-strength="fair"] { color: var(--warning); }
-.conn-item[data-strength="weak"] { color: var(--danger); }
-
 .conn-sep {
   width: 1px;
   height: 14px;

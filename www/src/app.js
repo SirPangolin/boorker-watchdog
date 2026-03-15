@@ -11,6 +11,7 @@ import 'oat-animate/oat-animate/oat-animate.js';
 import { initTheme, toggleTheme } from './lib/theme.js';
 import { checkSession, logout } from './lib/auth.js';
 import { api } from './lib/api.js';
+import { wifiArcsSvg, wifiTooltip } from './lib/format.js';
 import * as loginPage from './pages/login.js';
 import * as dashboardPage from './pages/dashboard.js';
 import * as settingsPage from './pages/settings.js';
@@ -267,20 +268,16 @@ async function loadShellStatus() {
       nodeIdEl.appendChild(text);
     }
 
-    // WiFi transport
+    // WiFi transport — update arcs SVG and tooltip
     if (wifiEl) {
       if (status.wifi_connected) {
         wifiEl.classList.remove('inactive');
-        wifiEl.classList.add('active');
-        const rssi = status.wifi_rssi || 0;
-        const strength = rssi > -50 ? 'strong' : rssi > -70 ? 'fair' : 'weak';
-        wifiEl.dataset.tooltip = `WiFi: ${status.wifi_ssid || 'connected'} (${rssi} dBm)`;
-        wifiEl.dataset.strength = strength;
+        wifiEl.innerHTML = wifiArcsSvg(status.wifi_rssi);
+        wifiEl.dataset.tooltip = wifiTooltip(status.wifi_ssid, status.wifi_rssi);
       } else {
         wifiEl.classList.add('inactive');
-        wifiEl.classList.remove('active');
+        wifiEl.innerHTML = wifiArcsSvg(null);
         wifiEl.dataset.tooltip = 'WiFi: disconnected';
-        delete wifiEl.dataset.strength;
       }
     }
 

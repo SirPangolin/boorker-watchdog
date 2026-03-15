@@ -28,9 +28,10 @@ export async function api(method, path, body) {
   }
 
   if (res.status === 401) {
-    if (!authRedirectPending) {
+    // Don't gate auth redirects for login attempts — 401 is expected for wrong password
+    const isLoginAttempt = path === '/auth/login' || path === '/auth/password';
+    if (!isLoginAttempt && !authRedirectPending) {
       authRedirectPending = true;
-      // Use replaceState to avoid polluting history
       if (window.location.hash !== '#login') {
         window.location.replace('#login');
       }
