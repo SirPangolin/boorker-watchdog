@@ -46,7 +46,14 @@ function mockApiPlugin() {
           let body = '';
           req.on('data', c => body += c);
           req.on('end', () => {
-            const { password } = JSON.parse(body);
+            let parsed;
+            try { parsed = JSON.parse(body); } catch {
+              res.statusCode = 400;
+              res.setHeader('Content-Type', 'application/json');
+              res.end(JSON.stringify({ error: true, message: 'Invalid request body' }));
+              return;
+            }
+            const { password } = parsed;
             res.setHeader('Content-Type', 'application/json');
             if (password === 'admin' || password === 'newpassword') {
               const firstBoot = password === 'admin';

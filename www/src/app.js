@@ -181,7 +181,7 @@ export async function navigate() {
 
   // Always unmount before any redirect to prevent stale timers
   if (currentPage) {
-    try { currentPage.unmount(); } catch (_) { /* ignore */ }
+    try { currentPage.unmount(); } catch (err) { console.error('Page unmount failed:', err); }
     currentPage = null;
   }
 
@@ -229,7 +229,7 @@ export async function navigate() {
       logoutBtn.addEventListener('click', async () => {
         try {
           await logout();
-        } catch (_) { /* ignore */ }
+        } catch (err) { console.warn('Logout failed, clearing local session:', err); }
         session = { authenticated: false, claimed: true };
         location.hash = '#login';
       });
@@ -295,7 +295,8 @@ async function loadShellStatus() {
     // updateTransport('conn-usb', status.usb_connected, ...);
     // updateTransport('conn-power', status.power_source, status.battery_pct, ...);
 
-  } catch (_) {
+  } catch (err) {
+    console.warn('Shell status load failed:', err);
     // Device unreachable — mark WiFi unknown, show offline dot
     if (nodeIdEl) {
       const dot = nodeIdEl.querySelector('.status-dot');
@@ -343,17 +344,24 @@ async function loadMotd() {
         dismissable: true,
         onDismiss: () => {
           // Server-side dismiss — best-effort
-          api('DELETE', '/system/motd', { id: motd.id }).catch(() => {});
+          api('DELETE', '/system/motd', { id: motd.id }).catch((err) => {
+            console.warn('MOTD dismiss failed:', err);
+          });
         },
       });
     }
-  } catch (_) {
-    // MOTD is non-critical
+  } catch (err) {
+    console.warn('MOTD load failed:', err);
   }
 }
 
 async function init() {
-  session = await checkSession();
+  try {
+    session = await checkSession();
+  } catch (err) {
+    console.error('App init failed:', err);
+    session = { authenticated: false, claimed: true };
+  }
   app.removeAttribute('aria-busy');
   app.removeAttribute('data-spinner');
   window.addEventListener('hashchange', navigate);

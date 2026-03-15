@@ -5,6 +5,7 @@ import { showToast } from '../lib/toast.js';
 
 let otaPollTimer = null;
 let deviceName = '';
+let unmounted = false;
 
 export function render() {
   return `
@@ -131,6 +132,7 @@ export function render() {
 }
 
 export function mount() {
+  unmounted = false;
   loadDeviceInfo();
   loadOtaStatus();
   loadWifiInfo();
@@ -138,6 +140,7 @@ export function mount() {
 }
 
 export function unmount() {
+  unmounted = true;
   if (otaPollTimer) {
     clearInterval(otaPollTimer);
     otaPollTimer = null;
@@ -224,6 +227,8 @@ async function loadOtaStatus() {
     renderOtaStatus(ota);
   } catch (err) {
     console.error('OTA status load failed:', err);
+    const versionEl = document.getElementById('ota-current-version');
+    if (versionEl) versionEl.textContent = 'Failed to load';
   }
 }
 
@@ -284,8 +289,10 @@ function showProgress(ota) {
 function startPolling() {
   if (otaPollTimer) return;
   otaPollTimer = setInterval(async () => {
+    if (unmounted) return;
     try {
       const ota = await api('GET', '/ota');
+      if (unmounted) return;
       renderOtaStatus(ota);
 
       if (ota.state !== 'downloading' && ota.state !== 'flashing') {

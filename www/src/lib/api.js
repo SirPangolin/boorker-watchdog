@@ -20,11 +20,13 @@ export async function api(method, path, body) {
 
   const res = await fetch(`${API_BASE}${path}`, opts);
 
+  // Parse response — try JSON first, fall back to raw text for error context
+  const text = await res.text();
   let data;
   try {
-    data = await res.json();
+    data = JSON.parse(text);
   } catch {
-    data = {};
+    data = text ? { _rawBody: text } : {};
   }
 
   if (res.status === 401) {
@@ -39,7 +41,7 @@ export async function api(method, path, body) {
           variant: 'warning',
           dismissable: false,
         });
-      });
+      }).catch((err) => console.error('Failed to load banner module:', err));
       setTimeout(() => {
         if (window.location.hash !== '#login') {
           window.location.replace('#login');
@@ -50,7 +52,7 @@ export async function api(method, path, body) {
   }
 
   if (!res.ok) {
-    throw new ApiError(data.message || data.error || 'Request failed', res.status, data);
+    throw new ApiError(data.message || data.error || data._rawBody || `Request failed (${res.status})`, res.status, data);
   }
 
   return data;

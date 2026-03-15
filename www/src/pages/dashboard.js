@@ -1,4 +1,4 @@
-import { api, ApiError } from '../lib/api.js';
+import { api } from '../lib/api.js';
 import { signalBarsSvg, signalLabel, signalColor, wifiArcsSvg, wifiTooltip, formatSignal } from '../lib/format.js';
 import { showBanner, dismissBanner, BANNER_PRIORITY } from '../lib/banner.js';
 
@@ -210,21 +210,31 @@ function updateRefreshText() {
 }
 
 async function loadData() {
-  const [status, sensors, events] = await Promise.all([
-    api('GET', '/system/status').catch(() => null),
-    api('GET', '/sensors').catch(() => []),
-    api('GET', '/events').catch(() => []),
+  const [statusR, sensorsR, eventsR] = await Promise.allSettled([
+    api('GET', '/system/status'),
+    api('GET', '/sensors'),
+    api('GET', '/events'),
   ]);
+
+  const status = statusR.status === 'fulfilled' ? statusR.value : null;
   if (!status) {
-    // Device unreachable — update header to show offline
+    if (statusR.reason) console.warn('Status fetch failed:', statusR.reason);
     markOffline();
     return;
   }
+
   lastLoadTime = Date.now();
   updateRefreshText();
   markOnline(status);
-  const sensorList = Array.isArray(sensors) ? sensors : [];
-  const eventList = Array.isArray(events) ? events : [];
+
+  const sensorList = sensorsR.status === 'fulfilled' && Array.isArray(sensorsR.value)
+    ? sensorsR.value : [];
+  const eventList = eventsR.status === 'fulfilled' && Array.isArray(eventsR.value)
+    ? eventsR.value : [];
+
+  if (sensorsR.status === 'rejected') console.warn('Sensors fetch failed:', sensorsR.reason);
+  if (eventsR.status === 'rejected') console.warn('Events fetch failed:', eventsR.reason);
+
   renderStatGrid(status, sensorList);
   renderSections({ status, sensors: sensorList, events: eventList });
 }
