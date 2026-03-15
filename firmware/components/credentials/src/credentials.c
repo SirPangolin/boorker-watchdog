@@ -78,6 +78,10 @@ static esp_err_t derive_node_name(void)
 
 static esp_err_t generate_tls_cert(const char *cn)
 {
+    // Clear buffers first — prevents stale partial data if generation fails midway
+    s_tls_cert[0] = '\0';
+    s_tls_key[0] = '\0';
+
     int ret;
     mbedtls_pk_context key;
     mbedtls_x509write_cert crt;
@@ -212,9 +216,16 @@ static esp_err_t load_or_generate_credentials(void)
         // Generate TLS certificate (ECDSA P-256)
         esp_err_t tls_ret = generate_tls_cert(s_cred.node_name);
         if (tls_ret == ESP_OK) {
-            nvs_set_str(handle, NVS_KEY_TLS_CERT, s_tls_cert);
-            nvs_set_str(handle, NVS_KEY_TLS_KEY, s_tls_key);
-            nvs_commit(handle);
+            esp_err_t w1 = nvs_set_str(handle, NVS_KEY_TLS_CERT, s_tls_cert);
+            esp_err_t w2 = nvs_set_str(handle, NVS_KEY_TLS_KEY, s_tls_key);
+            esp_err_t w3 = (w1 == ESP_OK && w2 == ESP_OK) ? nvs_commit(handle) : ESP_FAIL;
+            if (w1 != ESP_OK || w2 != ESP_OK || w3 != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to persist TLS cert/key (cert=%s, key=%s, commit=%s)",
+                         esp_err_to_name(w1), esp_err_to_name(w2), esp_err_to_name(w3));
+                ESP_LOGE(TAG, "HTTPS will not survive reboot — check NVS partition size");
+                s_tls_cert[0] = '\0';
+                s_tls_key[0] = '\0';
+            }
         } else {
             ESP_LOGE(TAG, "TLS cert generation failed — HTTPS will not be available");
         }
@@ -399,6 +410,10 @@ esp_err_t credentials_regenerate(void)
     }
 
     nvs_close(handle);
+
+    // Scrub sensitive material before regeneration
+    memset(s_tls_key, 0, sizeof(s_tls_key));
+    memset(s_tls_cert, 0, sizeof(s_tls_cert));
 
     // Re-initialize (will generate new credentials)
     s_initialized = false;

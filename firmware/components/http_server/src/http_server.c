@@ -32,10 +32,10 @@ static const char *TAG = "http_server";
 
 // Cookie flags — add Secure when serving over HTTPS
 #if CONFIG_HTTP_SERVER_HTTPS_ENABLED
-#define COOKIE_CLEAR "session=; Path=/; Max-Age=0; SameSite=Strict; Secure"
+#define COOKIE_CLEAR "session=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict; Secure"
 #define COOKIE_SECURE_FLAG "; Secure"
 #else
-#define COOKIE_CLEAR "session=; Path=/; Max-Age=0; SameSite=Strict"
+#define COOKIE_CLEAR "session=; Path=/; HttpOnly; Max-Age=0; SameSite=Strict"
 #define COOKIE_SECURE_FLAG ""
 #endif
 
@@ -497,10 +497,13 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     if (keys_part != NULL) {
         err = esp_partition_erase_range(keys_part, 0, keys_part->size);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "Failed to erase nvs_keys: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "Failed to erase nvs_keys: %s — old encryption key retained",
+                     esp_err_to_name(err));
         } else {
             ESP_LOGI(TAG, "NVS encryption keys erased");
         }
+    } else {
+        ESP_LOGW(TAG, "nvs_keys partition not found — encryption key not erased");
     }
 
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
@@ -1047,7 +1050,11 @@ static esp_err_t redirect_to_https(httpd_req_t *req)
 {
     char host[64] = {0};
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
-        wifi_mgr_get_ip(host, sizeof(host));
+        if (wifi_mgr_get_ip(host, sizeof(host)) != ESP_OK) {
+            ESP_LOGW(TAG, "Cannot determine host for HTTPS redirect");
+            httpd_resp_send_500(req);
+            return ESP_FAIL;
+        }
     }
     // Strip port from host if present (e.g. "192.168.1.1:80" → "192.168.1.1")
     char *colon = strchr(host, ':');
@@ -1322,19 +1329,30 @@ esp_err_t http_server_start(void)
     // Start HTTP redirect server on port 80 (redirects all requests to HTTPS)
     httpd_config_t redirect_config = HTTPD_DEFAULT_CONFIG();
     redirect_config.server_port = 80;
-    redirect_config.max_uri_handlers = 1;
+    redirect_config.max_uri_handlers = 4;
     redirect_config.max_open_sockets = 2;
     redirect_config.stack_size = 4096;
 
     ret = httpd_start(&s_redirect_server, &redirect_config);
     if (ret == ESP_OK) {
-        httpd_uri_t redirect_uri = {
-            .uri = "/*",
-            .method = HTTP_GET,
-            .handler = redirect_to_https,
-        };
-        httpd_register_uri_handler(s_redirect_server, &redirect_uri);
-        ESP_LOGI(TAG, "HTTP redirect server started on port 80");
+        // Register redirect for all methods the HTTPS server handles
+        const httpd_method_t methods[] = {HTTP_GET, HTTP_POST, HTTP_PUT, HTTP_DELETE};
+        bool handler_ok = true;
+        for (int i = 0; i < sizeof(methods) / sizeof(methods[0]); i++) {
+            httpd_uri_t redirect_uri = {
+                .uri = "/*",
+                .method = methods[i],
+                .handler = redirect_to_https,
+            };
+            if (httpd_register_uri_handler(s_redirect_server, &redirect_uri) != ESP_OK) {
+                handler_ok = false;
+            }
+        }
+        if (handler_ok) {
+            ESP_LOGI(TAG, "HTTP redirect server started on port 80");
+        } else {
+            ESP_LOGW(TAG, "HTTP redirect server started but some handlers failed");
+        }
     } else {
         ESP_LOGW(TAG, "Failed to start HTTP redirect server: %s", esp_err_to_name(ret));
     }

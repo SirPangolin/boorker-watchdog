@@ -204,11 +204,20 @@ static void init_console(void)
 static esp_err_t nvs_full_wipe_and_reinit(const esp_partition_t *keys_part)
 {
     ESP_LOGW(TAG, "Performing full NVS wipe (data + encryption key)");
-    nvs_flash_erase();
-    esp_partition_erase_range(keys_part, 0, keys_part->size);
+
+    esp_err_t ret = nvs_flash_erase();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS partition erase failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_partition_erase_range(keys_part, 0, keys_part->size);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_keys partition erase failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
 
     nvs_sec_cfg_t sec_cfg;
-    esp_err_t ret = nvs_flash_generate_keys(keys_part, &sec_cfg);
+    ret = nvs_flash_generate_keys(keys_part, &sec_cfg);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "NVS key generation failed: %s", esp_err_to_name(ret));
         return ret;
@@ -222,7 +231,8 @@ static esp_err_t init_nvs_encrypted(void)
     const esp_partition_t *keys_part = esp_partition_find_first(
         ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, "nvs_keys");
     if (keys_part == NULL) {
-        ESP_LOGE(TAG, "nvs_keys partition not found — falling back to unencrypted NVS");
+        ESP_LOGE(TAG, "nvs_keys partition not found — check partition table!");
+        ESP_LOGW(TAG, "Falling back to UNENCRYPTED NVS — credentials stored in plaintext");
         return nvs_flash_init();
     }
 
@@ -241,15 +251,20 @@ static esp_err_t init_nvs_encrypted(void)
         if (ret != ESP_OK) {
             // Stale NVS data from pre-encryption or prior key — wipe everything
             ESP_LOGW(TAG, "NVS init failed after key gen (%s) — wiping", esp_err_to_name(ret));
-            return nvs_full_wipe_and_reinit(keys_part);
+            ret = nvs_full_wipe_and_reinit(keys_part);
+            if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+            return ret;
         }
+        ESP_LOGI(TAG, "NVS initialized (encrypted, first boot)");
         return ESP_OK;
     }
 
     if (ret != ESP_OK) {
         // Key partition corrupt — full wipe
         ESP_LOGE(TAG, "NVS key read failed (%s) — corruption, wiping everything", esp_err_to_name(ret));
-        return nvs_full_wipe_and_reinit(keys_part);
+        ret = nvs_full_wipe_and_reinit(keys_part);
+        if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+        return ret;
     }
 
     // Key loaded OK — try init
@@ -257,9 +272,12 @@ static esp_err_t init_nvs_encrypted(void)
     if (ret != ESP_OK) {
         // NVS data corrupt — full wipe
         ESP_LOGE(TAG, "NVS secure init failed (%s) — corruption, wiping everything", esp_err_to_name(ret));
-        return nvs_full_wipe_and_reinit(keys_part);
+        ret = nvs_full_wipe_and_reinit(keys_part);
+        if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+        return ret;
     }
 
+    ESP_LOGI(TAG, "NVS initialized (encrypted)");
     return ESP_OK;
 }
 
@@ -290,8 +308,6 @@ void app_main(void)
 
     // Initialize NVS with encryption (requires nvs_keys partition)
     ESP_ERROR_CHECK(init_nvs_encrypted());
-
-    ESP_LOGI(TAG, "NVS initialized (encrypted)");
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
