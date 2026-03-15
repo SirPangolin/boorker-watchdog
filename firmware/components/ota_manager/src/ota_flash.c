@@ -58,6 +58,18 @@ esp_err_t ota_flash_begin(uint32_t image_size)
 
 esp_err_t ota_flash_write(const void *data, size_t len)
 {
+    if (g_ota.session.ota_handle == 0) {
+        ESP_LOGE(TAG, "Write called with no active flash session");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (g_ota.session.total_bytes > 0 &&
+        g_ota.session.bytes_written + len > g_ota.session.total_bytes) {
+        ESP_LOGE(TAG, "Write would exceed declared size (written=%"PRIu32" + len=%zu > total=%"PRIu32")",
+                 g_ota.session.bytes_written, len, g_ota.session.total_bytes);
+        return ESP_ERR_INVALID_SIZE;
+    }
+
     esp_err_t err = esp_ota_write(g_ota.session.ota_handle, data, len);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(err));
@@ -69,7 +81,10 @@ esp_err_t ota_flash_write(const void *data, size_t len)
     if (s_sha256_active) {
         int ret = mbedtls_sha256_update(&s_sha256_ctx, (const unsigned char *)data, len);
         if (ret != 0) {
-            ESP_LOGE(TAG, "mbedtls_sha256_update failed: %d", ret);
+            ESP_LOGE(TAG, "mbedtls_sha256_update failed: %d (data already written to flash, "
+                     "hash verification will be unreliable)", ret);
+            mbedtls_sha256_free(&s_sha256_ctx);
+            s_sha256_active = false;
             return ESP_FAIL;
         }
     }
@@ -153,10 +168,14 @@ esp_err_t ota_flash_end(void)
 
 esp_err_t ota_flash_abort(void)
 {
+    esp_err_t result = ESP_OK;
+
     if (g_ota.session.ota_handle != 0) {
         esp_err_t err = esp_ota_abort(g_ota.session.ota_handle);
         if (err != ESP_OK) {
-            ESP_LOGW(TAG, "esp_ota_abort failed: %s", esp_err_to_name(err));
+            ESP_LOGE(TAG, "esp_ota_abort failed: %s (partition may be in inconsistent state)",
+                     esp_err_to_name(err));
+            result = err;
         }
         ESP_LOGW(TAG, "OTA flash aborted");
     }
@@ -171,5 +190,5 @@ esp_err_t ota_flash_abort(void)
         s_sha256_active = false;
     }
 
-    return ESP_OK;
+    return result;
 }

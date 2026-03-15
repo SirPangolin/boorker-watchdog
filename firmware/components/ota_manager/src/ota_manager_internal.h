@@ -11,6 +11,7 @@
 typedef enum {
     OTA_CHANNEL_STABLE = 0,     /**< Stable releases only */
     OTA_CHANNEL_PRERELEASE = 1, /**< Include pre-releases */
+    OTA_CHANNEL_MAX             /**< Sentinel — must be last */
 } ota_channel_t;
 
 /**
@@ -57,8 +58,8 @@ extern ota_ctx_t g_ota;
 #define OTA_UNLOCK() xSemaphoreGive(g_ota.mutex)
 
 // Internal functions (implemented in other source files)
-// ota_github.c
-esp_err_t ota_github_check_releases(void);
+// ota_github.c — writes results to output params, caller copies under lock
+esp_err_t ota_github_check_releases(ota_update_info_t *out_info, bool *out_available);
 bool ota_github_version_newer(const char *current, const char *candidate);
 
 // ota_download.c

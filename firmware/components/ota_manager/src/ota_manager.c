@@ -57,7 +57,10 @@ static void load_nvs_config(void)
 
     uint8_t channel_raw;
     err = nvs_get_u8(nvs, OTA_NVS_KEY_CHAN, &channel_raw);
-    if (err != ESP_OK) {
+    if (err != ESP_OK || channel_raw >= OTA_CHANNEL_MAX) {
+        if (err == ESP_OK) {
+            ESP_LOGW(TAG, "Invalid channel value %u in NVS, using default", channel_raw);
+        }
         g_ota.channel = CONFIG_OTA_MANAGER_DEFAULT_CHANNEL;
     } else {
         g_ota.channel = (ota_channel_t)channel_raw;
@@ -176,11 +179,22 @@ esp_err_t ota_manager_check_now(void)
     /* Release mutex before blocking HTTPS call */
     OTA_UNLOCK();
 
-    esp_err_t err = ota_github_check_releases();
+    /* Write to local vars — caller copies into g_ota under lock */
+    ota_update_info_t check_info;
+    bool check_available = false;
+    esp_err_t err = ota_github_check_releases(&check_info, &check_available);
 
     if (!OTA_LOCK()) {
         ESP_LOGE(TAG, "Failed to re-acquire lock after update check");
         return (err == ESP_OK) ? ESP_ERR_TIMEOUT : err;
+    }
+
+    /* Copy results into global state under lock */
+    if (err == ESP_OK) {
+        g_ota.update_available = check_available;
+        if (check_available) {
+            memcpy(&g_ota.update_info, &check_info, sizeof(g_ota.update_info));
+        }
     }
 
     if (err == ESP_OK && g_ota.update_available) {
@@ -388,6 +402,13 @@ esp_err_t ota_manager_finish_upload(void)
 
     OTA_UNLOCK();
 
+    /* Guard: abort() may have cleared the session while we released the lock */
+    if (g_ota.session.ota_handle == 0) {
+        ESP_LOGW(TAG, "Flash session aborted during finalization");
+        system_state_set_ota(SYSTEM_OTA_IDLE);
+        return ESP_ERR_INVALID_STATE;
+    }
+
     if (has_sha256) {
         esp_err_t err = ota_flash_verify_hash(sha256_copy);
         if (err != ESP_OK) {
@@ -419,7 +440,8 @@ esp_err_t ota_manager_abort(void)
         return ESP_OK;
     }
 
-    if (!OTA_LOCK()) {
+    bool locked = OTA_LOCK();
+    if (!locked) {
         ESP_LOGW(TAG, "Abort: failed to acquire mutex, proceeding without lock");
     }
 
@@ -430,7 +452,9 @@ esp_err_t ota_manager_abort(void)
 
     memset(&g_ota.session, 0, sizeof(g_ota.session));
 
-    OTA_UNLOCK();
+    if (locked) {
+        OTA_UNLOCK();
+    }
 
     ESP_LOGI(TAG, "OTA aborted");
     return err;

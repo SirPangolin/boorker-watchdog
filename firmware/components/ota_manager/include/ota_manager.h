@@ -22,6 +22,7 @@ typedef struct {
     char tag_name[48];          /**< Git tag name, e.g. "v1.3.0" */
     char download_url[256];     /**< Asset download URL */
     char sha256[65];            /**< Expected SHA-256 hash (hex string, 64 chars + NUL) */
+    bool has_sha256;            /**< True if sha256 field contains a valid hash */
     char release_notes[512];    /**< Truncated release body / notes */
     bool is_prerelease;         /**< True if this is a pre-release */
     uint32_t size_bytes;        /**< Firmware binary size in bytes */

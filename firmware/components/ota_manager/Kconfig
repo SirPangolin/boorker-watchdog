@@ -14,14 +14,6 @@ menu "OTA Manager"
         help
             0 = stable releases only, 1 = include pre-releases.
 
-    config OTA_MANAGER_ROLLBACK_BOOT_COUNT
-        int "Failed boots before rollback"
-        default 3
-        range 1 10
-        help
-            Number of consecutive failed boots before automatic rollback
-            to the previous firmware.
-
     config OTA_MANAGER_TASK_STACK_SIZE
         int "OTA task stack size"
         default 8192
