@@ -15,6 +15,7 @@
 #include "esp_timer.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
+#include "esp_partition.h"
 #include "cJSON.h"
 #include <string.h>
 #include <sys/stat.h>
@@ -450,6 +451,7 @@ static esp_err_t api_system_reboot(httpd_req_t *req)
 }
 
 // POST /api/v1/system/factory-reset
+// Wipes ALL NVS data + encryption key. Device reboots as fresh-out-of-box.
 static esp_err_t api_system_factory_reset(httpd_req_t *req)
 {
     if (web_auth_require(req) != ESP_OK) {
@@ -458,43 +460,31 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
 
     httpd_resp_set_type(req, "application/json");
 
-    // Regenerate device identity FIRST (new credentials)
-    // Must happen before web_auth_reset so it uses the new password
-    esp_err_t err = credentials_regenerate();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to regenerate identity: %s", esp_err_to_name(err));
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Reset web auth password to default (uses regenerated credentials)
-    err = web_auth_reset_password();
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to reset password: %s", esp_err_to_name(err));
-        httpd_resp_send_500(req);
-        return ESP_FAIL;
-    }
-
-    // Invalidate all sessions before reboot
+    // Invalidate all in-memory sessions immediately
     web_auth_invalidate_all_sessions();
 
-    // Clear WiFi credentials (forces reprovisioning)
-    err = wifi_mgr_clear_credentials();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to clear WiFi credentials: %s", esp_err_to_name(err));
-    }
+    // Set FIRST_BOOT LED state (visual feedback before reboot)
+    event_bus_set_state(EVENT_FIRST_BOOT);
 
-    // Reset device claimed state (returns to first boot)
-    err = system_state_set_claimed(false);
+    // Erase entire NVS partition (all namespaces: cred, web_auth, WiFi, etc.)
+    esp_err_t err = nvs_flash_erase();
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to reset claimed state: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "Failed to erase NVS partition: %s", esp_err_to_name(err));
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
     }
+    ESP_LOGI(TAG, "NVS partition erased");
 
-    // Set FIRST_BOOT LED state
-    esp_err_t event_ret = event_bus_set_state(EVENT_FIRST_BOOT);
-    if (event_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set FIRST_BOOT LED state: %s", esp_err_to_name(event_ret));
-        // Non-fatal - continue with factory reset
+    // Erase nvs_keys partition (fresh encryption key on next boot)
+    const esp_partition_t *keys_part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, "nvs_keys");
+    if (keys_part != NULL) {
+        err = esp_partition_erase_range(keys_part, 0, keys_part->size);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to erase nvs_keys: %s", esp_err_to_name(err));
+        } else {
+            ESP_LOGI(TAG, "NVS encryption keys erased");
+        }
     }
 
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
