@@ -185,19 +185,19 @@ export async function navigate() {
 
   // Unknown route -> dashboard
   if (!route) {
-    location.hash = '#dashboard';
+    location.replace('#dashboard');
     return;
   }
 
   // Auth guard: unauthenticated users must go to #login
   if (route.auth && (!session || !session.authenticated)) {
-    location.hash = '#login';
+    location.replace('#login');
     return;
   }
 
   // Authenticated users should not see #login
   if (!route.auth && session && session.authenticated) {
-    location.hash = '#dashboard';
+    location.replace('#dashboard');
     return;
   }
 
