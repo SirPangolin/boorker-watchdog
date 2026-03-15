@@ -21,6 +21,7 @@
 #include "status_led.h"
 #include "status_buzzer.h"
 #include "sensor_manager.h"
+#include "ota_manager.h"
 #if CONFIG_SW420_DRIVER_ENABLED
 #include "sw420_driver.h"
 #endif
@@ -241,6 +242,13 @@ void app_main(void)
         return;
     }
 
+    // Mark current firmware as valid to prevent rollback on next boot
+    ret = ota_manager_mark_valid();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "OTA mark valid failed: %s (continuing without rollback protection)",
+                 esp_err_to_name(ret));
+    }
+
     // Initialize credentials (generates secrets on first boot)
     ret = credentials_init();
     if (ret != ESP_OK) {
@@ -350,6 +358,13 @@ void app_main(void)
                 ESP_LOGI(TAG, "Web server running at http://%s/", ip);
             } else {
                 ESP_LOGI(TAG, "Web server started");
+            }
+
+            // Initialize OTA manager (needs network and HTTP server)
+            ret = ota_manager_init();
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "OTA manager init failed: %s (continuing without OTA updates)",
+                         esp_err_to_name(ret));
             }
         }
     }
