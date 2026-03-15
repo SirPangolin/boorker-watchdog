@@ -12,6 +12,7 @@ import { initTheme, toggleTheme } from './lib/theme.js';
 import { checkSession, logout } from './lib/auth.js';
 import { api } from './lib/api.js';
 import { wifiArcsSvg, wifiTooltip } from './lib/format.js';
+import { showBanner, dismissBanner, BANNER_PRIORITY } from './lib/banner.js';
 import * as loginPage from './pages/login.js';
 import * as dashboardPage from './pages/dashboard.js';
 import * as settingsPage from './pages/settings.js';
@@ -157,7 +158,7 @@ function renderShell(pageHtml, showNav) {
       <a href="#dashboard" class="${hash === '#dashboard' ? 'active' : ''}">Dashboard</a>
       <a href="#settings" class="${hash === '#settings' ? 'active' : ''}">Settings</a>
     </nav>
-    <div id="motd-area"></div>
+    <div id="banner-area"></div>
     <main class="container">
       ${pageHtml}
     </main>
@@ -309,76 +310,42 @@ async function loadShellStatus() {
   }
 }
 
-// Priority → CSS modifier class
-const MOTD_PRIORITY_CLASS = {
-  warning: 'warning',
-  critical: 'critical',
-};
+// Info icon SVG (circled i) — trusted static string
+const INFO_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>`;
 
-// Info icon SVG (circled i)
-const INFO_ICON = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>
-</svg>`;
+const MOTD_PRIORITY_MAP = {
+  critical: { variant: 'error', bannerPriority: BANNER_PRIORITY.MOTD_CRITICAL },
+  warning: { variant: 'warning', bannerPriority: BANNER_PRIORITY.MOTD_WARNING },
+  info: { variant: undefined, bannerPriority: BANNER_PRIORITY.MOTD_INFO },
+};
 
 async function loadMotd() {
   try {
     const motds = await api('GET', '/system/motd');
     if (!Array.isArray(motds) || motds.length === 0) return;
 
-    const area = document.getElementById('motd-area');
-    if (!area) return;
-
     for (const motd of motds) {
-      const priorityClass = MOTD_PRIORITY_CLASS[motd.priority] || '';
+      const mapping = MOTD_PRIORITY_MAP[motd.priority] || MOTD_PRIORITY_MAP.info;
 
-      const banner = document.createElement('div');
-      banner.setAttribute('role', 'alert');
-      banner.className = `motd-banner${priorityClass ? ` ${priorityClass}` : ''}`;
-
-      // Icon
-      const icon = document.createElement('span');
-      icon.className = 'motd-icon';
-      icon.innerHTML = INFO_ICON;
-
-      // SECURITY: textContent for XSS safety — MOTD message is from API
-      const msg = document.createElement('span');
-      msg.className = 'motd-message';
-      msg.textContent = motd.message;
-
-      banner.appendChild(icon);
-      banner.appendChild(msg);
-
-      // Source-based action link (future: use motd.url if present)
+      // Build link from source or explicit url
+      let link = null;
       if (motd.url && /^https?:\/\//.test(motd.url)) {
-        const link = document.createElement('a');
-        link.href = motd.url;
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = motd.url_label || 'Learn more';
-        banner.appendChild(link);
+        link = { href: motd.url, text: motd.url_label || 'Learn more', external: true };
       } else if (motd.source === 'ota') {
-        const link = document.createElement('a');
-        link.href = '#settings';
-        link.textContent = 'View OTA settings';
-        banner.appendChild(link);
+        link = { href: '#settings', text: 'View OTA settings' };
       }
 
-      // Dismiss button — calls firmware DELETE endpoint
-      const dismiss = document.createElement('button');
-      dismiss.className = 'motd-dismiss';
-      dismiss.textContent = '\u00d7';
-      dismiss.title = 'Dismiss';
-      dismiss.addEventListener('click', async () => {
-        banner.remove();
-        try {
-          await api('DELETE', '/system/motd', { id: motd.id });
-        } catch (_) {
-          // Dismiss is best-effort — banner is already removed from UI
-        }
+      showBanner(`motd-${motd.id}`, mapping.bannerPriority, {
+        message: motd.message,
+        variant: mapping.variant,
+        icon: INFO_ICON,
+        link,
+        dismissable: true,
+        onDismiss: () => {
+          // Server-side dismiss — best-effort
+          api('DELETE', '/system/motd', { id: motd.id }).catch(() => {});
+        },
       });
-
-      banner.appendChild(dismiss);
-      area.appendChild(banner);
     }
   } catch (_) {
     // MOTD is non-critical
