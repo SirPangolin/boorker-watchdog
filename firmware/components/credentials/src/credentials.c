@@ -4,6 +4,14 @@
 #include "esp_random.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "mbedtls/pk.h"
+#include "mbedtls/x509.h"
+#include "mbedtls/x509_crt.h"
+#include "mbedtls/asn1.h"
+#include "mbedtls/entropy.h"
+#include "mbedtls/ctr_drbg.h"
+#include "mbedtls/error.h"
+#include "mbedtls/ecp.h"
 #include <string.h>
 #include <stdio.h>
 
@@ -14,10 +22,16 @@ static const char *TAG = "cred";
 #define NVS_KEY_AP_PASS "ap_pass"
 #define NVS_KEY_BLE_POP "ble_pop"
 #define NVS_KEY_FIRST_BOOT "first_boot"
+#define NVS_KEY_TLS_CERT   "tls_cert"
+#define NVS_KEY_TLS_KEY    "tls_key"
 
 static credentials_t s_cred;
 static bool s_initialized = false;
 static bool s_first_boot = false;
+
+// ECDSA P-256 cert/key PEM buffers (~800 bytes cert, ~230 bytes key)
+static char s_tls_cert[1024];
+static char s_tls_key[512];
 
 // Characters for password generation (alphanumeric + some symbols)
 static const char PASS_CHARS[] = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789#$@!";
@@ -61,6 +75,102 @@ static esp_err_t derive_node_name(void)
     snprintf(s_cred.node_name, sizeof(s_cred.node_name),
              "%s-%s", CONFIG_CRED_NAME_PREFIX, s_cred.node_suffix);
 
+    return ESP_OK;
+}
+
+static esp_err_t generate_tls_cert(const char *cn)
+{
+    // Clear buffers first — prevents stale partial data if generation fails midway
+    s_tls_cert[0] = '\0';
+    s_tls_key[0] = '\0';
+
+    int ret;
+    mbedtls_pk_context key;
+    mbedtls_x509write_cert crt;
+    mbedtls_entropy_context entropy;
+    mbedtls_ctr_drbg_context ctr_drbg;
+    unsigned char serial[8];
+    char subject[64];
+
+    mbedtls_pk_init(&key);
+    mbedtls_x509write_crt_init(&crt);
+    mbedtls_entropy_init(&entropy);
+    mbedtls_ctr_drbg_init(&ctr_drbg);
+
+    ret = mbedtls_ctr_drbg_seed(&ctr_drbg, mbedtls_entropy_func, &entropy, NULL, 0);
+    if (ret != 0) goto cleanup;
+
+    // Generate ECDSA P-256 key pair (<500ms on ESP32-S3 with HW acceleration)
+    ret = mbedtls_pk_setup(&key, mbedtls_pk_info_from_type(MBEDTLS_PK_ECKEY));
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_ecp_gen_key(MBEDTLS_ECP_DP_SECP256R1, mbedtls_pk_ec(key),
+                               mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0) goto cleanup;
+
+    // Build self-signed X.509 certificate
+    mbedtls_x509write_crt_set_version(&crt, MBEDTLS_X509_CRT_VERSION_3);
+    mbedtls_x509write_crt_set_md_alg(&crt, MBEDTLS_MD_SHA256);
+    mbedtls_x509write_crt_set_subject_key(&crt, &key);
+    mbedtls_x509write_crt_set_issuer_key(&crt, &key);
+
+    snprintf(subject, sizeof(subject), "CN=%s", cn);
+    ret = mbedtls_x509write_crt_set_subject_name(&crt, subject);
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_issuer_name(&crt, subject);
+    if (ret != 0) goto cleanup;
+
+    // Random serial number
+    ret = mbedtls_ctr_drbg_random(&ctr_drbg, serial, sizeof(serial));
+    if (ret != 0) goto cleanup;
+    ret = mbedtls_x509write_crt_set_serial_raw(&crt, serial, sizeof(serial));
+    if (ret != 0) goto cleanup;
+
+    // No expiry (no NTP on device)
+    ret = mbedtls_x509write_crt_set_validity(&crt, "20250101000000", "99991231235959");
+    if (ret != 0) goto cleanup;
+
+    // SAN extension — required by modern browsers (Chrome 58+) to show "proceed" option
+    char dns_name[48];
+    snprintf(dns_name, sizeof(dns_name), "%s.local", cn);
+    mbedtls_x509_san_list san = {
+        .node = {
+            .type = MBEDTLS_X509_SAN_DNS_NAME,
+            .san = { .unstructured_name = {
+                .tag = MBEDTLS_ASN1_IA5_STRING,
+                .len = strlen(dns_name),
+                .p = (unsigned char *)dns_name,
+            }},
+        },
+        .next = NULL,
+    };
+    ret = mbedtls_x509write_crt_set_subject_alternative_name(&crt, &san);
+    if (ret != 0) goto cleanup;
+
+    // Write cert PEM
+    ret = mbedtls_x509write_crt_pem(&crt, (unsigned char *)s_tls_cert, sizeof(s_tls_cert),
+                                     mbedtls_ctr_drbg_random, &ctr_drbg);
+    if (ret != 0) goto cleanup;
+
+    // Write key PEM
+    ret = mbedtls_pk_write_key_pem(&key, (unsigned char *)s_tls_key, sizeof(s_tls_key));
+    if (ret != 0) goto cleanup;
+
+    ESP_LOGI(TAG, "TLS certificate generated (ECDSA P-256, CN=%s)", cn);
+
+cleanup:
+    mbedtls_ctr_drbg_free(&ctr_drbg);
+    mbedtls_entropy_free(&entropy);
+    mbedtls_x509write_crt_free(&crt);
+    mbedtls_pk_free(&key);
+
+    if (ret != 0) {
+        char err_buf[128];
+        mbedtls_strerror(ret, err_buf, sizeof(err_buf));
+        ESP_LOGE(TAG, "TLS cert generation failed: %s (-0x%04X)", err_buf, -ret);
+        memset(s_tls_cert, 0, sizeof(s_tls_cert));
+        memset(s_tls_key, 0, sizeof(s_tls_key));
+        return ESP_FAIL;
+    }
     return ESP_OK;
 }
 
@@ -124,6 +234,23 @@ static esp_err_t load_or_generate_credentials(void)
             return ret;
         }
 
+        // Generate TLS certificate (ECDSA P-256)
+        esp_err_t tls_ret = generate_tls_cert(s_cred.node_name);
+        if (tls_ret == ESP_OK) {
+            esp_err_t w1 = nvs_set_str(handle, NVS_KEY_TLS_CERT, s_tls_cert);
+            esp_err_t w2 = nvs_set_str(handle, NVS_KEY_TLS_KEY, s_tls_key);
+            esp_err_t w3 = (w1 == ESP_OK && w2 == ESP_OK) ? nvs_commit(handle) : ESP_FAIL;
+            if (w1 != ESP_OK || w2 != ESP_OK || w3 != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to persist TLS cert/key (cert=%s, key=%s, commit=%s)",
+                         esp_err_to_name(w1), esp_err_to_name(w2), esp_err_to_name(w3));
+                ESP_LOGE(TAG, "HTTPS will not survive reboot — check NVS partition size");
+                s_tls_cert[0] = '\0';
+                s_tls_key[0] = '\0';
+            }
+        } else {
+            ESP_LOGE(TAG, "TLS cert generation failed — HTTPS will not be available");
+        }
+
         ESP_LOGI(TAG, "Credentials generated for %s", s_cred.node_name);
     } else if (ret == ESP_OK) {
         // Load existing credentials
@@ -178,6 +305,28 @@ static esp_err_t load_or_generate_credentials(void)
         uint8_t fb = 0;
         if (nvs_get_u8(handle, NVS_KEY_FIRST_BOOT, &fb) == ESP_OK && fb == 1) {
             s_first_boot = true;
+        }
+
+        // Load TLS cert/key (non-fatal if missing — HTTPS just won't start)
+        size_t cert_len = sizeof(s_tls_cert);
+        if (nvs_get_str(handle, NVS_KEY_TLS_CERT, s_tls_cert, &cert_len) != ESP_OK) {
+            ESP_LOGW(TAG, "TLS cert not found in NVS partition");
+            s_tls_cert[0] = '\0';
+        }
+        size_t key_len = sizeof(s_tls_key);
+        if (nvs_get_str(handle, NVS_KEY_TLS_KEY, s_tls_key, &key_len) != ESP_OK) {
+            ESP_LOGW(TAG, "TLS key not found in NVS partition");
+            s_tls_key[0] = '\0';
+        }
+
+        // Detect cert/key mismatch (partial NVS corruption)
+        bool have_cert = (s_tls_cert[0] != '\0');
+        bool have_key = (s_tls_key[0] != '\0');
+        if (have_cert != have_key) {
+            ESP_LOGE(TAG, "TLS cert/key mismatch (cert=%s, key=%s) — clearing both",
+                     have_cert ? "found" : "missing", have_key ? "found" : "missing");
+            memset(s_tls_cert, 0, sizeof(s_tls_cert));
+            memset(s_tls_key, 0, sizeof(s_tls_key));
         }
 
         ESP_LOGI(TAG, "Credentials loaded and validated for %s", s_cred.node_name);
@@ -293,9 +442,24 @@ esp_err_t credentials_regenerate(void)
 
     nvs_close(handle);
 
+    // Scrub all sensitive material before regeneration
+    memset(&s_cred, 0, sizeof(s_cred));
+    memset(s_tls_key, 0, sizeof(s_tls_key));
+    memset(s_tls_cert, 0, sizeof(s_tls_cert));
+
     // Re-initialize (will generate new credentials)
     s_initialized = false;
     return credentials_init();
+}
+
+const char *credentials_get_tls_cert(void)
+{
+    return s_tls_cert[0] != '\0' ? s_tls_cert : NULL;
+}
+
+const char *credentials_get_tls_key(void)
+{
+    return s_tls_key[0] != '\0' ? s_tls_key : NULL;
 }
 
 esp_err_t credentials_get_qr_json(char *buf, size_t buf_len)

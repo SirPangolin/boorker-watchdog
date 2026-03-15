@@ -6,6 +6,7 @@
 #include "esp_heap_caps.h"
 #include "esp_console.h"
 #include "nvs_flash.h"
+#include "esp_partition.h"
 
 #include "version.h"
 #include "wifi_manager.h"
@@ -31,7 +32,7 @@ static const char *TAG = "boorker";
 #if CONFIG_TS_MGR_ENABLED
 static void tailscale_callback(ts_mgr_event_t event, void *ctx)
 {
-    char ip[16];
+    char ip[16] = {0};
     switch (event) {
         case TS_MGR_EVENT_CONNECTED:
             event_bus_clear_state(EVENT_TAILSCALE_CONNECTING);
@@ -198,6 +199,98 @@ static void init_console(void)
     ESP_LOGI(TAG, "Console ready. Type 'help' for commands.");
 }
 
+// Wipe NVS + nvs_keys and generate fresh encryption key.
+// Used for corruption recovery — any NVS/key issue triggers a full reset.
+static esp_err_t nvs_full_wipe_and_reinit(const esp_partition_t *keys_part)
+{
+    ESP_LOGW(TAG, "Performing full NVS wipe (data + encryption key)");
+
+    esp_err_t ret = nvs_flash_erase();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS partition erase failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_partition_erase_range(keys_part, 0, keys_part->size);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "nvs_keys partition erase failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    nvs_sec_cfg_t sec_cfg;
+    ret = nvs_flash_generate_keys(keys_part, &sec_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS key generation failed: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = nvs_flash_secure_init(&sec_cfg);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "NVS secure init failed after full wipe: %s", esp_err_to_name(ret));
+    }
+    return ret;
+}
+
+static esp_err_t init_nvs_encrypted(void)
+{
+    const esp_partition_t *keys_part = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_NVS_KEYS, "nvs_keys");
+    if (keys_part == NULL) {
+        ESP_LOGE(TAG, "nvs_keys partition not found — check partition table!");
+        ESP_LOGW(TAG, "Falling back to UNENCRYPTED NVS — credentials stored in plaintext");
+        esp_err_t ret = nvs_flash_init();
+        if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+            ESP_LOGW(TAG, "NVS needs erase (%s)", esp_err_to_name(ret));
+            ESP_ERROR_CHECK(nvs_flash_erase());
+            ret = nvs_flash_init();
+        }
+        return ret;
+    }
+
+    nvs_sec_cfg_t sec_cfg;
+    esp_err_t ret = nvs_flash_read_security_cfg(keys_part, &sec_cfg);
+
+    if (ret == ESP_ERR_NVS_KEYS_NOT_INITIALIZED) {
+        // First boot or post-factory-reset: generate key, init NVS
+        ESP_LOGI(TAG, "Generating NVS encryption keys (first boot)");
+        ret = nvs_flash_generate_keys(keys_part, &sec_cfg);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "NVS key generation failed: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        ret = nvs_flash_secure_init(&sec_cfg);
+        if (ret != ESP_OK) {
+            // Stale NVS data from pre-encryption or prior key — wipe everything
+            ESP_LOGW(TAG, "NVS init failed after key gen (%s) — wiping", esp_err_to_name(ret));
+            ret = nvs_full_wipe_and_reinit(keys_part);
+            if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+            return ret;
+        }
+        ESP_LOGI(TAG, "NVS initialized (encrypted, first boot)");
+        return ESP_OK;
+    }
+
+    if (ret != ESP_OK) {
+        // Key partition corrupt — full wipe
+        ESP_LOGE(TAG, "NVS key read failed (%s) — corruption, wiping everything", esp_err_to_name(ret));
+        ret = nvs_full_wipe_and_reinit(keys_part);
+        if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+        return ret;
+    }
+
+    // Key loaded OK — try init
+    ret = nvs_flash_secure_init(&sec_cfg);
+    if (ret != ESP_OK) {
+        // NVS data corrupt — full wipe
+        ESP_LOGE(TAG, "NVS secure init failed (%s) — corruption, wiping everything", esp_err_to_name(ret));
+        ret = nvs_full_wipe_and_reinit(keys_part);
+        if (ret == ESP_OK) ESP_LOGI(TAG, "NVS initialized (encrypted, after wipe)");
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "NVS initialized (encrypted)");
+    return ESP_OK;
+}
+
 void app_main(void)
 {
 #if CONFIG_TS_MGR_ENABLED
@@ -223,20 +316,13 @@ void app_main(void)
     printf("  +====================================================================+\n");
     printf("\n");
 
-    // Initialize NVS (required for WiFi and Tailscale credential storage)
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
-
-    ESP_LOGI(TAG, "NVS initialized");
+    // Initialize NVS with encryption (requires nvs_keys partition)
+    ESP_ERROR_CHECK(init_nvs_encrypted());
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     // Initialize device state early (others depend on claimed status)
-    ret = system_state_init();
+    esp_err_t ret = system_state_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "System state init failed: %s", esp_err_to_name(ret));
         return;
@@ -336,7 +422,7 @@ void app_main(void)
                         pdFALSE, pdTRUE, portMAX_DELAY);
 
     // Get WiFi IP address
-    char ip[16];
+    char ip[16] = {0};
     if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK) {
         ESP_LOGI(TAG, "WiFi connected with IP: %s", ip);
     }
@@ -355,7 +441,11 @@ void app_main(void)
             // Continue without web server
         } else {
             if (ip[0] != '\0') {
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+                ESP_LOGI(TAG, "Web server running at https://%s/", ip);
+#else
                 ESP_LOGI(TAG, "Web server running at http://%s/", ip);
+#endif
             } else {
                 ESP_LOGI(TAG, "Web server started");
             }

@@ -78,6 +78,21 @@ esp_err_t credentials_regenerate(void);
  */
 esp_err_t credentials_get_qr_json(char *buf, size_t buf_len);
 
+/**
+ * Get TLS certificate PEM string (ECDSA P-256, self-signed).
+ * Generated at first boot alongside other credentials.
+ *
+ * @return PEM string or NULL if not generated yet.
+ */
+const char *credentials_get_tls_cert(void);
+
+/**
+ * Get TLS private key PEM string (ECDSA P-256).
+ *
+ * @return PEM string or NULL if not generated yet.
+ */
+const char *credentials_get_tls_key(void);
+
 #ifdef __cplusplus
 }
 #endif

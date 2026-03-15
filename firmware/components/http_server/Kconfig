@@ -1,5 +1,13 @@
 menu "HTTP Server"
 
+    config HTTP_SERVER_HTTPS_ENABLED
+        bool "Enable HTTPS (TLS)"
+        default y
+        help
+            Serve web interface over HTTPS with a self-signed certificate.
+            When enabled, HTTP on port 80 redirects to HTTPS on port 443.
+            Disable only for debugging or constrained environments.
+
     config HTTP_SERVER_PORT
         int "HTTP port"
         default 80
@@ -8,5 +16,21 @@ menu "HTTP Server"
     config HTTP_SERVER_MAX_URI_LEN
         int "Max URI length"
         default 128
+
+    config HTTP_SERVER_MAX_CONNECTIONS
+        int "Max concurrent connections"
+        default 4
+        range 2 7
+        help
+            Maximum simultaneous client connections. Each HTTPS connection
+            uses ~40-50KB of heap. Reduce for boards without PSRAM.
+
+    config HTTP_SERVER_STACK_SIZE
+        int "HTTP server task stack size"
+        default 12288
+        range 8192 16384
+        help
+            Stack size for HTTP/HTTPS server worker tasks.
+            TLS handshakes require more stack than plain HTTP.
 
 endmenu
