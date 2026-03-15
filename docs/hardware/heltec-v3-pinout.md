@@ -169,7 +169,7 @@ Note: GPIO 17 and 18 are **not broken out to headers**. GPIO 21 is on J2-16 but 
 | 19 | USB D- (native USB) |
 | 20 | USB D+ (native USB) |
 | 35 | White LED (active HIGH, on/off or PWM) |
-| 36 | Vext control (HIGH = external 3.3V on) |
+| 36 | Vext control (LOW = external 3.3V on (active LOW, P-channel MOSFET)) |
 | 43 | U0TXD (UART0 TX → CP2102 RX) |
 | 44 | U0RXD (UART0 RX ← CP2102 TX) |
 
@@ -218,12 +218,12 @@ Sensors tap power from the (+) rail (Vext) and ground from the (-) rail. Firmwar
 
 ## Vext Power Rail
 
-The Vext pin provides 3.3V to external sensors, controlled by GPIO36. **Off by default** — firmware must enable it.
+The Vext pin provides 3.3V to external sensors, controlled by GPIO36. **Off by default** — firmware must drive GPIO36 LOW to enable (active LOW, P-channel MOSFET).
 
 ```c
 gpio_set_direction(GPIO_NUM_36, GPIO_MODE_OUTPUT);
-gpio_set_level(GPIO_NUM_36, 1);  // Vext ON — sensors powered
-gpio_set_level(GPIO_NUM_36, 0);  // Vext OFF — sensors unpowered (deep sleep)
+gpio_set_level(GPIO_NUM_36, 0);  // LOW = Vext ON — sensors powered
+gpio_set_level(GPIO_NUM_36, 1);  // HIGH = Vext OFF — sensors unpowered (deep sleep)
 ```
 
 Sensors connected to Vext will not work until GPIO36 is driven HIGH.
