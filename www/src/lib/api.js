@@ -32,9 +32,19 @@ export async function api(method, path, body) {
     const isLoginAttempt = path === '/auth/login' || path === '/auth/password';
     if (!isLoginAttempt && !authRedirectPending) {
       authRedirectPending = true;
-      if (window.location.hash !== '#login') {
-        window.location.replace('#login');
-      }
+      // Show session expired banner via the unified banner system
+      import('./banner.js').then(({ showBanner, BANNER_PRIORITY }) => {
+        showBanner('session-expired', BANNER_PRIORITY.SESSION_EXPIRED, {
+          message: 'Session expired \u2014 redirecting to login...',
+          variant: 'warning',
+          dismissable: false,
+        });
+      });
+      setTimeout(() => {
+        if (window.location.hash !== '#login') {
+          window.location.replace('#login');
+        }
+      }, 2000);
     }
     throw new ApiError(data.message || 'Session expired', 401, data);
   }

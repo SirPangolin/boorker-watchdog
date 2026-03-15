@@ -1,5 +1,6 @@
-import { api } from '../lib/api.js';
+import { api, ApiError } from '../lib/api.js';
 import { signalBarsSvg, signalLabel, signalColor, wifiArcsSvg, wifiTooltip, formatSignal } from '../lib/format.js';
+import { showBanner, dismissBanner, BANNER_PRIORITY } from '../lib/banner.js';
 
 let pollTimer = null;
 let lastLoadTime = null;
@@ -234,12 +235,17 @@ function markOffline() {
   const wifiEl = document.getElementById('conn-wifi');
   if (wifiEl) {
     wifiEl.classList.add('inactive');
-    wifiEl.classList.remove('active');
+    wifiEl.innerHTML = wifiArcsSvg(null);
     wifiEl.dataset.tooltip = 'WiFi: unreachable';
-    delete wifiEl.dataset.strength;
   }
   const refreshEl = document.getElementById('refresh-text');
   if (refreshEl) refreshEl.textContent = 'Device unreachable';
+  showBanner('device-offline', BANNER_PRIORITY.DEVICE_OFFLINE, {
+    message: 'Device is unreachable',
+    variant: 'error',
+    badge: 'OFFLINE',
+    dismissable: false,
+  });
 }
 
 function markOnline(status) {
@@ -251,6 +257,7 @@ function markOnline(status) {
     wifiEl.innerHTML = wifiArcsSvg(status.wifi_rssi);
     wifiEl.dataset.tooltip = wifiTooltip(status.wifi_ssid, status.wifi_rssi);
   }
+  dismissBanner('device-offline');
 }
 
 // ── Stat Grid ──────────────────────────────────────────────────────
