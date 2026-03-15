@@ -296,7 +296,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
 
     // Initialize device state early (others depend on claimed status)
-    ret = system_state_init();
+    esp_err_t ret = system_state_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "System state init failed: %s", esp_err_to_name(ret));
         return;

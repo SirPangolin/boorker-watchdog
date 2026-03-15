@@ -75,7 +75,9 @@ CONFIG_LED_DRIVER_EXTERNAL_GPIO_B=8
 CONFIG_TS_MGR_ENABLED=n
 
 # HTTPS + NVS encryption (v0.8.2)
-CONFIG_NVS_ENCRYPTION=y
+# NVS encryption uses nvs_flash_secure_init() directly with nvs_keys partition.
+# CONFIG_NVS_ENCRYPTION is NOT set — that enables nvs_sec_provider (HMAC/eFuse),
+# which we don't use. The core secure init API is always available.
 CONFIG_ESP_HTTPS_SERVER_ENABLE=y
 CONFIG_MBEDTLS_X509_CREATE_C=y
 CONFIG_MBEDTLS_PEM_WRITE_C=y

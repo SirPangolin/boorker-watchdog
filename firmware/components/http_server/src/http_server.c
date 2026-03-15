@@ -1053,8 +1053,16 @@ static esp_err_t redirect_to_https(httpd_req_t *req)
     char *colon = strchr(host, ':');
     if (colon) *colon = '\0';
 
-    char location[192];
-    snprintf(location, sizeof(location), "https://%s%s", host, req->uri);
+    // Bound the URI to our configured max — snprintf truncates safely.
+    // req->uri may report up to 512 bytes to the compiler but our redirect
+    // only needs enough to get the browser to the right HTTPS page.
+    char uri[CONFIG_HTTP_SERVER_MAX_URI_LEN + 1];
+    strncpy(uri, req->uri, sizeof(uri) - 1);
+    uri[sizeof(uri) - 1] = '\0';
+
+    // "https://" (8) + host (64) + uri (MAX_URI_LEN) + null
+    char location[8 + sizeof(host) + sizeof(uri)];
+    snprintf(location, sizeof(location), "https://%s%s", host, uri);
 
     httpd_resp_set_status(req, "301 Moved Permanently");
     httpd_resp_set_hdr(req, "Location", location);
