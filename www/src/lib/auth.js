@@ -11,7 +11,8 @@ export async function checkSession() {
     if (err instanceof ApiError && err.status === 401) {
       return { authenticated: false, claimed: true };
     }
-    return { authenticated: false, claimed: true };
+    console.error('Session check failed:', err);
+    return { authenticated: false, claimed: true, error: err.message };
   }
 }
 
