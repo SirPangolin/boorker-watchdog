@@ -53,6 +53,29 @@ typedef enum {
 } event_state_t;
 
 /**
+ * @brief MOTD priority levels
+ */
+typedef enum {
+    MOTD_PRIORITY_INFO = 0,      /**< Informational (lowest) */
+    MOTD_PRIORITY_WARNING,       /**< Warning */
+    MOTD_PRIORITY_CRITICAL,      /**< Critical (highest) */
+    MOTD_PRIORITY_MAX            /**< Sentinel — must be last */
+} motd_priority_t;
+
+/**
+ * @brief MOTD entry structure
+ */
+typedef struct {
+    uint32_t id;                 /**< Unique ID for dismissal */
+    char source[16];             /**< Source component (e.g., "ota") */
+    char message[128];           /**< MOTD message text */
+    motd_priority_t priority;    /**< Priority level */
+    uint32_t timestamp;          /**< Seconds since boot (esp_log_timestamp / 1000) */
+} motd_entry_t;
+
+#define EVENT_BUS_MAX_MOTDS 4    /**< Maximum concurrent MOTDs */
+
+/**
  * @brief Channel callback function signature
  *
  * Called when the active event state changes. Channels should update their
@@ -167,6 +190,47 @@ bool event_bus_is_business_state(event_state_t state);
  * @return Human-readable state name, or "UNKNOWN" if invalid
  */
 const char *event_state_name(event_state_t state);
+
+/**
+ * @brief Post an MOTD notification
+ *
+ * @param source Component name posting the MOTD (max 15 chars)
+ * @param message MOTD message text (max 127 chars)
+ * @param priority Priority level
+ * @return ESP_OK on success
+ * @return ESP_ERR_NO_MEM if MOTD slots full
+ * @return ESP_ERR_INVALID_ARG if source or message is NULL
+ */
+esp_err_t event_bus_post_motd(const char *source, const char *message, motd_priority_t priority);
+
+/**
+ * @brief Copy active MOTDs into caller-provided buffer
+ *
+ * Thread-safe: copies MOTD data under lock so the caller owns the result.
+ *
+ * @param out       Destination buffer for MOTD entries
+ * @param max_count Capacity of @p out (number of entries)
+ * @param count     Output: number of entries actually copied
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if out/count is NULL
+ */
+esp_err_t event_bus_get_motds(motd_entry_t *out, size_t max_count, size_t *count);
+
+/**
+ * @brief Dismiss an MOTD by ID
+ *
+ * @param id MOTD ID to dismiss
+ * @return ESP_OK on success
+ * @return ESP_ERR_NOT_FOUND if ID not found
+ */
+esp_err_t event_bus_dismiss_motd(uint32_t id);
+
+/**
+ * @brief Clear all MOTDs from a source
+ *
+ * @param source Source component name
+ * @return ESP_OK on success
+ */
+esp_err_t event_bus_clear_motds_from(const char *source);
 
 #ifdef __cplusplus
 }

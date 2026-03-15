@@ -6,6 +6,7 @@
 #include "event_bus.h"
 #include "sys_console.h"
 #include "version.h"
+#include "ota_manager.h"
 #include "esp_log.h"
 #include "esp_heap_caps.h"
 #include "esp_littlefs.h"
@@ -658,6 +659,324 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     return ESP_OK;
 }
 
+// Helper: convert motd_priority_t to string
+static const char* motd_priority_str(motd_priority_t priority)
+{
+    switch (priority) {
+        case MOTD_PRIORITY_INFO:     return "info";
+        case MOTD_PRIORITY_WARNING:  return "warning";
+        case MOTD_PRIORITY_CRITICAL: return "critical";
+        default:                     return "info";
+    }
+}
+
+// GET /api/v1/system/motd
+static esp_err_t api_system_motd_get(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    motd_entry_t motds[EVENT_BUS_MAX_MOTDS];
+    size_t count = 0;
+    event_bus_get_motds(motds, EVENT_BUS_MAX_MOTDS, &count);
+
+    cJSON *arr = cJSON_CreateArray();
+    if (arr == NULL) {
+        ESP_LOGE(TAG, "Failed to create MOTD JSON array");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    bool ok = true;
+    for (size_t i = 0; i < count && ok; i++) {
+        cJSON *item = cJSON_CreateObject();
+        if (item == NULL) {
+            ok = false;
+            break;
+        }
+        ok = ok && cJSON_AddNumberToObject(item, "id", motds[i].id);
+        ok = ok && cJSON_AddStringToObject(item, "source", motds[i].source);
+        ok = ok && cJSON_AddStringToObject(item, "message", motds[i].message);
+        ok = ok && cJSON_AddStringToObject(item, "priority", motd_priority_str(motds[i].priority));
+        ok = ok && cJSON_AddNumberToObject(item, "timestamp", motds[i].timestamp);
+        if (ok) {
+            cJSON_AddItemToArray(arr, item);
+        } else {
+            cJSON_Delete(item);
+        }
+    }
+
+    if (!ok) {
+        ESP_LOGE(TAG, "Failed to build MOTD JSON - memory allocation failed");
+        cJSON_Delete(arr);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char *resp = cJSON_PrintUnformatted(arr);
+    cJSON_Delete(arr);
+
+    if (!resp) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
+    free(resp);
+
+    return ESP_OK;
+}
+
+// DELETE /api/v1/system/motd
+static esp_err_t api_system_motd_delete(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    char buf[64];
+    int ret = httpd_req_recv(req, buf, sizeof(buf) - 1);
+    if (ret < 0) {
+        ESP_LOGD(TAG, "MOTD delete recv error: %d", ret);
+        return ESP_FAIL;
+    }
+    if (ret == 0) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No body\"}");
+        return ESP_OK;
+    }
+    buf[ret] = '\0';
+
+    cJSON *json = cJSON_Parse(buf);
+    if (!json) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Invalid JSON\"}");
+        return ESP_OK;
+    }
+
+    cJSON *id_json = cJSON_GetObjectItem(json, "id");
+    if (!cJSON_IsNumber(id_json)) {
+        cJSON_Delete(json);
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Missing or invalid id\"}");
+        return ESP_OK;
+    }
+
+    uint32_t id = (uint32_t)id_json->valueint;
+    cJSON_Delete(json);
+
+    httpd_resp_set_type(req, "application/json");
+
+    esp_err_t err = event_bus_dismiss_motd(id);
+    if (err == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else {
+        httpd_resp_set_status(req, "404 Not Found");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"MOTD not found\"}");
+    }
+
+    return ESP_OK;
+}
+
+// GET /api/v1/ota - get OTA status
+static esp_err_t api_ota_status_get(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    // Check for ?refresh=true query parameter
+    char query[32] = {0};
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) == ESP_OK) {
+        char val[8] = {0};
+        if (httpd_query_key_value(query, "refresh", val, sizeof(val)) == ESP_OK) {
+            if (strcmp(val, "true") == 0) {
+                esp_err_t check_err = ota_manager_check_now();
+                if (check_err != ESP_OK) {
+                    ESP_LOGW(TAG, "OTA refresh check failed: %s", esp_err_to_name(check_err));
+                }
+            }
+        }
+    }
+
+    cJSON *json = cJSON_CreateObject();
+    if (json == NULL) {
+        ESP_LOGE(TAG, "Failed to create OTA status JSON");
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    bool ok = true;
+    ok = ok && cJSON_AddStringToObject(json, "state",
+             system_state_ota_name(system_state_get_ota()));
+    ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
+
+    ota_update_info_t update;
+    if (ota_manager_get_available_update(&update) == ESP_OK) {
+        cJSON *upd = cJSON_CreateObject();
+        if (upd != NULL) {
+            ok = ok && cJSON_AddStringToObject(upd, "version", update.version);
+            ok = ok && cJSON_AddStringToObject(upd, "tag_name", update.tag_name);
+            ok = ok && cJSON_AddStringToObject(upd, "release_notes", update.release_notes);
+            ok = ok && cJSON_AddNumberToObject(upd, "size_bytes", update.size_bytes);
+            ok = ok && cJSON_AddBoolToObject(upd, "is_prerelease", update.is_prerelease);
+            ok = ok && cJSON_AddBoolToObject(upd, "has_sha256", update.has_sha256);
+            ok = ok && cJSON_AddItemToObject(json, "update", upd);
+        } else {
+            ok = false;
+        }
+    }
+
+    if (!ok) {
+        ESP_LOGE(TAG, "Failed to build OTA status JSON - memory allocation failed");
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    char *resp = cJSON_PrintUnformatted(json);
+    cJSON_Delete(json);
+
+    if (!resp) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
+    free(resp);
+
+    return ESP_OK;
+}
+
+// PUT /api/v1/ota - start GitHub update
+static esp_err_t api_ota_update_put(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    // TODO: start_update is blocking (downloads entire firmware). The HTTP server
+    // thread is unavailable during this time. Consider dispatching to a separate
+    // task and returning 202 Accepted for async operation.
+    esp_err_t err = ota_manager_start_update(NULL, NULL);
+    if (err == ESP_OK) {
+        httpd_resp_sendstr(req, "{\"success\":true}");
+    } else if (err == ESP_ERR_INVALID_STATE) {
+        httpd_resp_set_status(req, "409 Conflict");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No update available or already in progress\"}");
+    } else {
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"OTA update failed\"}");
+    }
+
+    return ESP_OK;
+}
+
+// POST /api/v1/ota - upload firmware
+static esp_err_t api_ota_upload_post(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+
+    // Get content length
+    int content_len = req->content_len;
+    if (content_len <= 0) {
+        httpd_resp_set_status(req, "400 Bad Request");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"No content\"}");
+        return ESP_OK;
+    }
+
+    // Optional X-SHA256 header
+    char sha256_buf[65] = {0};
+    const char *sha256 = NULL;
+    if (httpd_req_get_hdr_value_str(req, "X-SHA256", sha256_buf, sizeof(sha256_buf)) == ESP_OK) {
+        sha256 = sha256_buf;
+    }
+
+    // Start upload session
+    esp_err_t err = ota_manager_start_upload((uint32_t)content_len, sha256, NULL, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start OTA upload: %s", esp_err_to_name(err));
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Failed to start upload\"}");
+        return ESP_OK;
+    }
+
+    // Read body in chunks and write to OTA partition
+    char buf[1024];
+    int remaining = content_len;
+
+    while (remaining > 0) {
+        int to_read = remaining < (int)sizeof(buf) ? remaining : (int)sizeof(buf);
+        int received = httpd_req_recv(req, buf, to_read);
+        if (received <= 0) {
+            if (received == HTTPD_SOCK_ERR_TIMEOUT) {
+                continue;  // Retry on timeout
+            }
+            ESP_LOGE(TAG, "OTA upload recv error: %d", received);
+            ota_manager_abort();
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Upload receive failed\"}");
+            return ESP_OK;
+        }
+
+        err = ota_manager_write_upload_chunk(buf, received);
+        if (err != ESP_OK) {
+            ESP_LOGE(TAG, "OTA write chunk failed: %s", esp_err_to_name(err));
+            ota_manager_abort();
+            httpd_resp_set_status(req, "500 Internal Server Error");
+            httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Write failed\"}");
+            return ESP_OK;
+        }
+
+        remaining -= received;
+    }
+
+    // Finalize
+    err = ota_manager_finish_upload();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "OTA finish upload failed: %s", esp_err_to_name(err));
+        ota_manager_abort();
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Verification failed\"}");
+        return ESP_OK;
+    }
+
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
+// DELETE /api/v1/ota - abort in-progress update
+static esp_err_t api_ota_abort_delete(httpd_req_t *req)
+{
+    if (web_auth_require(req) != ESP_OK) {
+        return ESP_OK;
+    }
+
+    esp_err_t err = ota_manager_abort();
+    if (err != ESP_OK) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_set_status(req, "500 Internal Server Error");
+        httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Abort failed\"}");
+        return ESP_OK;
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"success\":true}");
+    return ESP_OK;
+}
+
 // Mount LittleFS
 static esp_err_t mount_littlefs(void)
 {
@@ -702,7 +1021,7 @@ esp_err_t http_server_start(void)
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.server_port = CONFIG_HTTP_SERVER_PORT;
     config.uri_match_fn = httpd_uri_match_wildcard;
-    config.max_uri_handlers = 16;
+    config.max_uri_handlers = 20;
     config.stack_size = 8192;
 
     ret = httpd_start(&s_server, &config);
@@ -823,6 +1142,73 @@ esp_err_t http_server_start(void)
     ret = httpd_register_uri_handler(s_server, &uri_factory_reset);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register /api/v1/system/factory-reset: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_motd_get = {
+        .uri = "/api/v1/system/motd",
+        .method = HTTP_GET,
+        .handler = api_system_motd_get,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_motd_get);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register GET /api/v1/system/motd: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_motd_delete = {
+        .uri = "/api/v1/system/motd",
+        .method = HTTP_DELETE,
+        .handler = api_system_motd_delete,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_motd_delete);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register DELETE /api/v1/system/motd: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    // OTA endpoints
+    httpd_uri_t uri_ota_get = {
+        .uri = "/api/v1/ota",
+        .method = HTTP_GET,
+        .handler = api_ota_status_get,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_ota_get);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register GET /api/v1/ota: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_ota_put = {
+        .uri = "/api/v1/ota",
+        .method = HTTP_PUT,
+        .handler = api_ota_update_put,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_ota_put);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register PUT /api/v1/ota: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_ota_post = {
+        .uri = "/api/v1/ota",
+        .method = HTTP_POST,
+        .handler = api_ota_upload_post,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_ota_post);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register POST /api/v1/ota: %s", esp_err_to_name(ret));
+        if (first_error == ESP_OK) first_error = ret;
+    }
+
+    httpd_uri_t uri_ota_delete = {
+        .uri = "/api/v1/ota",
+        .method = HTTP_DELETE,
+        .handler = api_ota_abort_delete,
+    };
+    ret = httpd_register_uri_handler(s_server, &uri_ota_delete);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register DELETE /api/v1/ota: %s", esp_err_to_name(ret));
         if (first_error == ESP_OK) first_error = ret;
     }
 

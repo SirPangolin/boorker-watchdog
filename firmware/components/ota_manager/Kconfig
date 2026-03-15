@@ -1,0 +1,41 @@
+menu "OTA Manager"
+
+    config OTA_MANAGER_CHECK_INTERVAL_HOURS
+        int "Background check interval (hours)"
+        default 24
+        range 1 168
+        help
+            How often to check GitHub for firmware updates.
+
+    config OTA_MANAGER_DEFAULT_CHANNEL
+        int "Default release channel (0=stable, 1=prerelease)"
+        default 0
+        range 0 1
+        help
+            0 = stable releases only, 1 = include pre-releases.
+
+    config OTA_MANAGER_TASK_STACK_SIZE
+        int "OTA task stack size"
+        default 8192
+        help
+            Stack size for the OTA background check task.
+            Must be large enough for HTTPS/TLS operations.
+
+    config OTA_MANAGER_HTTP_BUF_SIZE_KB
+        int "HTTP response buffer size (KB)"
+        default 16
+        range 4 64
+        help
+            Maximum size in kilobytes for HTTP response buffers used by
+            OTA operations (GitHub API calls and firmware downloads).
+            Allocated from PSRAM at runtime.
+
+    config OTA_MANAGER_TASK_PRIORITY
+        int "OTA task priority"
+        default 3
+        range 1 24
+        help
+            FreeRTOS priority for OTA background task.
+            Lower than sensors (5) since OTA checks are infrequent.
+
+endmenu
