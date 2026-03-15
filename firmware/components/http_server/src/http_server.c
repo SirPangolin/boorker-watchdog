@@ -30,6 +30,15 @@ static const char *TAG = "http_server";
 // LittleFS mount point for static web content
 #define WEB_FS_BASE_PATH "/littlefs"
 
+// Cookie flags — add Secure when serving over HTTPS
+#if CONFIG_HTTP_SERVER_HTTPS_ENABLED
+#define COOKIE_CLEAR "session=; Path=/; Max-Age=0; SameSite=Strict; Secure"
+#define COOKIE_SECURE_FLAG "; Secure"
+#else
+#define COOKIE_CLEAR "session=; Path=/; Max-Age=0; SameSite=Strict"
+#define COOKIE_SECURE_FLAG ""
+#endif
+
 static httpd_handle_t s_server = NULL;
 #if CONFIG_HTTP_SERVER_HTTPS_ENABLED
 static httpd_handle_t s_redirect_server = NULL;
@@ -232,7 +241,7 @@ static esp_err_t api_auth_login(httpd_req_t *req)
     if (err == ESP_OK) {
         // Set session cookie
         char cookie[128];
-        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict", token);
+        snprintf(cookie, sizeof(cookie), "session=%s; Path=/; HttpOnly; SameSite=Strict%s", token, COOKIE_SECURE_FLAG);
         httpd_resp_set_hdr(req, "Set-Cookie", cookie);
 
         // Check if password change is required (device unclaimed)
@@ -279,7 +288,7 @@ static esp_err_t api_auth_logout(httpd_req_t *req)
     }
 
     // Always clear cookie (even if server-side invalidation failed)
-    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
+    httpd_resp_set_hdr(req, "Set-Cookie", COOKIE_CLEAR);
     httpd_resp_set_type(req, "application/json");
 
     if (session_invalidated) {
@@ -367,7 +376,7 @@ static esp_err_t api_auth_password(httpd_req_t *req)
 
     if (err == ESP_OK) {
         // Clear session cookie (user must re-login)
-        httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
+        httpd_resp_set_hdr(req, "Set-Cookie", COOKIE_CLEAR);
         httpd_resp_sendstr(req, "{\"success\":true}");
     } else if (err == ESP_ERR_INVALID_ARG) {
         httpd_resp_set_status(req, "401 Unauthorized");
@@ -497,7 +506,7 @@ static esp_err_t api_system_factory_reset(httpd_req_t *req)
     ESP_LOGI(TAG, "Factory reset complete - scheduling reboot");
 
     // Clear session cookie
-    httpd_resp_set_hdr(req, "Set-Cookie", "session=; Path=/; Max-Age=0; SameSite=Strict");
+    httpd_resp_set_hdr(req, "Set-Cookie", COOKIE_CLEAR);
     httpd_resp_sendstr(req, "{\"success\":true,\"message\":\"Factory reset complete, rebooting...\"}");
 
     // Schedule reboot after response sent
