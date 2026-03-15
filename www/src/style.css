@@ -637,9 +637,8 @@ dialog footer {
 /* ===== MOBILE NAV ===== */
 .mobile-only { display: none !important; }
 
-/* Override OAT's display:flex on role="alert" and .mobile-nav when hidden */
-[role="alert"][hidden],
-.mobile-nav[hidden] { display: none; }
+/* Override OAT's explicit display values that break the native [hidden] attribute */
+[hidden] { display: none !important; }
 
 .mobile-nav:not([hidden]) {
   display: flex;

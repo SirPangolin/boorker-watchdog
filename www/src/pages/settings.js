@@ -38,35 +38,35 @@ export function render() {
       <div class="settings-body" id="ota-section">
         <div class="settings-row">
           <div>
-            <strong>Current Version</strong>
+            <strong>Current Firmware</strong>
             <small id="ota-current-version">--</small>
           </div>
-          <div>
-            <small id="ota-last-check"></small>
-          </div>
+          <button id="ota-check-btn" class="outline">Check for Updates</button>
         </div>
-        <div id="ota-update-alert" class="settings-row" hidden>
-          <div>
-            <strong id="ota-update-version"></strong>
-            <small id="ota-release-notes"></small>
+        <div id="ota-check-result" hidden>
+          <div id="ota-up-to-date" class="settings-row" hidden>
+            <div>
+              <strong>Up to date</strong>
+              <small id="ota-last-check">No updates available.</small>
+            </div>
           </div>
-          <button id="ota-install-btn">Install Update</button>
-        </div>
-        <div class="settings-row">
-          <div>
-            <strong>Check for Updates</strong>
-            <small>Query the update server for new firmware.</small>
+          <div id="ota-update-alert" class="settings-row" hidden>
+            <div>
+              <strong id="ota-update-version">Update available</strong>
+              <small id="ota-release-notes"></small>
+            </div>
+            <button id="ota-install-btn">Install Update</button>
           </div>
-          <button id="ota-check-btn" class="outline">Check Now</button>
         </div>
         <div id="ota-progress" hidden>
           <progress id="ota-progress-bar" value="0" max="100"></progress>
           <small id="ota-progress-text">Preparing...</small>
         </div>
+        <hr>
         <div class="settings-row">
           <div>
-            <strong>Upload Firmware</strong>
-            <small>Manually upload a .bin firmware file.</small>
+            <strong>Manual Upload</strong>
+            <small>Upload a .bin firmware file directly.</small>
           </div>
           <input type="file" id="ota-file-input" name="firmware" accept=".bin">
           <button id="ota-upload-btn" class="outline file-upload-btn" type="button">Upload File</button>
@@ -228,6 +228,8 @@ async function loadOtaStatus() {
 function renderOtaStatus(ota) {
   // SECURITY: All values set via textContent — no innerHTML with API data
   const versionEl = document.getElementById('ota-current-version');
+  const checkResult = document.getElementById('ota-check-result');
+  const upToDate = document.getElementById('ota-up-to-date');
   const lastCheckEl = document.getElementById('ota-last-check');
   const updateAlert = document.getElementById('ota-update-alert');
   const updateVersion = document.getElementById('ota-update-version');
@@ -237,19 +239,24 @@ function renderOtaStatus(ota) {
     versionEl.textContent = 'v' + (ota.version || '?');
   }
 
-  if (lastCheckEl && ota.last_check) {
-    const d = new Date(ota.last_check * 1000);
-    lastCheckEl.textContent = 'Last checked: ' + d.toLocaleString();
-  }
-
-  if (ota.update && updateAlert) {
-    updateAlert.hidden = false;
+  if (ota.update) {
+    // Update available
+    if (checkResult) checkResult.hidden = false;
+    if (upToDate) upToDate.hidden = true;
+    if (updateAlert) updateAlert.hidden = false;
     if (updateVersion) {
-      updateVersion.textContent = 'Update available: v' + ota.update.version;
+      const size = ota.update.size_bytes ? ` (${(ota.update.size_bytes / 1024 / 1024).toFixed(1)} MB)` : '';
+      updateVersion.textContent = `v${ota.update.version} available${size}`;
     }
     if (releaseNotes) {
       releaseNotes.textContent = ota.update.release_notes || '';
     }
+  } else if (ota._checked) {
+    // Explicitly checked and no update found
+    if (checkResult) checkResult.hidden = false;
+    if (upToDate) upToDate.hidden = false;
+    if (updateAlert) updateAlert.hidden = true;
+    if (lastCheckEl) lastCheckEl.textContent = 'Your firmware is up to date.';
   }
 
   if (ota.state === 'downloading' || ota.state === 'flashing') {
@@ -431,8 +438,8 @@ function bindActions() {
       checkBtn.setAttribute('aria-busy', 'true');
       try {
         const ota = await api('GET', '/ota?refresh=true');
+        ota._checked = true;
         renderOtaStatus(ota);
-        showToast('Update check complete.');
       } catch (err) {
         showToast('Update check failed: ' + err.message);
       } finally {
@@ -482,7 +489,7 @@ function bindActions() {
           body: buffer,
         });
         if (res.status === 401) {
-          window.location.hash = '#login';
+          window.location.replace('#login');
           throw new Error('Session expired');
         }
         if (!res.ok) {

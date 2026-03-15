@@ -112,7 +112,7 @@ function mountLogin() {
       clearAuthRedirect();
       const { setSession } = await import('../app.js');
       setSession({ authenticated: true, claimed: true });
-      window.location.hash = '#dashboard';
+      window.location.replace('#dashboard');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         const remaining = err.data && err.data.attempts_remaining;
@@ -191,7 +191,7 @@ function mountSetPassword() {
       clearAuthRedirect();
       const { setSession } = await import('../app.js');
       setSession({ authenticated: true, claimed: true });
-      window.location.hash = '#dashboard';
+      window.location.replace('#dashboard');
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         errorEl.textContent = 'Generated password is incorrect.';
