@@ -38,16 +38,15 @@ export function signalColor(rssi) {
 export function wifiArcsSvg(rssi, size = 14) {
   const level = signalLevel(rssi);
   const color = rssi != null ? signalColor(rssi) : 'var(--muted-foreground)';
-  const dim = 'var(--muted-foreground)" opacity="0.25';
-  const arc3 = level >= 4 ? color : `${dim}`;
-  const arc2 = level >= 3 ? color : `${dim}`;
-  const arc1 = level >= 2 ? color : `${dim}`;
-  const dot = level >= 1 ? color : `${dim}`;
+  const dimColor = 'var(--muted-foreground)';
+  const dimOp = '0.25';
+  const s = (lvl, c) => lvl ? `stroke="${c}"` : `stroke="${dimColor}" opacity="${dimOp}"`;
+  const f = (lvl, c) => lvl ? `fill="${c}"` : `fill="${dimColor}" opacity="${dimOp}"`;
   return `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M1.42 9a16 16 0 0 1 21.16 0" stroke="${arc3}"/>
-    <path d="M5 12.55a11 11 0 0 1 14.08 0" stroke="${arc2}"/>
-    <path d="M8.53 16.11a6 6 0 0 1 6.95 0" stroke="${arc1}"/>
-    <circle cx="12" cy="20" r="1" fill="${dot}"/>
+    <path d="M1.42 9a16 16 0 0 1 21.16 0" ${s(level >= 4, color)}/>
+    <path d="M5 12.55a11 11 0 0 1 14.08 0" ${s(level >= 3, color)}/>
+    <path d="M8.53 16.11a6 6 0 0 1 6.95 0" ${s(level >= 2, color)}/>
+    <circle cx="12" cy="20" r="1" ${f(level >= 1, color)}/>
   </svg>`;
 }
 
@@ -60,7 +59,9 @@ export function wifiArcsSvg(rssi, size = 14) {
 export function signalBarsSvg(rssi, height = 28, barWidth = 5) {
   const level = signalLevel(rssi);
   const color = signalColor(rssi);
-  const dim = 'var(--muted-foreground)" opacity="0.25';
+  const dimColor = 'var(--muted-foreground)';
+  const dimOp = '0.25';
+  const bar = (lvl, c) => lvl ? `fill="${c}"` : `fill="${dimColor}" opacity="${dimOp}"`;
   const gap = barWidth + 2;
   const w = gap * 4 - 2;
   const h1 = Math.round(height * 0.25);
@@ -68,10 +69,10 @@ export function signalBarsSvg(rssi, height = 28, barWidth = 5) {
   const h3 = Math.round(height * 0.75);
   const h4 = height;
   return `<svg width="${w}" height="${height}" viewBox="0 0 ${w} ${height}" style="vertical-align:middle">
-    <rect x="0" y="${height - h1}" width="${barWidth}" height="${h1}" rx="1" fill="${level >= 1 ? color : `${dim}`}"/>
-    <rect x="${gap}" y="${height - h2}" width="${barWidth}" height="${h2}" rx="1" fill="${level >= 2 ? color : `${dim}`}"/>
-    <rect x="${gap * 2}" y="${height - h3}" width="${barWidth}" height="${h3}" rx="1" fill="${level >= 3 ? color : `${dim}`}"/>
-    <rect x="${gap * 3}" y="${height - h4}" width="${barWidth}" height="${h4}" rx="1" fill="${level >= 4 ? color : `${dim}`}"/>
+    <rect x="0" y="${height - h1}" width="${barWidth}" height="${h1}" rx="1" ${bar(level >= 1, color)}/>
+    <rect x="${gap}" y="${height - h2}" width="${barWidth}" height="${h2}" rx="1" ${bar(level >= 2, color)}/>
+    <rect x="${gap * 2}" y="${height - h3}" width="${barWidth}" height="${h3}" rx="1" ${bar(level >= 3, color)}/>
+    <rect x="${gap * 3}" y="${height - h4}" width="${barWidth}" height="${h4}" rx="1" ${bar(level >= 4, color)}/>
   </svg>`;
 }
 
