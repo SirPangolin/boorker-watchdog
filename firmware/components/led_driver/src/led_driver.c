@@ -597,6 +597,37 @@ esp_err_t led_driver_register_patterns(blink_step_t const **patterns, size_t num
     return ret;
 }
 
+/**
+ * @brief Check if a pattern contains steps that cause infinite loops on GPIO handles
+ *
+ * The led_indicator library excludes BREATHE, RGB_RING, and HSV_RING from
+ * step-pointer pre-advancement (they self-advance during fade completion).
+ * When a handle lacks the required capability, the skip path doesn't advance
+ * the pointer either — creating an infinite tight loop that starves the
+ * FreeRTOS timer daemon and blocks all other LED handles.
+ *
+ * @param pattern_id Pattern index to check
+ * @return true if the pattern contains steps unsafe for GPIO handles
+ */
+static bool pattern_has_gpio_unsafe_steps(int pattern_id)
+{
+    if (!s_ctx.patterns || (size_t)pattern_id >= s_ctx.num_patterns) {
+        return false;
+    }
+    const blink_step_t *steps = s_ctx.patterns[pattern_id];
+    for (int i = 0; i < 32; i++) {  // Safety limit
+        if (steps[i].type == LED_BLINK_BREATHE ||
+            steps[i].type == LED_BLINK_RGB_RING ||
+            steps[i].type == LED_BLINK_HSV_RING) {
+            return true;
+        }
+        if (steps[i].type == LED_BLINK_LOOP || steps[i].type == LED_BLINK_STOP) {
+            break;
+        }
+    }
+    return false;
+}
+
 esp_err_t led_driver_start_pattern(int pattern_id)
 {
     if (!s_ctx.initialized) {
@@ -619,10 +650,24 @@ esp_err_t led_driver_start_pattern(int pattern_id)
     esp_err_t ret = ESP_OK;
 
     if (s_ctx.onboard_handle) {
+#if CONFIG_LED_DRIVER_ONBOARD_GPIO
+        if (pattern_has_gpio_unsafe_steps(pattern_id)) {
+            ret = led_indicator_set_on_off(s_ctx.onboard_handle, true);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to set onboard GPIO on for pattern %d: %s", pattern_id, esp_err_to_name(ret));
+            }
+        } else {
+            ret = led_indicator_start(s_ctx.onboard_handle, pattern_id);
+            if (ret != ESP_OK) {
+                ESP_LOGE(TAG, "Failed to start onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
+            }
+        }
+#else
         ret = led_indicator_start(s_ctx.onboard_handle, pattern_id);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
         }
+#endif
     }
 
     if (s_ctx.external_handle) {
@@ -644,15 +689,34 @@ esp_err_t led_driver_stop_pattern(int pattern_id)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (pattern_id < 0 || (size_t)pattern_id >= s_ctx.num_patterns) {
+        ESP_LOGE(TAG, "Stop pattern ID %d out of range (0-%zu)", pattern_id, s_ctx.num_patterns - 1);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
 
     esp_err_t ret = ESP_OK;
 
     if (s_ctx.onboard_handle) {
+#if CONFIG_LED_DRIVER_ONBOARD_GPIO
+        if (pattern_has_gpio_unsafe_steps(pattern_id)) {
+            ret = led_indicator_set_on_off(s_ctx.onboard_handle, false);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to set onboard GPIO off for pattern %d: %s", pattern_id, esp_err_to_name(ret));
+            }
+        } else {
+            ret = led_indicator_stop(s_ctx.onboard_handle, pattern_id);
+            if (ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to stop onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
+            }
+        }
+#else
         ret = led_indicator_stop(s_ctx.onboard_handle, pattern_id);
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to stop onboard pattern %d: %s", pattern_id, esp_err_to_name(ret));
         }
+#endif
     }
 
     if (s_ctx.external_handle) {
