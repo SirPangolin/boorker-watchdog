@@ -7,6 +7,9 @@
 #include "esp_console.h"
 #include "nvs_flash.h"
 #include "esp_partition.h"
+#if CONFIG_BOARD_VEXT_ENABLED
+#include "driver/gpio.h"
+#endif
 
 #include "version.h"
 #include "wifi_manager.h"
@@ -320,6 +323,24 @@ void app_main(void)
     ESP_ERROR_CHECK(init_nvs_encrypted());
     ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
     ESP_LOGI(TAG, "Free PSRAM: %lu bytes", heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
+
+    // Enable Vext power rail for external sensors (Heltec V3)
+    // Active LOW — P-channel MOSFET, GPIO LOW = Vext ON
+    // Must happen before any sensor driver init
+#if CONFIG_BOARD_VEXT_ENABLED
+    {
+        esp_err_t vext_ret = gpio_set_direction(CONFIG_BOARD_VEXT_GPIO, GPIO_MODE_OUTPUT);
+        if (vext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Vext GPIO %d direction failed: %s", CONFIG_BOARD_VEXT_GPIO, esp_err_to_name(vext_ret));
+        }
+        vext_ret = gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 0);  // LOW = Vext ON
+        if (vext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Vext GPIO %d set level failed: %s", CONFIG_BOARD_VEXT_GPIO, esp_err_to_name(vext_ret));
+        } else {
+            ESP_LOGI(TAG, "Vext enabled on GPIO %d (active LOW)", CONFIG_BOARD_VEXT_GPIO);
+        }
+    }
+#endif
 
     // Initialize device state early (others depend on claimed status)
     esp_err_t ret = system_state_init();
