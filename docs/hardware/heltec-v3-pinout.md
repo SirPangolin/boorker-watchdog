@@ -226,7 +226,7 @@ gpio_set_level(GPIO_NUM_36, 0);  // LOW = Vext ON — sensors powered
 gpio_set_level(GPIO_NUM_36, 1);  // HIGH = Vext OFF — sensors unpowered (deep sleep)
 ```
 
-Sensors connected to Vext will not work until GPIO36 is driven HIGH.
+Sensors connected to Vext will not work until GPIO36 is driven LOW.
 
 ## LED
 

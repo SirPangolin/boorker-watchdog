@@ -328,9 +328,18 @@ void app_main(void)
     // Active LOW — P-channel MOSFET, GPIO LOW = Vext ON
     // Must happen before any sensor driver init
 #if CONFIG_BOARD_VEXT_ENABLED
-    gpio_set_direction(CONFIG_BOARD_VEXT_GPIO, GPIO_MODE_OUTPUT);
-    gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 0);  // LOW = Vext ON
-    ESP_LOGI(TAG, "Vext enabled on GPIO %d (active LOW)", CONFIG_BOARD_VEXT_GPIO);
+    {
+        esp_err_t vext_ret = gpio_set_direction(CONFIG_BOARD_VEXT_GPIO, GPIO_MODE_OUTPUT);
+        if (vext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Vext GPIO %d direction failed: %s", CONFIG_BOARD_VEXT_GPIO, esp_err_to_name(vext_ret));
+        }
+        vext_ret = gpio_set_level(CONFIG_BOARD_VEXT_GPIO, 0);  // LOW = Vext ON
+        if (vext_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Vext GPIO %d set level failed: %s", CONFIG_BOARD_VEXT_GPIO, esp_err_to_name(vext_ret));
+        } else {
+            ESP_LOGI(TAG, "Vext enabled on GPIO %d (active LOW)", CONFIG_BOARD_VEXT_GPIO);
+        }
+    }
 #endif
 
     // Initialize device state early (others depend on claimed status)

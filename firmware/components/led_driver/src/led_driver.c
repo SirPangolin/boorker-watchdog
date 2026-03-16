@@ -689,6 +689,11 @@ esp_err_t led_driver_stop_pattern(int pattern_id)
         return ESP_ERR_INVALID_STATE;
     }
 
+    if (pattern_id < 0 || (size_t)pattern_id >= s_ctx.num_patterns) {
+        ESP_LOGE(TAG, "Stop pattern ID %d out of range (0-%zu)", pattern_id, s_ctx.num_patterns - 1);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     xSemaphoreTake(s_ctx.mutex, portMAX_DELAY);
 
     esp_err_t ret = ESP_OK;
