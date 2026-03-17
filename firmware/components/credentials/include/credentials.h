@@ -79,6 +79,21 @@ esp_err_t credentials_regenerate(void);
 esp_err_t credentials_get_qr_json(char *buf, size_t buf_len);
 
 /**
+ * Generate ESP BLE Prov app compatible QR payload
+ *
+ * Format: {"ver":"v1","name":"PROV_XXXX","pop":"123456","transport":"ble"}
+ * This is the exact format the ESP BLE Prov mobile app expects to scan.
+ *
+ * @param buf Output buffer (recommend 128 bytes)
+ * @param buf_len Buffer size
+ * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_ARG if buf is NULL or buf_len is 0
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_NO_MEM if buffer too small
+ */
+esp_err_t credentials_get_prov_qr_json(char *buf, size_t buf_len);
+
+/**
  * Get TLS certificate PEM string (ECDSA P-256, self-signed).
  * Generated at first boot alongside other credentials.
  *
