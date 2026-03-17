@@ -310,6 +310,36 @@ size_t sensor_manager_get_sensor_count(void)
     return s_ctx.sensor_count;
 }
 
+esp_err_t sensor_manager_get_reading_by_index(size_t index, sensor_reading_t *out)
+{
+    if (out == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (index >= s_ctx.sensor_count) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
+    *out = s_ctx.sensors[index].last_reading;
+
+    xSemaphoreGive(s_ctx.mutex);
+    return ESP_OK;
+}
+
+const char *sensor_manager_get_sensor_id(size_t index)
+{
+    if (!s_ctx.initialized || index >= s_ctx.sensor_count) {
+        return NULL;
+    }
+    return s_ctx.sensors[index].id;
+}
+
 // --- Internal functions ---
 
 static esp_err_t load_config_from_nvs(void)
