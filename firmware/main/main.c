@@ -24,6 +24,9 @@
 #include "sys_console.h"
 #include "status_led.h"
 #include "status_buzzer.h"
+#if CONFIG_STATUS_DISPLAY_ENABLED
+#include "status_display.h"
+#endif
 #include "sensor_manager.h"
 #include "ota_manager.h"
 #if CONFIG_SW420_DRIVER_ENABLED
@@ -195,6 +198,13 @@ static void init_console(void)
     ret = sw420_driver_register_console(NULL);  // Uses singleton
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "SW420 console init failed: %s", esp_err_to_name(ret));
+    }
+#endif
+
+#if CONFIG_STATUS_DISPLAY_ENABLED
+    ret = status_display_register_console();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Display console init failed: %s", esp_err_to_name(ret));
     }
 #endif
 
@@ -392,6 +402,15 @@ void app_main(void)
         // Continue - buzzer is not critical
     }
 
+    // Initialize status display (OLED + button, registers with event bus)
+#if CONFIG_STATUS_DISPLAY_ENABLED
+    ret = status_display_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Display init failed: %s (continuing without display)",
+                 esp_err_to_name(ret));
+    }
+#endif
+
     // Initialize sensor manager
     ret = sensor_manager_init();
     if (ret != ESP_OK) {
@@ -405,7 +424,7 @@ void app_main(void)
         }
     }
 
-    // Show credentials on first boot (until OLED is implemented)
+    // Show credentials on first boot (serial console + OLED display)
     if (!system_state_is_claimed()) {
         event_bus_set_state(EVENT_FIRST_BOOT);
         ESP_LOGI(TAG, "========================================");
