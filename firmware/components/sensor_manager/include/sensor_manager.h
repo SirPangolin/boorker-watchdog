@@ -96,6 +96,29 @@ sensor_status_t sensor_manager_get_status(const char *sensor_id);
 size_t sensor_manager_get_sensor_count(void);
 
 /**
+ * @brief Get sensor reading by index (for display enumeration)
+ *
+ * Allows iterating sensors without knowing IDs. Index order matches
+ * registration order (typically Kconfig default order).
+ *
+ * @param index Sensor index (0 to get_sensor_count()-1)
+ * @param out Output reading (copied under mutex)
+ * @return ESP_OK on success
+ * @return ESP_ERR_INVALID_ARG if index out of range or out is NULL
+ * @return ESP_ERR_INVALID_STATE if not initialized
+ * @return ESP_ERR_TIMEOUT if mutex acquisition fails
+ */
+esp_err_t sensor_manager_get_reading_by_index(size_t index, sensor_reading_t *out);
+
+/**
+ * @brief Get sensor ID string by index
+ *
+ * @param index Sensor index (0 to get_sensor_count()-1)
+ * @return Sensor ID string (e.g., "temp_humidity"), or NULL if index invalid
+ */
+const char *sensor_manager_get_sensor_id(size_t index);
+
+/**
  * @brief Register console commands for sensor manager
  *
  * Registers the "sensor" command with subcommands:
