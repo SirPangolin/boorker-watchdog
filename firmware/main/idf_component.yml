@@ -1,3 +1,5 @@
 dependencies:
   joltwallet/littlefs:
     version: "*"
+  nixy4/u8g2:
+    version: "*"

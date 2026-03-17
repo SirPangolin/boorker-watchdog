@@ -1,0 +1,85 @@
+menu "Status Display"
+
+    config STATUS_DISPLAY_ENABLED
+        bool "Enable OLED status display"
+        default n
+        help
+            Enable SSD1306 OLED display as an ANDON notification channel.
+            Uses u8g2 graphics library for rendering.
+
+    if STATUS_DISPLAY_ENABLED
+
+        config STATUS_DISPLAY_I2C_SDA
+            int "I2C SDA GPIO"
+            default 17
+            range 0 48
+            help
+                I2C data GPIO for OLED. Heltec V3: GPIO17.
+
+        config STATUS_DISPLAY_I2C_SCL
+            int "I2C SCL GPIO"
+            default 18
+            range 0 48
+            help
+                I2C clock GPIO for OLED. Heltec V3: GPIO18.
+
+        config STATUS_DISPLAY_RST_GPIO
+            int "Display reset GPIO (-1 to disable)"
+            default 21
+            range -1 48
+            help
+                GPIO for display hardware reset. Heltec V3: GPIO21.
+                Set -1 if no reset pin connected.
+
+        config STATUS_DISPLAY_SPLASH_DELAY_MS
+            int "Splash screen duration (ms)"
+            default 5000
+            range 1000 15000
+
+        config STATUS_DISPLAY_ROTATE_INTERVAL_MS
+            int "Dashboard auto-rotate interval (ms)"
+            default 5000
+            range 2000 30000
+
+        config STATUS_DISPLAY_DRILL_TIMEOUT_MS
+            int "Drill-down auto-return timeout (ms)"
+            default 30000
+            range 5000 120000
+
+        config STATUS_DISPLAY_CONTRAST
+            int "Default contrast (0-255)"
+            default 128
+            range 0 255
+
+        config STATUS_DISPLAY_MAX_SENSORS
+            int "Max sensors per node"
+            default 8
+            range 1 16
+
+        config STATUS_DISPLAY_MAX_NODES
+            int "Max mesh nodes tracked"
+            default 8
+            range 1 16
+
+        config STATUS_DISPLAY_TASK_STACK
+            int "Display task stack size"
+            default 4096
+            range 2048 8192
+
+        config STATUS_DISPLAY_TASK_PRIORITY
+            int "Display task priority"
+            default 3
+            range 1 10
+
+        config STATUS_DISPLAY_THROBBER_MS
+            int "Splash throbber interval (ms)"
+            default 300
+            range 100 1000
+
+        config STATUS_DISPLAY_PERSIST_OFF
+            bool "Persist display on/off across reboots"
+            default n
+
+    endif # STATUS_DISPLAY_ENABLED
+
+endmenu
