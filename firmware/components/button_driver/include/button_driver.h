@@ -56,6 +56,9 @@ typedef enum {
  */
 typedef void (*button_callback_t)(int button_id, button_press_t press_type, void *ctx);
 
+/** Sentinel value to disable very-long press detection for a button */
+#define BUTTON_VERY_LONG_DISABLED  UINT16_MAX
+
 /**
  * @brief Button registration configuration
  */
@@ -65,7 +68,7 @@ typedef struct {
     button_mode_t mode;           /**< MOMENTARY or LATCHED */
     uint16_t debounce_ms;         /**< Debounce period. 0 = Kconfig default */
     uint16_t long_press_ms;       /**< Long press threshold. 0 = Kconfig default */
-    uint16_t very_long_press_ms;  /**< Very long press threshold. 0 = Kconfig default, 0xFFFF = disabled */
+    uint16_t very_long_press_ms;  /**< Very long press threshold. 0 = Kconfig default, BUTTON_VERY_LONG_DISABLED = disabled */
     button_callback_t callback;   /**< Event callback (required) */
     void *ctx;                    /**< User context passed to callback */
 } button_config_t;
