@@ -35,7 +35,7 @@ static const char *TAG = "status_display";
 // Forward declarations for screen rendering (display_screens.c)
 extern void screen_splash(u8g2_t *u8g2, int throbber_phase);
 extern void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str);
-extern void screen_dashboard_card(u8g2_t *u8g2, int metric_index, int total_metrics);
+extern void screen_dashboard_card(u8g2_t *u8g2, int metric_index);
 extern int screen_get_metric_count(void);
 extern void screen_alert(u8g2_t *u8g2, const char *source, const char *message, bool silenced);
 extern void screen_network(u8g2_t *u8g2);
@@ -72,7 +72,6 @@ typedef enum {
 // --------------------------------------------------------------------------
 
 static struct {
-    SemaphoreHandle_t mutex;
     TaskHandle_t task;
     bool initialized;
 
@@ -87,7 +86,6 @@ static struct {
 
     // Event bus state
     event_state_t event_state;
-    bool event_pending;
 
     // Rotation
     int rotate_page;
@@ -139,7 +137,6 @@ static void on_event_state_change(event_state_t state, void *ctx)
 {
     (void)ctx;
     s_ctx.event_state = state;
-    s_ctx.event_pending = true;
 
     if (s_ctx.task) {
         xTaskNotify(s_ctx.task, NOTIFY_EVENT_CHANGE, eSetBits);
@@ -152,13 +149,13 @@ static void on_event_state_change(event_state_t state, void *ctx)
 
 static void handle_event_change(void)
 {
-    s_ctx.event_pending = false;
     event_state_t state = s_ctx.event_state;
 
     // Alert override — takes over any screen
     if (state == EVENT_ALERT_CRITICAL || state == EVENT_ALERT_ACTIVE || state == EVENT_ERROR) {
         if (s_ctx.screen != SCREEN_ALERT) {
-            s_ctx.pre_alert_screen = s_ctx.screen;
+            // Don't return to OFF after alert — user should see the dashboard
+            s_ctx.pre_alert_screen = (s_ctx.screen == SCREEN_OFF) ? SCREEN_DASHBOARD : s_ctx.screen;
             s_ctx.screen = SCREEN_ALERT;
             s_ctx.alert_silenced = false;
         }
@@ -304,7 +301,7 @@ static void render_current_screen(void)
     case SCREEN_DASHBOARD: {
         int total_metrics = screen_get_metric_count();
         s_ctx.rotate_total = total_metrics > 0 ? total_metrics : 1;
-        screen_dashboard_card(&s_ctx.u8g2, s_ctx.rotate_page, s_ctx.rotate_total);
+        screen_dashboard_card(&s_ctx.u8g2, s_ctx.rotate_page);
         break;
     }
 
@@ -388,7 +385,7 @@ static void display_task(void *arg)
         }
 
         uint32_t notify_value = 0;
-        xTaskNotifyWait(0, ULONG_MAX, &notify_value, wait_ticks);
+        xTaskNotifyWait(0, UINT32_MAX, &notify_value, wait_ticks);
 
         // Process notifications
         if (notify_value & NOTIFY_BUTTON_VLONG) {
@@ -436,18 +433,10 @@ esp_err_t status_display_init(void)
 
     ESP_LOGI(TAG, "Initializing status display");
 
-    s_ctx.mutex = xSemaphoreCreateMutex();
-    if (s_ctx.mutex == NULL) {
-        ESP_LOGE(TAG, "Failed to create mutex");
-        return ESP_ERR_NO_MEM;
-    }
-
     // Initialize I2C HAL for u8g2
     esp_err_t ret = display_hal_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Display HAL init failed: %s", esp_err_to_name(ret));
-        vSemaphoreDelete(s_ctx.mutex);
-        s_ctx.mutex = NULL;
         return ret;
     }
 
@@ -475,8 +464,6 @@ esp_err_t status_display_init(void)
         // ESP_ERR_INVALID_STATE = already initialized (OK)
         ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(ret));
         display_hal_deinit();
-        vSemaphoreDelete(s_ctx.mutex);
-        s_ctx.mutex = NULL;
         return ret;
     }
 
@@ -506,9 +493,8 @@ esp_err_t status_display_init(void)
         if (s_ctx.prg_button_id >= 0) {
             button_driver_unregister(s_ctx.prg_button_id);
         }
+        button_driver_deinit();
         display_hal_deinit();
-        vSemaphoreDelete(s_ctx.mutex);
-        s_ctx.mutex = NULL;
         return ESP_ERR_NO_MEM;
     }
 
@@ -545,8 +531,6 @@ esp_err_t status_display_deinit(void)
     display_hal_deinit();
 
     // Cleanup
-    vSemaphoreDelete(s_ctx.mutex);
-    s_ctx.mutex = NULL;
     s_ctx.initialized = false;
 
     ESP_LOGI(TAG, "Status display deinitialized");

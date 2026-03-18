@@ -45,13 +45,27 @@ uint8_t display_hal_i2c_byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void
 
     case U8X8_MSG_BYTE_START_TRANSFER:
         s_i2c_handle = i2c_cmd_link_create();
-        i2c_master_start(s_i2c_handle);
-        i2c_master_write_byte(s_i2c_handle, u8x8_GetI2CAddress(u8x8), true);
+        if (s_i2c_handle == NULL) {
+            ESP_LOGE(TAG, "i2c_cmd_link_create failed (OOM)");
+            return 0;
+        }
+        esp_err_t start_ret = i2c_master_start(s_i2c_handle);
+        if (start_ret != ESP_OK) {
+            ESP_LOGE(TAG, "i2c_master_start failed: %s", esp_err_to_name(start_ret));
+        }
+        start_ret = i2c_master_write_byte(s_i2c_handle, u8x8_GetI2CAddress(u8x8), true);
+        if (start_ret != ESP_OK) {
+            ESP_LOGE(TAG, "i2c_master_write_byte (addr) failed: %s", esp_err_to_name(start_ret));
+        }
         break;
 
-    case U8X8_MSG_BYTE_SEND:
-        i2c_master_write(s_i2c_handle, (uint8_t *)arg_ptr, arg_int, true);
+    case U8X8_MSG_BYTE_SEND: {
+        esp_err_t send_ret = i2c_master_write(s_i2c_handle, (uint8_t *)arg_ptr, arg_int, true);
+        if (send_ret != ESP_OK) {
+            ESP_LOGE(TAG, "i2c_master_write failed: %s", esp_err_to_name(send_ret));
+        }
         break;
+    }
 
     case U8X8_MSG_BYTE_END_TRANSFER: {
         i2c_master_stop(s_i2c_handle);
@@ -66,7 +80,7 @@ uint8_t display_hal_i2c_byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void
     }
 
     default:
-        return 0;
+        return 1;  // Return 1 = "handled" for unrecognized I2C messages
     }
 
     return 1;
@@ -99,12 +113,17 @@ uint8_t display_hal_gpio_delay_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, vo
 
     case U8X8_MSG_GPIO_RESET:
 #if CONFIG_STATUS_DISPLAY_RST_GPIO >= 0
-        gpio_set_level((gpio_num_t)CONFIG_STATUS_DISPLAY_RST_GPIO, arg_int);
+    {
+        esp_err_t rst_ret = gpio_set_level((gpio_num_t)CONFIG_STATUS_DISPLAY_RST_GPIO, arg_int);
+        if (rst_ret != ESP_OK) {
+            ESP_LOGW(TAG, "RST gpio_set_level(%d) failed: %s", arg_int, esp_err_to_name(rst_ret));
+        }
+    }
 #endif
         break;
 
     default:
-        return 0;
+        return 1;  // Return 1 for unhandled GPIO/delay messages (software I2C not used)
     }
 
     return 1;
@@ -153,7 +172,10 @@ esp_err_t display_hal_init(void)
     };
     ret = gpio_config(&io_conf);
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "RST GPIO config failed: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "RST GPIO %d config failed: %s — display may not init correctly",
+                 CONFIG_STATUS_DISPLAY_RST_GPIO, esp_err_to_name(ret));
+        i2c_driver_delete(I2C_NUM_0);
+        return ret;
     }
 #endif
 
