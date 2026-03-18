@@ -13,6 +13,7 @@
 
 #if CONFIG_STATUS_DISPLAY_ENABLED
 
+#include <math.h>
 #include "u8g2.h"
 #include "sensor_manager.h"
 #include "sensor_types.h"
@@ -60,7 +61,6 @@ static void draw_footer_dots(u8g2_t *u8g2, int current_page, int total_pages)
 
     // Draw dot indicators on the left
     int dot_spacing = 8;
-    int dots_width = total_pages * dot_spacing;
     int dot_x = 2;
     int dot_y = 58;
 
@@ -166,7 +166,7 @@ void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_
 // 3. Dashboard — metric card (one sensor value per screen, auto-rotates)
 // --------------------------------------------------------------------------
 
-void screen_dashboard_card(u8g2_t *u8g2, int metric_index, int total_metrics)
+void screen_dashboard_card(u8g2_t *u8g2, int metric_index)
 {
     draw_header(u8g2, "BOORKER", NULL);
 

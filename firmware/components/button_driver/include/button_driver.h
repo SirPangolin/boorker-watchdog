@@ -6,11 +6,12 @@
  * Each button is registered at runtime with per-button configuration for GPIO,
  * active level, debounce, press thresholds, and callback.
  *
- * Uses GPIO ISR for edge detection + FreeRTOS timer for debounce/press timing.
- * Callbacks fire from FreeRTOS timer daemon task context — must not block.
+ * Uses a periodic 10ms polling timer (esp_timer). Reads GPIO state, debounces
+ * via consecutive stable readings, and tracks hold duration for press detection.
+ * Callbacks fire from esp_timer task context (high priority) — must not block.
  *
  * @note Thread Safety: register/unregister are mutex-protected.
- *       Callbacks fire from timer task — callers must handle their own sync.
+ *       Callbacks fire from esp_timer task — callers must handle their own sync.
  */
 
 #pragma once
@@ -50,7 +51,7 @@ typedef enum {
  * @param press_type Type of button event
  * @param ctx User context from button_config_t
  *
- * @note Called from FreeRTOS timer daemon task. Must not block or call
+ * @note Called from esp_timer task (high priority). Must not block or call
  *       button_driver_register/unregister (deadlock risk).
  */
 typedef void (*button_callback_t)(int button_id, button_press_t press_type, void *ctx);
@@ -72,7 +73,7 @@ typedef struct {
 /**
  * @brief Initialize the button driver
  *
- * Installs GPIO ISR service and creates internal resources.
+ * Creates mutex and starts periodic GPIO poll timer.
  * Must be called before register/unregister.
  *
  * @return ESP_OK on success
@@ -94,7 +95,7 @@ esp_err_t button_driver_deinit(void);
 /**
  * @brief Register a button
  *
- * Configures GPIO, installs ISR handler, creates debounce timer.
+ * Configures GPIO as input and initializes debounce/press tracking state.
  *
  * @param config Button configuration (callback is required)
  * @return Non-negative button_id on success (0 to MAX_BUTTONS-1)
@@ -105,7 +106,7 @@ int button_driver_register(const button_config_t *config);
 /**
  * @brief Unregister a button
  *
- * Removes ISR handler, deletes timer, releases slot.
+ * Deactivates button slot. The button will no longer be polled.
  *
  * @param button_id ID returned by button_driver_register()
  * @return ESP_OK on success

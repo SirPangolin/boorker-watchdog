@@ -41,7 +41,6 @@ typedef struct {
     int64_t press_start_us;      /**< When press was first debounced */
     bool long_fired;
     bool very_long_fired;
-    bool last_latched_state;
 } button_slot_t;
 
 /**
@@ -214,12 +213,17 @@ esp_err_t button_driver_deinit(void)
 
     ESP_LOGI(TAG, "Deinitializing button driver");
 
-    // Stop and delete poll timer
-    esp_timer_stop(s_ctx.poll_timer);
-    esp_timer_delete(s_ctx.poll_timer);
+    esp_err_t stop_ret = esp_timer_stop(s_ctx.poll_timer);
+    if (stop_ret != ESP_OK && stop_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGW(TAG, "Timer stop failed: %s", esp_err_to_name(stop_ret));
+    }
+    esp_err_t del_ret = esp_timer_delete(s_ctx.poll_timer);
+    if (del_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Timer delete failed: %s", esp_err_to_name(del_ret));
+        return del_ret;
+    }
     s_ctx.poll_timer = NULL;
 
-    // Clear all slots
     memset(s_ctx.slots, 0, sizeof(s_ctx.slots));
 
     s_ctx.initialized = false;
@@ -286,7 +290,6 @@ int button_driver_register(const button_config_t *config)
     slot->stable_count = 255;  // Already stable
     slot->debounce_threshold = DEBOUNCE_TICKS(slot->config.debounce_ms);
     if (slot->debounce_threshold < 2) slot->debounce_threshold = 2;
-    slot->last_latched_state = slot->raw_last;
 
     slot->active = true;
 

@@ -334,6 +334,8 @@ esp_err_t sensor_manager_get_reading_by_index(size_t index, sensor_reading_t *ou
 
 const char *sensor_manager_get_sensor_id(size_t index)
 {
+    // No mutex: sensor IDs are immutable after init. If hot-add/remove
+    // is added in the future, this must take s_ctx.mutex.
     if (!s_ctx.initialized || index >= s_ctx.sensor_count) {
         return NULL;
     }
