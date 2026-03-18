@@ -27,7 +27,7 @@ menu "Button Driver"
         range 2000 30000
         help
             Default very long press threshold. Per-button override available.
-            Set 0xFFFF at registration to disable for a specific button.
+            Set BUTTON_VERY_LONG_DISABLED at registration to disable.
 
     config BUTTON_DRIVER_PRG_GPIO
         int "PRG button GPIO"

@@ -60,6 +60,9 @@ uint8_t display_hal_i2c_byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void
         break;
 
     case U8X8_MSG_BYTE_SEND: {
+        if (s_i2c_handle == NULL) {
+            return 0;  // OOM during START_TRANSFER — u8g2 still calls SEND
+        }
         esp_err_t send_ret = i2c_master_write(s_i2c_handle, (uint8_t *)arg_ptr, arg_int, true);
         if (send_ret != ESP_OK) {
             ESP_LOGE(TAG, "i2c_master_write failed: %s", esp_err_to_name(send_ret));
@@ -68,6 +71,9 @@ uint8_t display_hal_i2c_byte_cb(u8x8_t *u8x8, uint8_t msg, uint8_t arg_int, void
     }
 
     case U8X8_MSG_BYTE_END_TRANSFER: {
+        if (s_i2c_handle == NULL) {
+            return 0;  // OOM during START_TRANSFER — nothing to end
+        }
         i2c_master_stop(s_i2c_handle);
         esp_err_t ret = i2c_master_cmd_begin(I2C_NUM_0, s_i2c_handle, pdMS_TO_TICKS(100));
         i2c_cmd_link_delete(s_i2c_handle);
