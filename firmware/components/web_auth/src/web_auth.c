@@ -638,6 +638,12 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
                  esp_err_to_name(claim_ret));
     }
 
+    // Clear credential first-boot flag so creds stop printing on serial
+    esp_err_t cred_ret = credentials_ack_first_boot();
+    if (cred_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to ack credential first boot: %s", esp_err_to_name(cred_ret));
+    }
+
     esp_err_t event_ret = event_bus_clear_state(EVENT_FIRST_BOOT);
     if (event_ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to clear first boot LED state: %s", esp_err_to_name(event_ret));
