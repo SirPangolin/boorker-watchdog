@@ -32,17 +32,7 @@
 
 static const char *TAG = "status_display";
 
-// Forward declarations for screen rendering (display_screens.c)
-extern void screen_splash(u8g2_t *u8g2, int throbber_phase);
-extern void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str);
-extern void screen_dashboard_card(u8g2_t *u8g2, int metric_index);
-extern int screen_get_metric_count(void);
-extern void screen_alert(u8g2_t *u8g2, const char *source, const char *message, bool silenced);
-extern void screen_network(u8g2_t *u8g2);
-extern void screen_lora(u8g2_t *u8g2);
-extern void screen_system(u8g2_t *u8g2);
-extern void screen_nodes(u8g2_t *u8g2);
-extern void screen_sensors(u8g2_t *u8g2);
+#include "display_internal.h"
 
 // --------------------------------------------------------------------------
 // Screen state machine

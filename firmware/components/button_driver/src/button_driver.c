@@ -69,6 +69,14 @@ static void apply_defaults(button_config_t *cfg)
     if (cfg->very_long_press_ms == 0) {
         cfg->very_long_press_ms = CONFIG_BUTTON_DRIVER_VERY_LONG_PRESS_MS;
     }
+
+    // Validate: very_long must be greater than long (unless disabled)
+    if (cfg->very_long_press_ms != BUTTON_VERY_LONG_DISABLED &&
+        cfg->very_long_press_ms <= cfg->long_press_ms) {
+        ESP_LOGW(TAG, "very_long_press_ms (%u) must be > long_press_ms (%u), adjusting",
+                 cfg->very_long_press_ms, cfg->long_press_ms);
+        cfg->very_long_press_ms = cfg->long_press_ms + 2000;
+    }
 }
 
 /**
@@ -141,7 +149,7 @@ static void poll_timer_callback(void *arg)
             int64_t held_ms = (esp_timer_get_time() - slot->press_start_us) / 1000;
 
             if (!slot->very_long_fired &&
-                slot->config.very_long_press_ms != 0xFFFF &&
+                slot->config.very_long_press_ms != BUTTON_VERY_LONG_DISABLED &&
                 held_ms >= slot->config.very_long_press_ms) {
                 slot->very_long_fired = true;
                 slot->config.callback(i, BUTTON_PRESS_VERY_LONG, slot->config.ctx);
