@@ -17,6 +17,7 @@
 #include "sensor_manager.h"
 #include "credentials.h"
 #include "system_state.h"
+#include "status_buzzer.h"
 #include "u8g2.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -34,8 +35,8 @@ static const char *TAG = "status_display";
 // Forward declarations for screen rendering (display_screens.c)
 extern void screen_splash(u8g2_t *u8g2, int throbber_phase);
 extern void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str);
-extern void screen_dashboard(u8g2_t *u8g2, const char *node_name, const char *conn_type,
-                             size_t sensor_count, int page, int total_pages);
+extern void screen_dashboard_card(u8g2_t *u8g2, int metric_index, int total_metrics);
+extern int screen_get_metric_count(void);
 extern void screen_alert(u8g2_t *u8g2, const char *source, const char *message, bool silenced);
 extern void screen_network(u8g2_t *u8g2);
 extern void screen_lora(u8g2_t *u8g2);
@@ -194,6 +195,9 @@ static void handle_button_short(void)
 {
     s_ctx.last_interaction_us = esp_timer_get_time();
 
+    // Chirp on every short press
+    status_buzzer_play(BUZZER_PRESET_CHIRP);
+
     switch (s_ctx.screen) {
     case SCREEN_OFF:
         // Wake display
@@ -208,8 +212,8 @@ static void handle_button_short(void)
         if (!s_ctx.alert_silenced) {
             // First press: silence buzzer
             s_ctx.alert_silenced = true;
+            status_buzzer_stop();
             ESP_LOGI(TAG, "Alert buzzer silenced");
-            // TODO: call status_buzzer_stop() when API available
         } else {
             // Second press: acknowledge alert
             ESP_LOGI(TAG, "Alert acknowledged");
@@ -255,6 +259,7 @@ static void handle_button_long(void)
     s_ctx.display_on = false;
     s_ctx.screen = SCREEN_OFF;
     u8g2_SetPowerSave(&s_ctx.u8g2, 1);
+    status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);
     ESP_LOGI(TAG, "Display off (long press)");
 }
 
@@ -262,7 +267,9 @@ static void handle_button_very_long(void)
 {
     ESP_LOGW(TAG, "Rebooting (very long press)...");
 
-    // Show reboot message
+    // Wake display if off so user sees the reboot message
+    u8g2_SetPowerSave(&s_ctx.u8g2, 0);
+
     u8g2_ClearBuffer(&s_ctx.u8g2);
     u8g2_SetFont(&s_ctx.u8g2, u8g2_font_6x10_tf);
     u8g2_DrawStr(&s_ctx.u8g2, 20, 36, "REBOOTING...");
@@ -295,10 +302,9 @@ static void render_current_screen(void)
     }
 
     case SCREEN_DASHBOARD: {
-        size_t count = sensor_manager_get_sensor_count();
-        s_ctx.rotate_total = 1;  // Local node for now
-        screen_dashboard(&s_ctx.u8g2, "LOCAL", "this node", count,
-                        s_ctx.rotate_page, s_ctx.rotate_total);
+        int total_metrics = screen_get_metric_count();
+        s_ctx.rotate_total = total_metrics > 0 ? total_metrics : 1;
+        screen_dashboard_card(&s_ctx.u8g2, s_ctx.rotate_page, s_ctx.rotate_total);
         break;
     }
 
