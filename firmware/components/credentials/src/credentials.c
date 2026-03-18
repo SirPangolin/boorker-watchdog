@@ -494,3 +494,27 @@ esp_err_t credentials_get_qr_json(char *buf, size_t buf_len)
 
     return ESP_OK;
 }
+
+esp_err_t credentials_get_prov_qr_json(char *buf, size_t buf_len)
+{
+    if (buf == NULL || buf_len == 0) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    // ESP BLE Prov app expects exactly this JSON format
+    int written = snprintf(buf, buf_len,
+        "{\"ver\":\"v1\",\"name\":\"PROV_%s\",\"pop\":\"%s\",\"transport\":\"ble\"}",
+        s_cred.node_suffix,
+        s_cred.ble_pop
+    );
+
+    if (written < 0 || (size_t)written >= buf_len) {
+        return ESP_ERR_NO_MEM;
+    }
+
+    return ESP_OK;
+}

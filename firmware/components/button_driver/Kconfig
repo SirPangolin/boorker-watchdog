@@ -1,0 +1,40 @@
+menu "Button Driver"
+
+    config BUTTON_DRIVER_MAX_BUTTONS
+        int "Maximum registered buttons"
+        default 4
+        range 1 8
+        help
+            Maximum number of buttons that can be registered simultaneously.
+
+    config BUTTON_DRIVER_DEBOUNCE_MS
+        int "Default debounce period (ms)"
+        default 50
+        range 10 500
+        help
+            Default debounce time. Per-button override available at registration.
+
+    config BUTTON_DRIVER_LONG_PRESS_MS
+        int "Default long press threshold (ms)"
+        default 3000
+        range 500 10000
+        help
+            Default long press detection threshold. Per-button override available.
+
+    config BUTTON_DRIVER_VERY_LONG_PRESS_MS
+        int "Default very long press threshold (ms)"
+        default 10000
+        range 2000 30000
+        help
+            Default very long press threshold. Per-button override available.
+            Set BUTTON_VERY_LONG_DISABLED at registration to disable.
+
+    config BUTTON_DRIVER_PRG_GPIO
+        int "PRG button GPIO"
+        default 0
+        range 0 48
+        help
+            GPIO for the on-board PRG button. Active LOW (internal pull-up).
+            Override in board sdkconfig overlay if needed.
+
+endmenu
