@@ -317,3 +317,11 @@ secrets.h
 
 # Web SPA — override Python lib/ ignore
 !www/src/lib/
+
+# Web SPA build cache
+www/.vite/
+www/dist/
+www/node_modules/
+
+# Superpowers brainstorming artifacts
+.superpowers/
