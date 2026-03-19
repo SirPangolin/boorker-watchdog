@@ -71,7 +71,7 @@ UART at 115200 baud. Type `help` for available commands.
 boorker> status
 Boorker v0.7.1 - boorker-727C
 Uptime: 0h 18m 49s
-WiFi: CONNECTED (192.168.68.54)
+WiFi: CONNECTED (192.168.x.x)
 ```
 
 ## Security
