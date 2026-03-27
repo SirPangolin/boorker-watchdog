@@ -329,6 +329,7 @@ www/node_modules/
 # OLED emulator build artifacts
 tools/oled-emulator/build/
 tools/oled-emulator/oled_emulator
+tools/oled-emulator/screenshots/
 
 # Override: allow the emulator Makefile (caught by CMake Makefile ignore)
 !tools/oled-emulator/Makefile

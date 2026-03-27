@@ -7,6 +7,9 @@
  */
 
 #include "mock_esp.h"
+#include "esp_netif.h"
+#include <stdarg.h>
+#include <stdio.h>
 #include <time.h>
 #include <stdlib.h>
 
@@ -47,15 +50,15 @@ const char *sensor_manager_get_sensor_id(size_t index) {
 }
 
 // --------------------------------------------------------------------------
-// Mock credentials
+// Mock credentials (intentionally fake — not real device secrets)
 // --------------------------------------------------------------------------
 
 static credentials_t mock_creds = {
-    .node_name = "boorker-E7E0",
-    .web_password = "pT84xa3WXaBe",
-    .ap_password = "sFq#36jcXphN",
-    .ble_pop = "844365",
-    .node_suffix = "E7E0",
+    .node_name = "boorker-MOCK",
+    .web_password = "mock-web-pass",
+    .ap_password = "mock-ap-pass",
+    .ble_pop = "000000",
+    .node_suffix = "MOCK",
 };
 
 const credentials_t *credentials_get(void) {
@@ -68,25 +71,24 @@ const credentials_t *credentials_get(void) {
 
 esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) {
     if (!ap) return ESP_FAIL;
-    strncpy((char *)ap->ssid, "Gnome", sizeof(ap->ssid));
-    ap->rssi = -22;
+    strncpy((char *)ap->ssid, "MockNetwork", sizeof(ap->ssid));
+    ap->rssi = -42;
     return ESP_OK;
 }
 
 esp_err_t esp_wifi_get_mac(wifi_interface_t ifx, uint8_t mac[6]) {
     (void)ifx;
-    mac[0] = 0x3C; mac[1] = 0x0F; mac[2] = 0x02;
-    mac[3] = 0xE7; mac[4] = 0xE7; mac[5] = 0xE0;
+    mac[0] = 0xDE; mac[1] = 0xAD; mac[2] = 0xBE;
+    mac[3] = 0xEF; mac[4] = 0x00; mac[5] = 0x01;
     return ESP_OK;
 }
 
-// Stub for esp_netif — emulator just shows the mock WiFi data
-typedef struct { uint32_t ip; } esp_netif_ip_info_t;
-typedef void* esp_netif_t;
+// Mock netif — return non-NULL so IP code path is exercised
+static int mock_netif_handle;
 
 esp_netif_t *esp_netif_get_handle_from_ifkey(const char *key) {
     (void)key;
-    return NULL;  // Network screen will skip IP line
+    return (esp_netif_t *)&mock_netif_handle;
 }
 
 // --------------------------------------------------------------------------
@@ -103,15 +105,24 @@ uint32_t esp_get_free_heap_size(void) {
 
 int64_t esp_timer_get_time(void) {
     struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
+        return 0;
+    }
     return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
 }
 
 // --------------------------------------------------------------------------
-// ESP log stub (just printf)
+// ESP log — forward errors and warnings to stderr
 // --------------------------------------------------------------------------
 
 void esp_log_write(int level, const char *tag, const char *fmt, ...) {
-    (void)level; (void)tag; (void)fmt;
-    // Silent in emulator
+    // ESP log levels: 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG, 5=VERBOSE
+    if (level <= 2) {
+        const char *prefix = (level == 1) ? "E" : "W";
+        fprintf(stderr, "[%s][%s] ", prefix, tag ? tag : "?");
+        va_list args;
+        va_start(args, fmt);
+        vfprintf(stderr, fmt, args);
+        va_end(args);
+    }
 }

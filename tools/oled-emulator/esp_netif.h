@@ -12,6 +12,8 @@ typedef void* esp_netif_t;
 esp_netif_t *esp_netif_get_handle_from_ifkey(const char *key);
 
 static inline esp_err_t esp_netif_get_ip_info(esp_netif_t *netif, esp_netif_ip_info_t *info) {
-    (void)netif; (void)info;
-    return ESP_FAIL;  // Will use the IP2STR fallback
+    (void)netif;
+    if (!info) return ESP_FAIL;
+    info->ip.addr = 0;  // IP2STR macro provides the display value
+    return ESP_OK;
 }
