@@ -1,3 +1,6 @@
 [submodule "firmware/components/microlink"]
 	path = firmware/components/microlink
 	url = https://github.com/CamM2325/microlink.git
+[submodule "tools/oled-emulator/u8g2"]
+	path = tools/oled-emulator/u8g2
+	url = https://github.com/olikraus/u8g2.git

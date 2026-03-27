@@ -25,6 +25,7 @@
 #include "esp_system.h"
 #include "version.h"
 
+#include <ctype.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -100,29 +101,38 @@ static void draw_footer_dots(u8g2_t *u8g2, int current_page, int total_pages)
 
 void screen_splash(u8g2_t *u8g2, int throbber_phase)
 {
-    // Draw Millie logo centered
-    int logo_x = (128 - millie_logo_width) / 2;
-    u8g2_DrawXBM(u8g2, logo_x, 2, millie_logo_width, millie_logo_height, millie_logo_xbm);
+    // Side-by-side brand lockup: logo left, text right
 
-    // Brand text below logo
-    u8g2_SetFont(u8g2, u8g2_font_6x10_tf);
+    // Millie logo — left side, vertically centered
+    int logo_x = 2;
+    int logo_y = (64 - millie_logo_height) / 2;
+    u8g2_DrawXBM(u8g2, logo_x, logo_y, millie_logo_width, millie_logo_height, millie_logo_xbm);
+
+    // Right-side text area — centered within available space
+    int area_x = logo_x + millie_logo_width + 2;
+    int area_w = 128 - area_x;
+
+    // "BOORKER" — bold, centered
+    u8g2_SetFont(u8g2, u8g2_font_7x14B_tf);
     const char *brand = "BOORKER";
     int bw = u8g2_GetStrWidth(u8g2, brand);
-    u8g2_DrawStr(u8g2, (128 - bw) / 2, 46, brand);
+    u8g2_DrawStr(u8g2, area_x + (area_w - bw) / 2, 30, brand);
 
-    u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
+    // "WATCHDOG" — smaller, centered below
+    u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
     const char *sub = "WATCHDOG";
     int sw = u8g2_GetStrWidth(u8g2, sub);
-    u8g2_DrawStr(u8g2, (128 - sw) / 2, 52, sub);
+    u8g2_DrawStr(u8g2, area_x + (area_w - sw) / 2, 42, sub);
 
-    // Throbber dots
-    u8g2_SetFont(u8g2, u8g2_font_5x7_tf);
+    // Throbber dots — centered on full display width
+    int dot_span = 2 * 8;  // 3 dots at 8px spacing
+    int dot_x0 = (128 - dot_span) / 2;
     for (int i = 0; i < 3; i++) {
-        int x = 56 + i * 8;
+        int x = dot_x0 + i * 8;
         if (i == throbber_phase) {
-            u8g2_DrawDisc(u8g2, x, 59, 2, U8G2_DRAW_ALL);
+            u8g2_DrawDisc(u8g2, x, 55, 2, U8G2_DRAW_ALL);
         } else {
-            u8g2_DrawCircle(u8g2, x, 59, 2, U8G2_DRAW_ALL);
+            u8g2_DrawCircle(u8g2, x, 55, 2, U8G2_DRAW_ALL);
         }
     }
 }
@@ -221,10 +231,12 @@ static bool resolve_metric(int metric_index, char *label, size_t label_len,
                     snprintf(value_str, value_len, "%.1f F", reading.value);
                 } else {
                     snprintf(label, label_len, "%s", id ? id : "SENSOR");
+                    for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
                     snprintf(value_str, value_len, "%.1f", reading.value);
                 }
             } else {
                 snprintf(label, label_len, "%s", id ? id : "SENSOR");
+                for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
                 snprintf(value_str, value_len, "%s", sensor_status_name(reading.status));
             }
             return true;
