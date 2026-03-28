@@ -123,18 +123,6 @@ esp_err_t sw420_driver_load_config(sw420_handle_t handle);
  */
 sw420_handle_t sw420_driver_get_instance(void);
 
-/**
- * @brief Register console commands
- *
- * Registers: vibration [status|raw [sec]|config [param] [value]|config save]
- *
- * @param handle Instance handle (NULL to use singleton)
- * @return ESP_OK on success
- * @return ESP_ERR_NO_MEM if argtable allocation fails
- * @note If no handle available, commands will return errors until sensor init
- */
-esp_err_t sw420_driver_register_console(sw420_handle_t handle);
-
 #ifdef __cplusplus
 }
 #endif
