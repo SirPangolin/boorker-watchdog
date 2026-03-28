@@ -68,9 +68,16 @@ static uint32_t calculate_backoff(uint8_t fail_count, uint32_t base_interval);
 static void button_event_handler(int button_id, button_press_t type, void *ctx)
 {
     (void)ctx;
+    uint8_t press;
+    switch (type) {
+    case BUTTON_PRESS_SHORT:     press = EVENT_PRESS_SHORT;     break;
+    case BUTTON_PRESS_LONG:      press = EVENT_PRESS_LONG;      break;
+    case BUTTON_PRESS_VERY_LONG: press = EVENT_PRESS_VERY_LONG; break;
+    default: return;
+    }
     event_notify_t event = {
         .type = EVENT_NOTIFY_BUTTON,
-        .button = { .button_id = (uint8_t)button_id, .press = (uint8_t)type },
+        .button = { .button_id = (uint8_t)button_id, .press = press },
     };
     event_bus_notify(&event);
 }

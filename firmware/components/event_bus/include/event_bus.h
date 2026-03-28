@@ -80,12 +80,18 @@ typedef enum {
     EVENT_NOTIFY_TYPE_MAX
 } event_notify_type_t;
 
+enum {
+    EVENT_PRESS_SHORT     = 0,
+    EVENT_PRESS_LONG      = 1,
+    EVENT_PRESS_VERY_LONG = 2,
+};
+
 typedef struct {
     event_notify_type_t type;
     union {
         struct {
             uint8_t button_id;
-            uint8_t press;       // button_press_t from button_driver.h
+            uint8_t press;       // EVENT_PRESS_SHORT / LONG / VERY_LONG
         } button;
     };
 } event_notify_t;

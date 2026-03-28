@@ -282,15 +282,24 @@ static esp_err_t play_preset_unlocked(buzzer_preset_t preset)
     return ret;
 }
 
-/**
- * @brief Event bus channel callback - plays transition sounds
- *
- * Called by event_bus when the active state changes. Maps state transitions
- * to buzzer patterns and plays appropriate sounds.
- *
- * @param new_state New active event state
- * @param ctx User context (unused)
- */
+static void on_notify(const event_notify_t *event, void *ctx)
+{
+    (void)ctx;
+    if (!s_ctx.initialized || !s_ctx.enabled) return;
+    if (event->type != EVENT_NOTIFY_BUTTON) return;
+
+    switch (event->button.press) {
+    case EVENT_PRESS_SHORT:
+        status_buzzer_play(BUZZER_PRESET_CHIRP);
+        break;
+    case EVENT_PRESS_LONG:
+        status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);
+        break;
+    default:
+        break;
+    }
+}
+
 static void on_event_state_change(event_state_t new_state, void *ctx)
 {
     (void)ctx;
@@ -441,7 +450,7 @@ esp_err_t status_buzzer_init(void)
              s_ctx.enabled, s_ctx.alerts_only);
 
     // Register as event bus channel
-    ret = event_bus_register_channel("buzzer", on_event_state_change, NULL);
+    ret = event_bus_register_channel_ex("buzzer", on_event_state_change, on_notify, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register event bus channel: %s", esp_err_to_name(ret));
         // Continue anyway - manual play still works

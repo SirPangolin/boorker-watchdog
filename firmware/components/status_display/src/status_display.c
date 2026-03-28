@@ -12,12 +12,10 @@
 
 #include "status_display.h"
 #include "display_hal.h"
-#include "button_driver.h"
 #include "event_bus.h"
 #include "sensor_manager.h"
 #include "credentials.h"
 #include "system_state.h"
-#include "status_buzzer.h"
 #include "u8g2.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -66,7 +64,6 @@ static struct {
     bool initialized;
 
     u8g2_t u8g2;
-    int prg_button_id;
 
     // Screen state
     screen_state_t screen;
@@ -87,33 +84,23 @@ static struct {
     .display_on = true,
     .screen = SCREEN_SPLASH,
     .event_state = EVENT_OFF,
-    .prg_button_id = -1,
 };
 
 // --------------------------------------------------------------------------
-// Button callback (fires from timer daemon task)
+// Event bus notify callback (button events)
 // --------------------------------------------------------------------------
 
-static void prg_button_handler(int button_id, button_press_t type, void *ctx)
+static void on_notify(const event_notify_t *event, void *ctx)
 {
-    (void)button_id;
     (void)ctx;
-
-    if (!s_ctx.task) return;
+    if (!s_ctx.task || event->type != EVENT_NOTIFY_BUTTON) return;
 
     uint32_t bits = 0;
-    switch (type) {
-    case BUTTON_PRESS_SHORT:
-        bits = NOTIFY_BUTTON_SHORT;
-        break;
-    case BUTTON_PRESS_LONG:
-        bits = NOTIFY_BUTTON_LONG;
-        break;
-    case BUTTON_PRESS_VERY_LONG:
-        bits = NOTIFY_BUTTON_VLONG;
-        break;
-    default:
-        return;
+    switch (event->button.press) {
+    case EVENT_PRESS_SHORT:     bits = NOTIFY_BUTTON_SHORT; break;
+    case EVENT_PRESS_LONG:      bits = NOTIFY_BUTTON_LONG;  break;
+    case EVENT_PRESS_VERY_LONG: bits = NOTIFY_BUTTON_VLONG; break;
+    default: return;
     }
 
     xTaskNotify(s_ctx.task, bits, eSetBits);
@@ -182,9 +169,6 @@ static void handle_button_short(void)
 {
     s_ctx.last_interaction_us = esp_timer_get_time();
 
-    // Chirp on every short press
-    status_buzzer_play(BUZZER_PRESET_CHIRP);
-
     switch (s_ctx.screen) {
     case SCREEN_OFF:
         // Wake display
@@ -199,8 +183,7 @@ static void handle_button_short(void)
         if (!s_ctx.alert_silenced) {
             // First press: silence buzzer
             s_ctx.alert_silenced = true;
-            status_buzzer_stop();
-            ESP_LOGI(TAG, "Alert buzzer silenced");
+            ESP_LOGI(TAG, "Alert silenced");
         } else {
             // Second press: acknowledge alert
             ESP_LOGI(TAG, "Alert acknowledged");
@@ -246,7 +229,6 @@ static void handle_button_long(void)
     s_ctx.display_on = false;
     s_ctx.screen = SCREEN_OFF;
     u8g2_SetPowerSave(&s_ctx.u8g2, 1);
-    status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);
     ESP_LOGI(TAG, "Display off (long press)");
 }
 
@@ -345,7 +327,7 @@ static void display_task(void *arg)
     }
 
     // Phase 2: Register with event_bus
-    esp_err_t ret = event_bus_register_channel("display", on_event_state_change, NULL);
+    esp_err_t ret = event_bus_register_channel_ex("display", on_event_state_change, on_notify, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register event bus channel: %s", esp_err_to_name(ret));
     } else {
@@ -448,42 +430,12 @@ esp_err_t status_display_init(void)
 
     ESP_LOGI(TAG, "u8g2 SSD1306 128x64 initialized");
 
-    // Initialize button driver and register PRG button
-    ret = button_driver_init();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        // ESP_ERR_INVALID_STATE = already initialized (OK)
-        ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(ret));
-        display_hal_deinit();
-        return ret;
-    }
-
-    button_config_t prg_cfg = {
-        .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
-        .active_high = false,
-        .mode = BUTTON_MODE_MOMENTARY,
-        .debounce_ms = 0,             // Kconfig default
-        .long_press_ms = 3000,        // Display off
-        .very_long_press_ms = 10000,  // Reboot
-        .callback = prg_button_handler,
-        .ctx = NULL,
-    };
-    s_ctx.prg_button_id = button_driver_register(&prg_cfg);
-    if (s_ctx.prg_button_id < 0) {
-        ESP_LOGW(TAG, "Failed to register PRG button (continuing without button)");
-    } else {
-        ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)", s_ctx.prg_button_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
-    }
-
     // Create display task
     BaseType_t task_ret = xTaskCreate(display_task, "display",
         CONFIG_STATUS_DISPLAY_TASK_STACK, NULL,
         CONFIG_STATUS_DISPLAY_TASK_PRIORITY, &s_ctx.task);
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create display task");
-        if (s_ctx.prg_button_id >= 0) {
-            button_driver_unregister(s_ctx.prg_button_id);
-        }
-        button_driver_deinit();
         display_hal_deinit();
         return ESP_ERR_NO_MEM;
     }
@@ -506,12 +458,6 @@ esp_err_t status_display_deinit(void)
     if (s_ctx.task) {
         vTaskDelete(s_ctx.task);
         s_ctx.task = NULL;
-    }
-
-    // Unregister button
-    if (s_ctx.prg_button_id >= 0) {
-        button_driver_unregister(s_ctx.prg_button_id);
-        s_ctx.prg_button_id = -1;
     }
 
     // Turn off display
