@@ -90,7 +90,7 @@ static struct {
 
     // Pending readings from notify callback (consumed by display task)
     cached_reading_t pending[MAX_CACHED_READINGS];
-    volatile size_t pending_count;
+    size_t pending_count;
 
     // Rotation
     int rotate_page;
@@ -103,6 +103,8 @@ static struct {
     .screen = SCREEN_SPLASH,
     .event_state = EVENT_OFF,
 };
+
+static portMUX_TYPE s_pending_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 // --------------------------------------------------------------------------
 // Reading cache accessors (used by display_screens.c)
@@ -132,8 +134,13 @@ bool display_get_reading(size_t index, const char **sensor_id,
 // Called from notify callback (sensor_manager's task) — writes to pending buffer
 static void queue_sensor_reading(const event_notify_t *event)
 {
+    portENTER_CRITICAL(&s_pending_spinlock);
     size_t idx = s_ctx.pending_count;
-    if (idx >= MAX_CACHED_READINGS) return;
+    if (idx >= MAX_CACHED_READINGS) {
+        portEXIT_CRITICAL(&s_pending_spinlock);
+        ESP_LOGW(TAG, "Pending buffer full, dropping '%s'", event->sensor_reading.sensor_id);
+        return;
+    }
 
     cached_reading_t *r = &s_ctx.pending[idx];
     strncpy(r->sensor_id, event->sensor_reading.sensor_id,
@@ -142,12 +149,17 @@ static void queue_sensor_reading(const event_notify_t *event)
     r->value2 = event->sensor_reading.value2;
     r->status = event->sensor_reading.status;
     s_ctx.pending_count = idx + 1;
+    portEXIT_CRITICAL(&s_pending_spinlock);
 }
 
 // Called from display task only — moves pending into the reading cache
 static void flush_pending_readings(void)
 {
+    portENTER_CRITICAL(&s_pending_spinlock);
     size_t count = s_ctx.pending_count;
+    s_ctx.pending_count = 0;
+    portEXIT_CRITICAL(&s_pending_spinlock);
+
     if (count == 0) return;
 
     for (size_t p = 0; p < count; p++) {
@@ -174,8 +186,6 @@ static void flush_pending_readings(void)
             }
         }
     }
-
-    s_ctx.pending_count = 0;
 }
 
 static void on_notify(const event_notify_t *event, void *ctx)

@@ -170,7 +170,11 @@ static int calibrate_sw420(sw420_handle_t h, const char *subcmd, const char *par
 
         if (strcasecmp(param, "save") == 0) {
             esp_err_t err = sw420_driver_save_config(h);
-            printf("%s\n", err == ESP_OK ? "Config saved to NVS" : "Save failed");
+            if (err == ESP_OK) {
+                printf("Config saved to NVS\n");
+            } else {
+                printf("Save failed: %s\n", esp_err_to_name(err));
+            }
             return err == ESP_OK ? 0 : 1;
         }
 

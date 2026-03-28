@@ -297,16 +297,21 @@ static void on_notify(const event_notify_t *event, void *ctx)
     if (event->type != EVENT_NOTIFY_BUTTON) return;
     if (!s_system_ready) return;
 
+    // Read alarm state under mutex for consistency on dual-core
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    bool alarm = s_ctx.alarm_active;
+    xSemaphoreGive(s_ctx.mutex);
+
     switch (event->button.press) {
     case EVENT_PRESS_SHORT:
-        if (s_ctx.alarm_active) {
+        if (alarm) {
             status_buzzer_stop();
         } else {
             status_buzzer_play(BUZZER_PRESET_CHIRP);
         }
         break;
     case EVENT_PRESS_LONG:
-        if (s_ctx.alarm_active) {
+        if (alarm) {
             status_buzzer_stop();
         }
         status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);

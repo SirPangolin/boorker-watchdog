@@ -180,6 +180,7 @@ esp_err_t sensor_manager_init(void)
         ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(btn_ret));
     }
 
+    if (btn_ret == ESP_OK || btn_ret == ESP_ERR_INVALID_STATE) {
     button_config_t prg_cfg = {
         .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
 #ifdef CONFIG_BUTTON_DRIVER_PRG_ACTIVE_HIGH
@@ -198,6 +199,7 @@ esp_err_t sensor_manager_init(void)
     } else {
         ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)",
                  prg_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
+    }
     }
 
     s_ctx.initialized = true;
