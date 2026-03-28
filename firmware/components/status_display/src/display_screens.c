@@ -15,8 +15,7 @@
 
 #include <math.h>
 #include "u8g2.h"
-#include "sensor_manager.h"
-#include "sensor_types.h"
+#include "event_bus.h"
 #include "credentials.h"
 #include "esp_wifi.h"
 #include "esp_log.h"
@@ -216,42 +215,43 @@ static bool resolve_metric(int metric_index, char *label, size_t label_len,
                            char *value_str, size_t value_len)
 {
     int metric_count = 0;
-    size_t sensor_count = sensor_manager_get_sensor_count();
+    size_t sensor_count = display_get_reading_count();
 
     for (size_t s = 0; s < sensor_count; s++) {
-        sensor_reading_t reading;
-        const char *id = sensor_manager_get_sensor_id(s);
-        if (sensor_manager_get_reading_by_index(s, &reading) != ESP_OK) continue;
+        const char *id = NULL;
+        float value = NAN, value2 = NAN;
+        uint8_t status = 0;
+        if (!display_get_reading(s, &id, &value, &value2, &status)) continue;
 
         // Primary value
         if (metric_index == metric_count) {
-            if (!isnan(reading.value)) {
+            if (!isnan(value)) {
                 if (id && strstr(id, "temp")) {
                     snprintf(label, label_len, "TEMPERATURE");
-                    snprintf(value_str, value_len, "%.1f F", reading.value);
+                    snprintf(value_str, value_len, "%.1f F", value);
                 } else {
                     snprintf(label, label_len, "%s", id ? id : "SENSOR");
                     for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
-                    snprintf(value_str, value_len, "%.1f", reading.value);
+                    snprintf(value_str, value_len, "%.1f", value);
                 }
             } else {
                 snprintf(label, label_len, "%s", id ? id : "SENSOR");
                 for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
-                snprintf(value_str, value_len, "%s", sensor_status_name(reading.status));
+                snprintf(value_str, value_len, "%s", event_sensor_status_name(status));
             }
             return true;
         }
         metric_count++;
 
         // Secondary value (e.g., humidity from DHT22)
-        if (!isnan(reading.value2)) {
+        if (!isnan(value2)) {
             if (metric_index == metric_count) {
                 if (id && strstr(id, "temp")) {
                     snprintf(label, label_len, "HUMIDITY");
-                    snprintf(value_str, value_len, "%.0f%%", reading.value2);
+                    snprintf(value_str, value_len, "%.0f%%", value2);
                 } else {
                     snprintf(label, label_len, "%s (2)", id ? id : "SENSOR");
-                    snprintf(value_str, value_len, "%.1f", reading.value2);
+                    snprintf(value_str, value_len, "%.1f", value2);
                 }
                 return true;
             }
@@ -287,12 +287,12 @@ void screen_dashboard_card(u8g2_t *u8g2, int metric_index)
 int screen_get_metric_count(void)
 {
     int count = 0;
-    size_t sensor_count = sensor_manager_get_sensor_count();
+    size_t sensor_count = display_get_reading_count();
     for (size_t s = 0; s < sensor_count; s++) {
-        sensor_reading_t reading;
-        if (sensor_manager_get_reading_by_index(s, &reading) != ESP_OK) continue;
+        float value2 = NAN;
+        if (!display_get_reading(s, NULL, NULL, &value2, NULL)) continue;
         count++;
-        if (!isnan(reading.value2)) {
+        if (!isnan(value2)) {
             count++;
         }
     }
@@ -430,16 +430,17 @@ void screen_sensors(u8g2_t *u8g2)
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    size_t count = sensor_manager_get_sensor_count();
+    size_t count = display_get_reading_count();
     for (size_t i = 0; i < count && i < 5; i++) {
-        sensor_reading_t reading;
-        const char *id = sensor_manager_get_sensor_id(i);
-        if (sensor_manager_get_reading_by_index(i, &reading) == ESP_OK) {
+        const char *id = NULL;
+        float value = NAN;
+        uint8_t status = 0;
+        if (display_get_reading(i, &id, &value, NULL, &status)) {
             char buf[48];
-            if (!isnan(reading.value)) {
-                snprintf(buf, sizeof(buf), "%s: %.1f", id ? id : "?", reading.value);
+            if (!isnan(value)) {
+                snprintf(buf, sizeof(buf), "%s: %.1f", id ? id : "?", value);
             } else {
-                snprintf(buf, sizeof(buf), "%s: %s", id ? id : "?", sensor_status_name(reading.status));
+                snprintf(buf, sizeof(buf), "%s: %s", id ? id : "?", event_sensor_status_name(status));
             }
             u8g2_DrawStr(u8g2, 0, y, buf);
             y += 8;

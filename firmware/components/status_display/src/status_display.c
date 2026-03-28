@@ -13,7 +13,6 @@
 #include "status_display.h"
 #include "display_hal.h"
 #include "event_bus.h"
-#include "sensor_manager.h"
 #include "credentials.h"
 #include "system_state.h"
 #include "u8g2.h"
@@ -54,6 +53,16 @@ typedef enum {
 #define NOTIFY_BUTTON_SHORT  (1 << 1)
 #define NOTIFY_BUTTON_LONG   (1 << 2)
 #define NOTIFY_BUTTON_VLONG  (1 << 3)
+#define NOTIFY_READING_UPDATE (1 << 4)
+
+#define MAX_CACHED_READINGS CONFIG_STATUS_DISPLAY_MAX_SENSORS
+
+typedef struct {
+    char sensor_id[32];
+    float value;
+    float value2;
+    uint8_t status;
+} cached_reading_t;
 
 // --------------------------------------------------------------------------
 // Context
@@ -67,12 +76,16 @@ static struct {
 
     // Screen state
     screen_state_t screen;
-    screen_state_t pre_alert_screen;  // Screen to return to after alert ack
+    screen_state_t pre_alert_screen;
     bool display_on;
     bool alert_silenced;
 
     // Event bus state
     event_state_t event_state;
+
+    // Sensor reading cache (populated via event_bus notify)
+    cached_reading_t readings[MAX_CACHED_READINGS];
+    size_t reading_count;
 
     // Rotation
     int rotate_page;
@@ -87,23 +100,77 @@ static struct {
 };
 
 // --------------------------------------------------------------------------
-// Event bus notify callback (button events)
+// Reading cache accessors (used by display_screens.c)
 // --------------------------------------------------------------------------
+
+size_t display_get_reading_count(void)
+{
+    return s_ctx.reading_count;
+}
+
+bool display_get_reading(size_t index, const char **sensor_id,
+                         float *value, float *value2, uint8_t *status)
+{
+    if (index >= s_ctx.reading_count) return false;
+    const cached_reading_t *r = &s_ctx.readings[index];
+    if (sensor_id) *sensor_id = r->sensor_id;
+    if (value) *value = r->value;
+    if (value2) *value2 = r->value2;
+    if (status) *status = r->status;
+    return true;
+}
+
+// --------------------------------------------------------------------------
+// Event bus notify callback
+// --------------------------------------------------------------------------
+
+static void cache_sensor_reading(const event_notify_t *event)
+{
+    const char *id = event->sensor_reading.sensor_id;
+
+    // Update existing or append
+    for (size_t i = 0; i < s_ctx.reading_count; i++) {
+        if (strncmp(s_ctx.readings[i].sensor_id, id, sizeof(s_ctx.readings[i].sensor_id)) == 0) {
+            s_ctx.readings[i].value = event->sensor_reading.value;
+            s_ctx.readings[i].value2 = event->sensor_reading.value2;
+            s_ctx.readings[i].status = event->sensor_reading.status;
+            return;
+        }
+    }
+
+    if (s_ctx.reading_count < MAX_CACHED_READINGS) {
+        cached_reading_t *r = &s_ctx.readings[s_ctx.reading_count++];
+        strncpy(r->sensor_id, id, sizeof(r->sensor_id) - 1);
+        r->value = event->sensor_reading.value;
+        r->value2 = event->sensor_reading.value2;
+        r->status = event->sensor_reading.status;
+    }
+}
 
 static void on_notify(const event_notify_t *event, void *ctx)
 {
     (void)ctx;
-    if (!s_ctx.task || event->type != EVENT_NOTIFY_BUTTON) return;
+    if (!s_ctx.task) return;
 
-    uint32_t bits = 0;
-    switch (event->button.press) {
-    case EVENT_PRESS_SHORT:     bits = NOTIFY_BUTTON_SHORT; break;
-    case EVENT_PRESS_LONG:      bits = NOTIFY_BUTTON_LONG;  break;
-    case EVENT_PRESS_VERY_LONG: bits = NOTIFY_BUTTON_VLONG; break;
-    default: return;
+    switch (event->type) {
+    case EVENT_NOTIFY_BUTTON: {
+        uint32_t bits = 0;
+        switch (event->button.press) {
+        case EVENT_PRESS_SHORT:     bits = NOTIFY_BUTTON_SHORT; break;
+        case EVENT_PRESS_LONG:      bits = NOTIFY_BUTTON_LONG;  break;
+        case EVENT_PRESS_VERY_LONG: bits = NOTIFY_BUTTON_VLONG; break;
+        default: return;
+        }
+        xTaskNotify(s_ctx.task, bits, eSetBits);
+        break;
     }
-
-    xTaskNotify(s_ctx.task, bits, eSetBits);
+    case EVENT_NOTIFY_SENSOR_READING:
+        cache_sensor_reading(event);
+        xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
+        break;
+    default:
+        break;
+    }
 }
 
 // --------------------------------------------------------------------------

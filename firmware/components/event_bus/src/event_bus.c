@@ -42,7 +42,8 @@ _Static_assert(sizeof(state_names) / sizeof(state_names[0]) == EVENT_MAX,
                "state_names array size must match EVENT_MAX");
 
 static const char *notify_type_names[] = {
-    [EVENT_NOTIFY_BUTTON] = "BUTTON",
+    [EVENT_NOTIFY_BUTTON]         = "BUTTON",
+    [EVENT_NOTIFY_SENSOR_READING] = "SENSOR_READING",
 };
 
 _Static_assert(sizeof(notify_type_names) / sizeof(notify_type_names[0]) == EVENT_NOTIFY_TYPE_MAX,

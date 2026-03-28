@@ -77,6 +77,7 @@ typedef struct {
 
 typedef enum {
     EVENT_NOTIFY_BUTTON = 0,
+    EVENT_NOTIFY_SENSOR_READING,
     EVENT_NOTIFY_TYPE_MAX
 } event_notify_type_t;
 
@@ -86,13 +87,32 @@ enum {
     EVENT_PRESS_VERY_LONG = 2,
 };
 
+enum {
+    EVENT_SENSOR_ONLINE   = 0,
+    EVENT_SENSOR_OFFLINE  = 1,
+    EVENT_SENSOR_DISABLED = 2,
+    EVENT_SENSOR_ERROR    = 3,
+    EVENT_SENSOR_STATUS_MAX
+};
+
+static inline const char *event_sensor_status_name(uint8_t status) {
+    static const char *names[] = { "ONLINE", "OFFLINE", "DISABLED", "ERROR" };
+    return status < EVENT_SENSOR_STATUS_MAX ? names[status] : "UNKNOWN";
+}
+
 typedef struct {
     event_notify_type_t type;
     union {
         struct {
             uint8_t button_id;
-            uint8_t press;       // EVENT_PRESS_SHORT / LONG / VERY_LONG
+            uint8_t press;
         } button;
+        struct {
+            char sensor_id[32];
+            float value;
+            float value2;
+            uint8_t status;
+        } sensor_reading;
     };
 } event_notify_t;
 
