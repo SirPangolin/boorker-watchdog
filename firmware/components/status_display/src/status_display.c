@@ -459,7 +459,7 @@ esp_err_t status_display_init(void)
 
     button_config_t prg_cfg = {
         .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
-        .active_low = true,
+        .active_high = false,
         .mode = BUTTON_MODE_MOMENTARY,
         .debounce_ms = 0,             // Kconfig default
         .long_press_ms = 3000,        // Display off

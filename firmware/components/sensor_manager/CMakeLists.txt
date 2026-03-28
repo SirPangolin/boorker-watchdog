@@ -7,6 +7,8 @@ idf_component_register(
     REQUIRES
         dht22_driver
         sw420_driver
+        button_driver
+        event_bus
         nvs_flash
         log
         console

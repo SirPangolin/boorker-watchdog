@@ -76,10 +76,18 @@ typedef struct {
 #define EVENT_BUS_MAX_MOTDS 4    /**< Maximum concurrent MOTDs */
 
 typedef enum {
-    EVENT_NOTIFY_BUTTON_SHORT = 0,
-    EVENT_NOTIFY_BUTTON_LONG,
-    EVENT_NOTIFY_BUTTON_VERY_LONG,
-    EVENT_NOTIFY_MAX
+    EVENT_NOTIFY_BUTTON = 0,
+    EVENT_NOTIFY_TYPE_MAX
+} event_notify_type_t;
+
+typedef struct {
+    event_notify_type_t type;
+    union {
+        struct {
+            uint8_t button_id;
+            uint8_t press;       // button_press_t from button_driver.h
+        } button;
+    };
 } event_notify_t;
 
 /**
@@ -89,10 +97,10 @@ typedef enum {
 typedef void (*event_channel_cb_t)(event_state_t new_state, void *ctx);
 
 /**
- * @param event The ephemeral event
+ * @param event Ephemeral event with type tag + payload
  * @param ctx User context pointer passed during registration
  */
-typedef void (*event_notify_cb_t)(event_notify_t event, void *ctx);
+typedef void (*event_notify_cb_t)(const event_notify_t *event, void *ctx);
 
 /**
  * @brief Initialize event bus
@@ -182,9 +190,7 @@ esp_err_t event_bus_register_channel_ex(const char *name, event_channel_cb_t sta
                                          event_notify_cb_t notify_cb, void *ctx);
 
 /** Fire an ephemeral event to all registered channels. */
-esp_err_t event_bus_notify(event_notify_t event);
-
-const char *event_notify_name(event_notify_t event);
+esp_err_t event_bus_notify(const event_notify_t *event);
 
 /**
  * @brief Check if a state is a business state

@@ -41,14 +41,12 @@ static const char *state_names[] = {
 _Static_assert(sizeof(state_names) / sizeof(state_names[0]) == EVENT_MAX,
                "state_names array size must match EVENT_MAX");
 
-static const char *notify_names[] = {
-    [EVENT_NOTIFY_BUTTON_SHORT]     = "BUTTON_SHORT",
-    [EVENT_NOTIFY_BUTTON_LONG]      = "BUTTON_LONG",
-    [EVENT_NOTIFY_BUTTON_VERY_LONG] = "BUTTON_VERY_LONG",
+static const char *notify_type_names[] = {
+    [EVENT_NOTIFY_BUTTON] = "BUTTON",
 };
 
-_Static_assert(sizeof(notify_names) / sizeof(notify_names[0]) == EVENT_NOTIFY_MAX,
-               "notify_names array size must match EVENT_NOTIFY_MAX");
+_Static_assert(sizeof(notify_type_names) / sizeof(notify_type_names[0]) == EVENT_NOTIFY_TYPE_MAX,
+               "notify_type_names must match EVENT_NOTIFY_TYPE_MAX");
 
 typedef struct {
     const char *name;
@@ -367,9 +365,9 @@ esp_err_t event_bus_register_channel_ex(const char *name, event_channel_cb_t sta
     return ESP_OK;
 }
 
-esp_err_t event_bus_notify(event_notify_t event)
+esp_err_t event_bus_notify(const event_notify_t *event)
 {
-    if (event >= EVENT_NOTIFY_MAX) {
+    if (event == NULL || event->type >= EVENT_NOTIFY_TYPE_MAX) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -382,7 +380,7 @@ esp_err_t event_bus_notify(event_notify_t event)
         return ESP_ERR_TIMEOUT;
     }
 
-    ESP_LOGI(TAG, "Notify: %s", notify_names[event]);
+    ESP_LOGD(TAG, "Notify: %s", notify_type_names[event->type]);
 
     for (size_t i = 0; i < s_ctx.channel_count; i++) {
         if (s_ctx.channels[i].notify_cb != NULL) {
@@ -392,14 +390,6 @@ esp_err_t event_bus_notify(event_notify_t event)
 
     xSemaphoreGive(s_ctx.mutex);
     return ESP_OK;
-}
-
-const char *event_notify_name(event_notify_t event)
-{
-    if (event >= EVENT_NOTIFY_MAX) {
-        return "UNKNOWN";
-    }
-    return notify_names[event];
 }
 
 // --------------------------------------------------------------------------

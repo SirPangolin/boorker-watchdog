@@ -6,6 +6,8 @@
 #include "sensor_manager.h"
 #include "dht22_driver.h"
 #include "sw420_driver.h"
+#include "button_driver.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -58,11 +60,20 @@ static struct {
     void *callback_user_data;
 } s_ctx = {0};
 
-// Forward declarations
 static void sensor_task(void *arg);
 static esp_err_t load_config_from_nvs(void);
 static esp_err_t init_default_sensor(void);
 static uint32_t calculate_backoff(uint8_t fail_count, uint32_t base_interval);
+
+static void button_event_handler(int button_id, button_press_t type, void *ctx)
+{
+    (void)ctx;
+    event_notify_t event = {
+        .type = EVENT_NOTIFY_BUTTON,
+        .button = { .button_id = (uint8_t)button_id, .press = (uint8_t)type },
+    };
+    event_bus_notify(&event);
+}
 
 esp_err_t sensor_manager_init(void)
 {
@@ -137,8 +148,31 @@ esp_err_t sensor_manager_init(void)
         }
     }
 
+    // Register buttons
+    button_driver_init();
+
+    button_config_t prg_cfg = {
+        .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
+#ifdef CONFIG_BUTTON_DRIVER_PRG_ACTIVE_HIGH
+        .active_high = true,
+#endif
+        .mode = BUTTON_MODE_MOMENTARY,
+        .debounce_ms = CONFIG_BUTTON_DRIVER_DEBOUNCE_MS,
+        .long_press_ms = CONFIG_BUTTON_DRIVER_LONG_PRESS_MS,
+        .very_long_press_ms = CONFIG_BUTTON_DRIVER_VERY_LONG_PRESS_MS,
+        .callback = button_event_handler,
+        .ctx = NULL,
+    };
+    int prg_id = button_driver_register(&prg_cfg);
+    if (prg_id < 0) {
+        ESP_LOGW(TAG, "Failed to register PRG button");
+    } else {
+        ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)",
+                 prg_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
+    }
+
     s_ctx.initialized = true;
-    ESP_LOGI(TAG, "Sensor manager initialized with %d sensor(s)", s_ctx.sensor_count);
+    ESP_LOGI(TAG, "Sensor manager initialized with %zu sensor(s)", s_ctx.sensor_count);
     return ESP_OK;
 }
 
