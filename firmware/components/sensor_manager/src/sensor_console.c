@@ -4,6 +4,7 @@
  */
 
 #include "sensor_manager.h"
+#include "sw420_driver.h"
 #include "esp_console.h"
 #include "esp_log.h"
 #include "argtable3/argtable3.h"
@@ -147,5 +148,17 @@ esp_err_t sensor_manager_register_console(void)
     }
 
     ESP_LOGI(TAG, "Registered command: sensor");
+
+#if CONFIG_SW420_DRIVER_ENABLED
+    // Register sw420 vibration console commands (owned by sensor_manager, not main)
+    sw420_handle_t sw420 = sw420_driver_get_instance();
+    if (sw420) {
+        ret = sw420_driver_register_console(sw420);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "SW420 console init failed: %s", esp_err_to_name(ret));
+        }
+    }
+#endif
+
     return ESP_OK;
 }

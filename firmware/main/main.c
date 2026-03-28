@@ -29,9 +29,6 @@
 #endif
 #include "sensor_manager.h"
 #include "ota_manager.h"
-#if CONFIG_SW420_DRIVER_ENABLED
-#include "sw420_driver.h"
-#endif
 
 static const char *TAG = "boorker";
 
@@ -193,13 +190,6 @@ static void init_console(void)
         ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
     }
 
-#if CONFIG_SW420_DRIVER_ENABLED
-    // Register SW420 vibration sensor console commands
-    ret = sw420_driver_register_console(NULL);  // Uses singleton
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "SW420 console init failed: %s", esp_err_to_name(ret));
-    }
-#endif
 
 #if CONFIG_STATUS_DISPLAY_ENABLED
     ret = status_display_register_console();
