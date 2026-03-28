@@ -86,6 +86,7 @@ static struct {
     // Sensor reading cache (populated via event_bus notify)
     cached_reading_t readings[MAX_CACHED_READINGS];
     size_t reading_count;
+    bool sensors_ready;
 
     // Rotation
     int rotate_page;
@@ -166,6 +167,10 @@ static void on_notify(const event_notify_t *event, void *ctx)
     }
     case EVENT_NOTIFY_SENSOR_READING:
         cache_sensor_reading(event);
+        xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
+        break;
+    case EVENT_NOTIFY_SENSORS_READY:
+        s_ctx.sensors_ready = true;
         xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
         break;
     default:
@@ -384,16 +389,7 @@ static void display_task(void *arg)
 {
     (void)arg;
 
-    // Phase 1: Splash screen with animated throbber
-    int splash_frames = CONFIG_STATUS_DISPLAY_SPLASH_DELAY_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
-    for (int i = 0; i < splash_frames; i++) {
-        u8g2_ClearBuffer(&s_ctx.u8g2);
-        screen_splash(&s_ctx.u8g2, i % 3);
-        u8g2_SendBuffer(&s_ctx.u8g2);
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_STATUS_DISPLAY_THROBBER_MS));
-    }
-
-    // Phase 2: Register with event_bus
+    // Register with event_bus so readings cache during splash
     esp_err_t ret = event_bus_register_channel_ex("display", on_event_state_change, on_notify, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register event bus channel: %s", esp_err_to_name(ret));
@@ -401,10 +397,24 @@ static void display_task(void *arg)
         ESP_LOGI(TAG, "Registered as event bus channel");
     }
 
-    // Determine initial screen
-    if (!system_state_is_claimed()) {
-        s_ctx.screen = SCREEN_FIRST_BOOT;
-    } else {
+    // Splash: show Millie logo, wait for system ready
+    // Break when: min branding time met AND (readings arrived OR sensors_ready OR timeout)
+    int min_frames = CONFIG_STATUS_DISPLAY_SPLASH_MIN_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
+    int max_frames = CONFIG_STATUS_DISPLAY_SPLASH_TIMEOUT_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
+    for (int i = 0; i < max_frames; i++) {
+        bool min_met = (i >= min_frames);
+        bool data_ready = (s_ctx.reading_count > 0 || s_ctx.sensors_ready);
+        bool first_boot = (s_ctx.screen == SCREEN_FIRST_BOOT);
+        if (min_met && (data_ready || first_boot)) break;
+
+        u8g2_ClearBuffer(&s_ctx.u8g2);
+        screen_splash(&s_ctx.u8g2, i % 3);
+        u8g2_SendBuffer(&s_ctx.u8g2);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_STATUS_DISPLAY_THROBBER_MS));
+    }
+
+    // Transition based on what arrived during splash
+    if (s_ctx.screen != SCREEN_FIRST_BOOT) {
         s_ctx.screen = SCREEN_DASHBOARD;
         s_ctx.rotate_page = 0;
     }

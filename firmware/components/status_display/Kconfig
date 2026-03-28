@@ -31,10 +31,15 @@ menu "Status Display"
                 GPIO for display hardware reset. Heltec V3: GPIO21.
                 Set -1 if no reset pin connected.
 
-        config STATUS_DISPLAY_SPLASH_DELAY_MS
-            int "Splash screen duration (ms)"
-            default 5000
-            range 1000 15000
+        config STATUS_DISPLAY_SPLASH_MIN_MS
+            int "Splash minimum display time (ms)"
+            default 1500
+            range 500 5000
+
+        config STATUS_DISPLAY_SPLASH_TIMEOUT_MS
+            int "Splash maximum wait for sensors (ms)"
+            default 10000
+            range 2000 30000
 
         config STATUS_DISPLAY_ROTATE_INTERVAL_MS
             int "Dashboard auto-rotate interval (ms)"

@@ -78,6 +78,7 @@ typedef struct {
 typedef enum {
     EVENT_NOTIFY_BUTTON = 0,
     EVENT_NOTIFY_SENSOR_READING,
+    EVENT_NOTIFY_SENSORS_READY,
     EVENT_NOTIFY_TYPE_MAX
 } event_notify_type_t;
 

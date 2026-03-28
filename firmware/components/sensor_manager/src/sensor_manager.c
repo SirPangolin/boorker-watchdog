@@ -608,6 +608,14 @@ static void sensor_task(void *arg)
             }
         }
 
+        // Signal first poll complete
+        static bool first_poll_done = false;
+        if (!first_poll_done) {
+            first_poll_done = true;
+            event_notify_t ready = { .type = EVENT_NOTIFY_SENSORS_READY };
+            event_bus_notify(&ready);
+        }
+
         // Wait for next poll cycle
         vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_DEFAULT_POLL_MS));
     }
