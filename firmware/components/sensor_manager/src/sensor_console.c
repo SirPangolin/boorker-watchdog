@@ -280,7 +280,7 @@ static int cmd_sensor(int argc, char **argv)
 
     printf("Unknown action '%s'\n", action);
     printf("Usage: sensor [status|read <id>|calibrate <id> [args...]]\n");
-    return 0;
+    return 1;
 }
 
 // --------------------------------------------------------------------------

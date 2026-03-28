@@ -308,6 +308,7 @@ esp_err_t event_bus_register_channel(const char *name, event_channel_cb_t cb, vo
     size_t idx = s_ctx.channel_count;
     s_ctx.channels[idx].name = name;
     s_ctx.channels[idx].cb = cb;
+    s_ctx.channels[idx].notify_cb = NULL;
     s_ctx.channels[idx].ctx = ctx;
     s_ctx.channel_count++;
 
@@ -384,13 +385,24 @@ esp_err_t event_bus_notify(const event_notify_t *event)
 
     ESP_LOGD(TAG, "Notify: %s", notify_type_names[event->type]);
 
+    // Snapshot callbacks under mutex, invoke outside (prevents deadlock)
+    event_notify_cb_t cbs[CONFIG_EVENT_BUS_MAX_CHANNELS];
+    void *ctxs[CONFIG_EVENT_BUS_MAX_CHANNELS];
+    size_t cb_count = 0;
     for (size_t i = 0; i < s_ctx.channel_count; i++) {
         if (s_ctx.channels[i].notify_cb != NULL) {
-            s_ctx.channels[i].notify_cb(event, s_ctx.channels[i].ctx);
+            cbs[cb_count] = s_ctx.channels[i].notify_cb;
+            ctxs[cb_count] = s_ctx.channels[i].ctx;
+            cb_count++;
         }
     }
 
     xSemaphoreGive(s_ctx.mutex);
+
+    for (size_t i = 0; i < cb_count; i++) {
+        cbs[i](event, ctxs[i]);
+    }
+
     return ESP_OK;
 }
 

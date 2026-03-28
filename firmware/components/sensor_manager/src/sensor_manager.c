@@ -77,7 +77,10 @@ static void button_event_handler(int button_id, button_press_t type, void *ctx)
         .type = EVENT_NOTIFY_BUTTON,
         .button = { .button_id = (uint8_t)button_id, .press = press },
     };
-    event_bus_notify(&event);
+    esp_err_t ret = event_bus_notify(&event);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Button notify failed: %s", esp_err_to_name(ret));
+    }
 }
 
 static void publish_reading(const sensor_reading_t *reading)
@@ -91,7 +94,11 @@ static void publish_reading(const sensor_reading_t *reading)
     event.sensor_reading.value = reading->value;
     event.sensor_reading.value2 = reading->value2;
     event.sensor_reading.status = (uint8_t)reading->status;
-    event_bus_notify(&event);
+    esp_err_t ret = event_bus_notify(&event);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Reading notify failed for '%s': %s",
+                 reading->sensor_id ? reading->sensor_id : "?", esp_err_to_name(ret));
+    }
 }
 
 esp_err_t sensor_manager_init(void)
@@ -168,7 +175,10 @@ esp_err_t sensor_manager_init(void)
     }
 
     // Register buttons
-    button_driver_init();
+    esp_err_t btn_ret = button_driver_init();
+    if (btn_ret != ESP_OK && btn_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(btn_ret));
+    }
 
     button_config_t prg_cfg = {
         .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
@@ -613,7 +623,10 @@ static void sensor_task(void *arg)
         if (!first_poll_done) {
             first_poll_done = true;
             event_notify_t ready = { .type = EVENT_NOTIFY_SENSORS_READY };
-            event_bus_notify(&ready);
+            esp_err_t notify_ret = event_bus_notify(&ready);
+            if (notify_ret != ESP_OK) {
+                ESP_LOGW(TAG, "SENSORS_READY notify failed: %s", esp_err_to_name(notify_ret));
+            }
         }
 
         // Wait for next poll cycle

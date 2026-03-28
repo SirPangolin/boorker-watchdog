@@ -83,10 +83,14 @@ static struct {
     // Event bus state
     event_state_t event_state;
 
-    // Sensor reading cache (populated via event_bus notify)
+    // Sensor reading cache (written by display task only)
     cached_reading_t readings[MAX_CACHED_READINGS];
     size_t reading_count;
     bool sensors_ready;
+
+    // Pending readings from notify callback (consumed by display task)
+    cached_reading_t pending[MAX_CACHED_READINGS];
+    volatile size_t pending_count;
 
     // Rotation
     int rotate_page;
@@ -125,27 +129,53 @@ bool display_get_reading(size_t index, const char **sensor_id,
 // Event bus notify callback
 // --------------------------------------------------------------------------
 
-static void cache_sensor_reading(const event_notify_t *event)
+// Called from notify callback (sensor_manager's task) — writes to pending buffer
+static void queue_sensor_reading(const event_notify_t *event)
 {
-    const char *id = event->sensor_reading.sensor_id;
+    size_t idx = s_ctx.pending_count;
+    if (idx >= MAX_CACHED_READINGS) return;
 
-    // Update existing or append
-    for (size_t i = 0; i < s_ctx.reading_count; i++) {
-        if (strncmp(s_ctx.readings[i].sensor_id, id, sizeof(s_ctx.readings[i].sensor_id)) == 0) {
-            s_ctx.readings[i].value = event->sensor_reading.value;
-            s_ctx.readings[i].value2 = event->sensor_reading.value2;
-            s_ctx.readings[i].status = event->sensor_reading.status;
-            return;
+    cached_reading_t *r = &s_ctx.pending[idx];
+    strncpy(r->sensor_id, event->sensor_reading.sensor_id,
+            sizeof(r->sensor_id) - 1);
+    r->value = event->sensor_reading.value;
+    r->value2 = event->sensor_reading.value2;
+    r->status = event->sensor_reading.status;
+    s_ctx.pending_count = idx + 1;
+}
+
+// Called from display task only — moves pending into the reading cache
+static void flush_pending_readings(void)
+{
+    size_t count = s_ctx.pending_count;
+    if (count == 0) return;
+
+    for (size_t p = 0; p < count; p++) {
+        const cached_reading_t *incoming = &s_ctx.pending[p];
+        bool found = false;
+
+        for (size_t i = 0; i < s_ctx.reading_count; i++) {
+            if (strncmp(s_ctx.readings[i].sensor_id, incoming->sensor_id,
+                        sizeof(s_ctx.readings[i].sensor_id)) == 0) {
+                s_ctx.readings[i].value = incoming->value;
+                s_ctx.readings[i].value2 = incoming->value2;
+                s_ctx.readings[i].status = incoming->status;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            if (s_ctx.reading_count < MAX_CACHED_READINGS) {
+                s_ctx.readings[s_ctx.reading_count++] = *incoming;
+            } else {
+                ESP_LOGW(TAG, "Reading cache full (%d), dropping '%s'",
+                         MAX_CACHED_READINGS, incoming->sensor_id);
+            }
         }
     }
 
-    if (s_ctx.reading_count < MAX_CACHED_READINGS) {
-        cached_reading_t *r = &s_ctx.readings[s_ctx.reading_count++];
-        strncpy(r->sensor_id, id, sizeof(r->sensor_id) - 1);
-        r->value = event->sensor_reading.value;
-        r->value2 = event->sensor_reading.value2;
-        r->status = event->sensor_reading.status;
-    }
+    s_ctx.pending_count = 0;
 }
 
 static void on_notify(const event_notify_t *event, void *ctx)
@@ -166,7 +196,7 @@ static void on_notify(const event_notify_t *event, void *ctx)
         break;
     }
     case EVENT_NOTIFY_SENSOR_READING:
-        cache_sensor_reading(event);
+        queue_sensor_reading(event);
         xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
         break;
     case EVENT_NOTIFY_SENSORS_READY:
@@ -404,7 +434,7 @@ static void display_task(void *arg)
     for (int i = 0; i < max_frames; i++) {
         bool min_met = (i >= min_frames);
         bool data_ready = (s_ctx.reading_count > 0 || s_ctx.sensors_ready);
-        bool first_boot = (s_ctx.screen == SCREEN_FIRST_BOOT);
+        bool first_boot = (s_ctx.event_state == EVENT_FIRST_BOOT);
         if (min_met && (data_ready || first_boot)) break;
 
         u8g2_ClearBuffer(&s_ctx.u8g2);
@@ -414,7 +444,9 @@ static void display_task(void *arg)
     }
 
     // Transition based on what arrived during splash
-    if (s_ctx.screen != SCREEN_FIRST_BOOT) {
+    if (s_ctx.event_state == EVENT_FIRST_BOOT) {
+        s_ctx.screen = SCREEN_FIRST_BOOT;
+    } else {
         s_ctx.screen = SCREEN_DASHBOARD;
         s_ctx.rotate_page = 0;
     }
@@ -445,6 +477,9 @@ static void display_task(void *arg)
         }
         if (notify_value & NOTIFY_BUTTON_SHORT) {
             handle_button_short();
+        }
+        if (notify_value & NOTIFY_READING_UPDATE) {
+            flush_pending_readings();
         }
         if (notify_value & NOTIFY_EVENT_CHANGE) {
             handle_event_change();

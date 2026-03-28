@@ -282,17 +282,33 @@ static esp_err_t play_preset_unlocked(buzzer_preset_t preset)
     return ret;
 }
 
+static bool s_system_ready = false;
+
 static void on_notify(const event_notify_t *event, void *ctx)
 {
     (void)ctx;
     if (!s_ctx.initialized || !s_ctx.enabled) return;
+
+    if (event->type == EVENT_NOTIFY_SENSORS_READY) {
+        s_system_ready = true;
+        return;
+    }
+
     if (event->type != EVENT_NOTIFY_BUTTON) return;
+    if (!s_system_ready) return;
 
     switch (event->button.press) {
     case EVENT_PRESS_SHORT:
-        status_buzzer_play(BUZZER_PRESET_CHIRP);
+        if (s_ctx.alarm_active) {
+            status_buzzer_stop();
+        } else {
+            status_buzzer_play(BUZZER_PRESET_CHIRP);
+        }
         break;
     case EVENT_PRESS_LONG:
+        if (s_ctx.alarm_active) {
+            status_buzzer_stop();
+        }
         status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);
         break;
     default:
