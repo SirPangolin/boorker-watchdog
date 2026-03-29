@@ -298,7 +298,10 @@ static void on_notify(const event_notify_t *event, void *ctx)
     if (!s_system_ready) return;
 
     // Read alarm state under mutex for consistency on dual-core
-    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(50)) != pdTRUE) return;
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(100)) != pdTRUE) {
+        ESP_LOGD(TAG, "Mutex timeout in button notify");
+        return;
+    }
     bool alarm = s_ctx.alarm_active;
     xSemaphoreGive(s_ctx.mutex);
 

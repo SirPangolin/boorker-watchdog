@@ -376,13 +376,6 @@ void app_main(void)
     // Initialize status LED (registers with event bus)
     ret = status_led_init();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Event bus init failed: %s", esp_err_to_name(ret));
-        return;
-    }
-
-    // Initialize status LED (registers with event bus)
-    ret = status_led_init();
-    if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Status LED init failed: %s (continuing without LED)",
                  esp_err_to_name(ret));
         // Non-fatal - continue without status LED

@@ -181,25 +181,25 @@ esp_err_t sensor_manager_init(void)
     }
 
     if (btn_ret == ESP_OK || btn_ret == ESP_ERR_INVALID_STATE) {
-    button_config_t prg_cfg = {
-        .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
+        button_config_t prg_cfg = {
+            .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
 #ifdef CONFIG_BUTTON_DRIVER_PRG_ACTIVE_HIGH
-        .active_high = true,
+            .active_high = true,
 #endif
-        .mode = BUTTON_MODE_MOMENTARY,
-        .debounce_ms = CONFIG_BUTTON_DRIVER_DEBOUNCE_MS,
-        .long_press_ms = CONFIG_BUTTON_DRIVER_LONG_PRESS_MS,
-        .very_long_press_ms = CONFIG_BUTTON_DRIVER_VERY_LONG_PRESS_MS,
-        .callback = button_event_handler,
-        .ctx = NULL,
-    };
-    int prg_id = button_driver_register(&prg_cfg);
-    if (prg_id < 0) {
-        ESP_LOGW(TAG, "Failed to register PRG button");
-    } else {
-        ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)",
-                 prg_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
-    }
+            .mode = BUTTON_MODE_MOMENTARY,
+            .debounce_ms = CONFIG_BUTTON_DRIVER_DEBOUNCE_MS,
+            .long_press_ms = CONFIG_BUTTON_DRIVER_LONG_PRESS_MS,
+            .very_long_press_ms = CONFIG_BUTTON_DRIVER_VERY_LONG_PRESS_MS,
+            .callback = button_event_handler,
+            .ctx = NULL,
+        };
+        int prg_id = button_driver_register(&prg_cfg);
+        if (prg_id < 0) {
+            ESP_LOGW(TAG, "Failed to register PRG button");
+        } else {
+            ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)",
+                     prg_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
+        }
     }
 
     s_ctx.initialized = true;

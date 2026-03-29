@@ -819,9 +819,11 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    system_state_t ss_ota_buf;
+    system_state_copy(&ss_ota_buf);
     bool ok = true;
     ok = ok && cJSON_AddStringToObject(json, "state",
-             system_ota_state_name(system_state_get()->ota.state));
+             system_ota_state_name(ss_ota_buf.ota.state));
     ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
 
     ota_update_info_t update;

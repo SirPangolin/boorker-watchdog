@@ -37,12 +37,14 @@ static uint8_t ota_get_state(void)
 
 static void ota_set_state(uint8_t state)
 {
-    system_ota_t ota = system_state_get()->ota;
-    ota.state = state;
-    esp_err_t ret = system_state_set_ota(&ota);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to set OTA state to %s: %s",
-                 system_ota_state_name(state), esp_err_to_name(ret));
+    system_state_t ss;
+    if (system_state_copy(&ss) == ESP_OK) {
+        ss.ota.state = state;
+        esp_err_t ret = system_state_set_ota(&ss.ota);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set OTA state to %s: %s",
+                     system_ota_state_name(state), esp_err_to_name(ret));
+        }
     }
 }
 
