@@ -1,57 +1,58 @@
 /**
  * @file mock_esp.c
- * @brief Mock implementations of ESP-IDF functions for desktop emulator
+ * @brief Mock implementations for desktop emulator
  *
- * Returns fake sensor data, secrets, WiFi info, and system stats
- * so display_screens.c renders realistic content without real hardware.
+ * All device state lives in one system_state_t struct.
+ * Sensor readings provided via display_get_reading API.
  */
 
 #include "mock_esp.h"
-#include "esp_netif.h"
-#include <stdarg.h>
+#include "event_bus.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <time.h>
-#include <stdlib.h>
 
-// --------------------------------------------------------------------------
-// Mock sensor data
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Mock system state
+// ---------------------------------------------------------------------------
 
-static sensor_reading_t mock_readings[] = {
-    {
-        .sensor_id = "temp_humidity",
-        .timestamp_ms = 12345678,
-        .value = 73.8f,
-        .value2 = 55.2f,
-        .status = SENSOR_STATUS_ONLINE,
+static system_state_t mock_state = {
+    .node_name = "boorker-MOCK",
+    .node_suffix = "MOCK",
+    .claimed = true,
+    .ota = { .state = SYSTEM_OTA_IDLE },
+    .wifi = {
+        .connected = true,
+        .ssid = "MockNetwork",
+        .rssi = -42,
+        .ip = "192.168.68.54",
+        .mac = { 0xDE, 0xAD, 0xBE, 0xEF, 0x00, 0x01 },
     },
-    {
-        .sensor_id = "vibration",
-        .timestamp_ms = 12345678,
-        .value = NAN,      // Digital sensor — no float value
-        .value2 = NAN,
-        .status = SENSOR_STATUS_ONLINE,
+    .lora = {
+        .frequency_mhz = 915,
+        .tx_power_dbm = 22,
     },
+    .firmware_version = "0.11.0-emu",
+    .idf_version = "v5.5.3",
+    .chip_revision_major = 0,
+    .chip_revision_minor = 2,
+    .chip_cores = 2,
+    .heap_free = 161892,
+    .heap_total = 327680,
 };
 
-size_t sensor_manager_get_sensor_count(void) {
-    return 2;
+const system_state_t *system_state_get(void)
+{
+    struct timespec ts;
+    if (clock_gettime(CLOCK_MONOTONIC, &ts) == 0) {
+        mock_state.uptime_us = (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
+    }
+    return &mock_state;
 }
 
-esp_err_t sensor_manager_get_reading_by_index(size_t index, sensor_reading_t *out) {
-    if (index >= 2 || !out) return ESP_FAIL;
-    *out = mock_readings[index];
-    return ESP_OK;
-}
-
-const char *sensor_manager_get_sensor_id(size_t index) {
-    if (index >= 2) return NULL;
-    return mock_readings[index].sensor_id;
-}
-
-// --------------------------------------------------------------------------
-// Mock secrets (intentionally fake — not real device secrets)
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Mock secrets
+// ---------------------------------------------------------------------------
 
 static secrets_t mock_secrets = {
     .node_name = "boorker-MOCK",
@@ -61,62 +62,52 @@ static secrets_t mock_secrets = {
     .node_suffix = "MOCK",
 };
 
-const secrets_t *secrets_get(void) {
+const secrets_t *secrets_get(void)
+{
     return &mock_secrets;
 }
 
-// --------------------------------------------------------------------------
-// Mock WiFi
-// --------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Mock sensor readings (display cache API)
+// ---------------------------------------------------------------------------
 
-esp_err_t esp_wifi_sta_get_ap_info(wifi_ap_record_t *ap) {
-    if (!ap) return ESP_FAIL;
-    strncpy((char *)ap->ssid, "MockNetwork", sizeof(ap->ssid));
-    ap->rssi = -42;
-    return ESP_OK;
+typedef struct {
+    const char *sensor_id;
+    float value;
+    float value2;
+    uint8_t status;
+} mock_reading_t;
+
+static mock_reading_t mock_readings[] = {
+    { "temp_humidity", 73.8f, 55.2f, EVENT_SENSOR_ONLINE },
+    { "vibration",     NAN,   NAN,   EVENT_SENSOR_ONLINE },
+};
+
+#define MOCK_READING_COUNT (sizeof(mock_readings) / sizeof(mock_readings[0]))
+
+size_t display_get_reading_count(void)
+{
+    return MOCK_READING_COUNT;
 }
 
-esp_err_t esp_wifi_get_mac(wifi_interface_t ifx, uint8_t mac[6]) {
-    (void)ifx;
-    mac[0] = 0xDE; mac[1] = 0xAD; mac[2] = 0xBE;
-    mac[3] = 0xEF; mac[4] = 0x00; mac[5] = 0x01;
-    return ESP_OK;
+bool display_get_reading(size_t index, const char **sensor_id,
+                         float *value, float *value2, uint8_t *status)
+{
+    if (index >= MOCK_READING_COUNT) return false;
+    const mock_reading_t *r = &mock_readings[index];
+    if (sensor_id) *sensor_id = r->sensor_id;
+    if (value) *value = r->value;
+    if (value2) *value2 = r->value2;
+    if (status) *status = r->status;
+    return true;
 }
 
-// Mock netif — return non-NULL so IP code path is exercised
-static int mock_netif_handle;
+// ---------------------------------------------------------------------------
+// ESP log stub
+// ---------------------------------------------------------------------------
 
-esp_netif_t *esp_netif_get_handle_from_ifkey(const char *key) {
-    (void)key;
-    return (esp_netif_t *)&mock_netif_handle;
-}
-
-// --------------------------------------------------------------------------
-// Mock system info
-// --------------------------------------------------------------------------
-
-void esp_chip_info(esp_chip_info_t *info) {
-    if (info) info->revision = 2;
-}
-
-uint32_t esp_get_free_heap_size(void) {
-    return 161892;
-}
-
-int64_t esp_timer_get_time(void) {
-    struct timespec ts;
-    if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) {
-        return 0;
-    }
-    return (int64_t)ts.tv_sec * 1000000 + ts.tv_nsec / 1000;
-}
-
-// --------------------------------------------------------------------------
-// ESP log — forward errors and warnings to stderr
-// --------------------------------------------------------------------------
-
-void esp_log_write(int level, const char *tag, const char *fmt, ...) {
-    // ESP log levels: 1=ERROR, 2=WARN, 3=INFO, 4=DEBUG, 5=VERBOSE
+void esp_log_write(int level, const char *tag, const char *fmt, ...)
+{
     if (level <= 2) {
         const char *prefix = (level == 1) ? "E" : "W";
         fprintf(stderr, "[%s][%s] ", prefix, tag ? tag : "?");
