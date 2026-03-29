@@ -9,6 +9,7 @@
 #include "event_bus.h"
 #include "system_state.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include <string.h>
@@ -89,7 +90,7 @@ static uint32_t calculate_time_on_air_ms(size_t payload_len)
 
 static void reset_airtime_window_if_needed(void)
 {
-    uint32_t now = (uint32_t)(esp_log_timestamp());
+    uint32_t now = (uint32_t)(esp_timer_get_time() / 1000);
     uint32_t elapsed = now - s_lora.airtime_window_start;
     if (elapsed >= 3600000) {
         s_lora.airtime_used_ms = 0;
@@ -187,7 +188,7 @@ esp_err_t lora_manager_init(void)
 
     // Apply config
     err = sx1262_set_frequency(s_lora.radio, s_lora.region->frequency_hz);
-    if (err != ESP_OK) goto fail;
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_frequency failed"); goto fail; }
 
     s_lora.tx_power_dbm = CONFIG_LORA_MANAGER_TX_POWER_DBM;
     if (s_lora.tx_power_dbm > s_lora.region->max_power_dbm) {
@@ -197,7 +198,7 @@ esp_err_t lora_manager_init(void)
                  s_lora.region->max_power_dbm);
     }
     err = sx1262_set_tx_power(s_lora.radio, s_lora.tx_power_dbm);
-    if (err != ESP_OK) goto fail;
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_tx_power failed"); goto fail; }
 
     s_lora.spreading_factor = CONFIG_LORA_MANAGER_SPREADING_FACTOR;
     s_lora.bandwidth = CONFIG_LORA_MANAGER_BANDWIDTH;
@@ -212,7 +213,7 @@ esp_err_t lora_manager_init(void)
         .low_data_rate_optimize = ldro,
     };
     err = sx1262_set_modulation(s_lora.radio, &mod);
-    if (err != ESP_OK) goto fail;
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_modulation failed"); goto fail; }
 
     sx1262_pkt_params_t pkt = {
         .preamble_length = s_lora.preamble_length,
@@ -222,9 +223,9 @@ esp_err_t lora_manager_init(void)
         .invert_iq = false,
     };
     err = sx1262_set_packet_params(s_lora.radio, &pkt);
-    if (err != ESP_OK) goto fail;
+    if (err != ESP_OK) { ESP_LOGE(TAG, "set_packet_params failed"); goto fail; }
 
-    s_lora.airtime_window_start = (uint32_t)esp_log_timestamp();
+    s_lora.airtime_window_start = (uint32_t)(esp_timer_get_time() / 1000);
     s_lora.initialized = true;
 
     publish_state(true);
@@ -269,7 +270,11 @@ esp_err_t lora_manager_send(const uint8_t *data, size_t len)
 
     bool was_listening = s_lora.listening;
     if (was_listening) {
-        sx1262_stop_receive(s_lora.radio);
+        esp_err_t stop_err = sx1262_stop_receive(s_lora.radio);
+        if (stop_err != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to stop RX before TX: %s", esp_err_to_name(stop_err));
+            return stop_err;
+        }
         s_lora.listening = false;
     }
 
@@ -284,8 +289,12 @@ esp_err_t lora_manager_send(const uint8_t *data, size_t len)
     }
 
     if (was_listening) {
-        sx1262_start_receive(s_lora.radio, on_rx_packet, NULL);
-        s_lora.listening = true;
+        esp_err_t rx_err = sx1262_start_receive(s_lora.radio, on_rx_packet, NULL);
+        if (rx_err == ESP_OK) {
+            s_lora.listening = true;
+        } else {
+            ESP_LOGE(TAG, "Failed to re-arm RX after TX: %s", esp_err_to_name(rx_err));
+        }
     }
 
     return err;

@@ -139,14 +139,7 @@ esp_err_t lora_manager_register_console(void)
     s_send_args.message = arg_str1(NULL, NULL, "<message>", "message to transmit");
     s_send_args.end = arg_end(2);
 
-    const esp_console_cmd_t send_cmd = {
-        .command = "lora",
-        .help = "LoRa radio: send <msg> | listen | stop | status | config",
-        .hint = NULL,
-        .func = NULL,
-    };
-
-    // Register subcommands individually with "lora" prefix
+    // Register subcommands with "lora_" prefix
     esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_send",
         .help = "Transmit a LoRa message",

@@ -224,6 +224,17 @@ static void IRAM_ATTR dio1_isr_handler(void *arg)
     portYIELD_FROM_ISR(higher_priority_woken);
 }
 
+static esp_err_t rearm_rx(sx1262_handle_t handle)
+{
+    uint8_t rx_params[3] = { 0xFF, 0xFF, 0xFF };
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_RX, rx_params, 3);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to re-arm RX: %s", esp_err_to_name(err));
+        handle->receiving = false;
+    }
+    return err;
+}
+
 static void irq_handler_task(void *arg)
 {
     sx1262_handle_t handle = (sx1262_handle_t)arg;
@@ -233,12 +244,15 @@ static void irq_handler_task(void *arg)
 
         uint8_t irq_buf[2];
         if (read_command(handle, SX1262_CMD_GET_IRQ_STATUS, irq_buf, 2) != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to read IRQ status");
             continue;
         }
         uint16_t irq = ((uint16_t)irq_buf[0] << 8) | irq_buf[1];
 
         uint8_t clear_buf[2] = { (uint8_t)(irq >> 8), (uint8_t)(irq & 0xFF) };
-        write_command(handle, SX1262_CMD_CLEAR_IRQ_STATUS, clear_buf, 2);
+        if (write_command(handle, SX1262_CMD_CLEAR_IRQ_STATUS, clear_buf, 2) != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to clear IRQ flags — possible interrupt storm");
+        }
 
         if (irq & SX1262_IRQ_TX_DONE) {
             xSemaphoreGive(handle->tx_done);
@@ -253,10 +267,15 @@ static void irq_handler_task(void *arg)
                 if (pkt_len > 0) {
                     uint8_t pkt_data[SX1262_MAX_PACKET_LENGTH];
                     if (read_buffer(handle, offset, pkt_data, pkt_len) == ESP_OK) {
+                        int16_t rssi = 0;
+                        int8_t snr = 0;
                         uint8_t pkt_status[3];
-                        read_command(handle, SX1262_CMD_GET_PACKET_STATUS, pkt_status, 3);
-                        int16_t rssi = -(int16_t)pkt_status[0] / 2;
-                        int8_t snr = (int8_t)pkt_status[1] / 4;
+                        if (read_command(handle, SX1262_CMD_GET_PACKET_STATUS, pkt_status, 3) == ESP_OK) {
+                            rssi = -(int16_t)pkt_status[0] / 2;
+                            snr = (int8_t)pkt_status[1] / 4;
+                        } else {
+                            ESP_LOGW(TAG, "Failed to read packet status, RSSI/SNR unavailable");
+                        }
 
                         if (handle->rx_cb) {
                             sx1262_rx_packet_t packet = {
@@ -272,8 +291,7 @@ static void irq_handler_task(void *arg)
             }
 
             if (handle->receiving) {
-                uint8_t rx_params[3] = { 0xFF, 0xFF, 0xFF };
-                write_command(handle, SX1262_CMD_SET_RX, rx_params, 3);
+                rearm_rx(handle);
             }
         }
 
@@ -284,8 +302,7 @@ static void irq_handler_task(void *arg)
         if (irq & SX1262_IRQ_CRC_ERR) {
             ESP_LOGW(TAG, "CRC error on received packet");
             if (handle->receiving) {
-                uint8_t rx_params[3] = { 0xFF, 0xFF, 0xFF };
-                write_command(handle, SX1262_CMD_SET_RX, rx_params, 3);
+                rearm_rx(handle);
             }
         }
     }
@@ -346,17 +363,29 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
         .mode = GPIO_MODE_OUTPUT,
         .pull_up_en = GPIO_PULLUP_ENABLE,
     };
-    gpio_config(&io_conf);
+    err = gpio_config(&io_conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "RST GPIO %d config failed: %s", config->pin_rst, esp_err_to_name(err));
+        goto fail_spi;
+    }
 
     io_conf.pin_bit_mask = (1ULL << config->pin_busy);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
+    err = gpio_config(&io_conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "BUSY GPIO %d config failed: %s", config->pin_busy, esp_err_to_name(err));
+        goto fail_spi;
+    }
 
     io_conf.pin_bit_mask = (1ULL << config->pin_dio1);
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
-    gpio_config(&io_conf);
+    err = gpio_config(&io_conf);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "DIO1 GPIO %d config failed: %s", config->pin_dio1, esp_err_to_name(err));
+        goto fail_spi;
+    }
 
     // TX done semaphore
     inst->tx_done = xSemaphoreCreateBinary();
@@ -366,10 +395,22 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
                 CONFIG_SX1262_TASK_STACK_SIZE, inst,
                 CONFIG_SX1262_TASK_PRIORITY, &inst->irq_task);
 
-    // DIO1 GPIO ISR
-    gpio_install_isr_service(0);
-    gpio_set_intr_type(config->pin_dio1, GPIO_INTR_POSEDGE);
-    gpio_isr_handler_add(config->pin_dio1, dio1_isr_handler, inst);
+    // DIO1 GPIO ISR (ESP_ERR_INVALID_STATE = already installed, acceptable)
+    err = gpio_install_isr_service(0);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "GPIO ISR service install failed: %s", esp_err_to_name(err));
+        goto fail;
+    }
+    err = gpio_set_intr_type(config->pin_dio1, GPIO_INTR_POSEDGE);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "DIO1 interrupt type setup failed: %s", esp_err_to_name(err));
+        goto fail;
+    }
+    err = gpio_isr_handler_add(config->pin_dio1, dio1_isr_handler, inst);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "DIO1 ISR handler add failed: %s", esp_err_to_name(err));
+        goto fail;
+    }
 
     // Hardware reset
     gpio_set_level(config->pin_rst, 0);
@@ -439,6 +480,7 @@ fail:
     gpio_isr_handler_remove(config->pin_dio1);
     if (inst->irq_task) vTaskDelete(inst->irq_task);
     if (inst->tx_done) vSemaphoreDelete(inst->tx_done);
+fail_spi:
     spi_bus_remove_device(inst->spi);
     spi_bus_free(config->spi_host);
     free(inst);
