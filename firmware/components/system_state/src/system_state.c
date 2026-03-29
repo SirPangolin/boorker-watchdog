@@ -1,19 +1,14 @@
 #include "system_state.h"
 #include "event_bus.h"
 #include "esp_log.h"
-#include "nvs_flash.h"
-#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
-#include "sdkconfig.h"
 #include <string.h>
 
 static const char *TAG = "system_state";
 
 #define MUTEX_TIMEOUT_MS        100
 #define DEINIT_MUTEX_TIMEOUT_MS 500
-#define NVS_NAMESPACE           "sys_state"
-#define NVS_KEY_CLAIMED         "claimed"
 
 static struct {
     bool initialized;
@@ -34,43 +29,6 @@ static esp_err_t notify_section(system_state_section_t section)
     return event_bus_notify(&event);
 }
 
-static esp_err_t load_claimed_from_nvs(void)
-{
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &handle);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        s_ctx.state.claimed = false;
-        return ESP_OK;
-    }
-    if (err != ESP_OK) return err;
-
-    uint8_t val = 0;
-    err = nvs_get_u8(handle, NVS_KEY_CLAIMED, &val);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        s_ctx.state.claimed = false;
-        err = ESP_OK;
-    } else if (err == ESP_OK) {
-        s_ctx.state.claimed = (val != 0);
-    }
-
-    nvs_close(handle);
-    return err;
-}
-
-static esp_err_t save_claimed_to_nvs(bool claimed)
-{
-    nvs_handle_t handle;
-    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &handle);
-    if (err != ESP_OK) return err;
-
-    err = nvs_set_u8(handle, NVS_KEY_CLAIMED, claimed ? 1 : 0);
-    if (err == ESP_OK) {
-        err = nvs_commit(handle);
-    }
-
-    nvs_close(handle);
-    return err;
-}
 
 // ---------------------------------------------------------------------------
 // Init / Deinit
@@ -88,13 +46,8 @@ esp_err_t system_state_init(void)
 
     memset(&s_ctx.state, 0, sizeof(s_ctx.state));
 
-    esp_err_t err = load_claimed_from_nvs();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to load claimed state: %s", esp_err_to_name(err));
-    }
-
     s_ctx.initialized = true;
-    ESP_LOGI(TAG, "Initialized (claimed=%d)", s_ctx.state.claimed);
+    ESP_LOGI(TAG, "Initialized");
     return ESP_OK;
 }
 
@@ -156,11 +109,6 @@ esp_err_t system_state_set_claimed(bool claimed)
 
     s_ctx.state.claimed = claimed;
     xSemaphoreGive(s_ctx.mutex);
-
-    esp_err_t err = save_claimed_to_nvs(claimed);
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to persist claimed=%d: %s", claimed, esp_err_to_name(err));
-    }
 
     notify_section(SYSTEM_STATE_LIFECYCLE_UPDATED);
     return ESP_OK;

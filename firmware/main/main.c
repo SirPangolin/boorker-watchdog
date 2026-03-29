@@ -350,8 +350,9 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
-    // Publish identity to system_state
+    // Publish identity + claimed state to system_state
     system_state_set_identity(identity->node_name, identity->node_suffix);
+    system_state_set_claimed(!credentials_is_first_boot());
 
     // Publish boot-time system info
     esp_chip_info_t chip;
