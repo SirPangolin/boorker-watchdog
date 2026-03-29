@@ -259,8 +259,10 @@ Single USB-C connector providing both interfaces:
 - **Form factor**: Breadboard compatible (2.54mm spacing, 23mm width)
 - **Headers**: 2x 18-pin (J2 right, J3 left)
 - **Antenna connectors**: WiFi (PCB spring), LoRa (IPEX/U.FL — external antenna required for TX)
-- **LoRa antenna (indoor)**: 915MHz 2dBi omnidirectional stub, 8cm, U.FL connector. ERP at max TX: +24 dBm
-- **LoRa antenna (outdoor)**: 915MHz 10dBi omnidirectional, 20cm, SMA male (requires U.FL→SMA adapter). ERP at max TX: +32 dBm. Waterproof.
+- **LoRa antenna (indoor)**: 915MHz 2dBi omnidirectional stub, 8cm, U.FL connector. EIRP at max TX: +24 dBm
+- **LoRa antenna (outdoor)**: 915MHz 10dBi omnidirectional, 20cm, SMA male (requires U.FL→SMA adapter). EIRP at max TX: +32 dBm — reduce TX power to +20 dBm to stay within FCC +30 dBm EIRP limit. Waterproof.
+- **Max antenna gain (US)**: 8 dBi at +22 dBm TX = +30 dBm EIRP (FCC limit). Higher gain antennas require reducing TX power.
+- **Max antenna gain (EU)**: 2 dBi at +12 dBm TX = +14 dBm ERP (ETSI limit). See REGULATORY.md.
 - **Battery**: JST SH 1.25-2 connector, TP4054 charging IC
 
 ## Notes
@@ -280,6 +282,11 @@ Single USB-C connector providing both interfaces:
 - [Power Specs Photo](./heltec-v3-power-specs.webp)
 - [Heltec Wiki](https://wiki.heltec.org/docs/devices/open-source-hardware/esp32-series/lora-32/wifi-lora-32-v3/)
 - [GPIO Usage Guide](https://wiki.heltec.org/docs/devices/open-source-hardware/esp32-series/lora-32/wifi-lora-32-v3/Pin-diagram-guidance)
+
+Regulatory Certification:
+- **FCC ID:** 2AXHB-HTIT-WB32LA (United States)
+- **CE Marked** (European Union)
+- See [REGULATORY.md](../../REGULATORY.md) for compliance details.
 
 Sources:
 - [Official V3.2 Document](https://resource.heltec.cn/download/WiFi_LoRa_32_V3/HTIT-WB32LA_V3.2.pdf)

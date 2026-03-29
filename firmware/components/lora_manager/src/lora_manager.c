@@ -85,6 +85,17 @@ static uint32_t calculate_time_on_air_ms(size_t payload_len)
 }
 
 // ---------------------------------------------------------------------------
+// Duty cycle / airtime
+// ---------------------------------------------------------------------------
+
+static uint8_t get_effective_duty_cycle_pct(void)
+{
+    uint8_t kconfig_pct = CONFIG_LORA_MANAGER_DUTY_CYCLE_PCT;
+    uint8_t region_max = s_lora.region ? s_lora.region->duty_cycle_pct : 10;
+    return (kconfig_pct < region_max) ? kconfig_pct : region_max;
+}
+
+// ---------------------------------------------------------------------------
 // Airtime tracking (rolling 1-hour window)
 // ---------------------------------------------------------------------------
 
@@ -162,11 +173,15 @@ esp_err_t lora_manager_init(void)
                  s_lora.region->name);
     }
 
-    ESP_LOGI(TAG, "Region: %s (%lu Hz, max %d dBm, %d%% duty)",
+    uint8_t effective_duty = get_effective_duty_cycle_pct();
+    ESP_LOGI(TAG, "Region: %s (%lu Hz, max %d dBm, %d%% duty cycle, enforced)",
              s_lora.region->name,
              (unsigned long)s_lora.region->frequency_hz,
              s_lora.region->max_power_dbm,
-             s_lora.region->duty_cycle_pct);
+             effective_duty);
+    if (s_lora.region->max_dwell_time_ms > 0) {
+        ESP_LOGI(TAG, "Dwell time limit: %u ms", s_lora.region->max_dwell_time_ms);
+    }
 
     // Create radio
     sx1262_config_t radio_cfg = {
@@ -264,9 +279,17 @@ esp_err_t lora_manager_send(const uint8_t *data, size_t len)
     reset_airtime_window_if_needed();
 
     if (!lora_manager_can_transmit()) {
-        ESP_LOGW(TAG, "Airtime budget exceeded (%lu/%lu ms). Transmitting anyway — operator responsibility.",
+        ESP_LOGW(TAG, "TX blocked — airtime budget exceeded (%lu/%lu ms)",
                  (unsigned long)s_lora.airtime_used_ms,
                  (unsigned long)lora_manager_get_airtime_budget_ms());
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    uint32_t toa = calculate_time_on_air_ms(len);
+    if (s_lora.region->max_dwell_time_ms > 0 && toa > s_lora.region->max_dwell_time_ms) {
+        ESP_LOGW(TAG, "TX blocked — time-on-air %lu ms exceeds %s dwell time limit of %u ms",
+                 (unsigned long)toa, s_lora.region->name, s_lora.region->max_dwell_time_ms);
+        return ESP_ERR_INVALID_SIZE;
     }
 
     bool was_listening = s_lora.listening;
@@ -279,7 +302,6 @@ esp_err_t lora_manager_send(const uint8_t *data, size_t len)
         s_lora.listening = false;
     }
 
-    uint32_t toa = calculate_time_on_air_ms(len);
     esp_err_t err = sx1262_transmit(s_lora.radio, data, len, toa + 5000);
 
     if (err == ESP_OK) {
@@ -345,7 +367,7 @@ uint32_t lora_manager_get_airtime_used_ms(void)
 uint32_t lora_manager_get_airtime_budget_ms(void)
 {
     if (!s_lora.region) return 0;
-    return (uint32_t)(3600UL * 1000UL * s_lora.region->duty_cycle_pct / 100);
+    return (uint32_t)(3600UL * 1000UL * get_effective_duty_cycle_pct() / 100);
 }
 
 esp_err_t lora_manager_get_status(lora_status_t *out)
@@ -359,7 +381,7 @@ esp_err_t lora_manager_get_status(lora_status_t *out)
     out->frequency_hz = s_lora.region->frequency_hz;
     out->tx_power_dbm = s_lora.tx_power_dbm;
     out->region_max_power_dbm = s_lora.region->max_power_dbm;
-    out->duty_cycle_pct = s_lora.region->duty_cycle_pct;
+    out->duty_cycle_pct = get_effective_duty_cycle_pct();
     out->receiving = s_lora.listening;
     out->antenna_verified = s_lora.antenna_verified;
     out->airtime_used_ms = s_lora.airtime_used_ms;
