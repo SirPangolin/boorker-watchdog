@@ -2,6 +2,20 @@
 
 Boorker Watchdog uses LoRa radio communication on the ISM (Industrial, Scientific, and Medical) frequency bands. These bands are shared, unlicensed spectrum governed by regional regulations.
 
+## Why This Matters
+
+ISM bands are a shared resource. Every device that transmits — your weather station, your neighbor's garage door opener, the farmer's irrigation sensor five miles away — shares the same sliver of spectrum. When one device monopolizes airtime, everyone else's packets get lost.
+
+The regulations exist because cooperation is the only thing that makes shared spectrum work. In the EU, ETSI EN 300 220 mandates a 10% duty cycle on the 868 MHz band — you can transmit for at most 6 minutes per hour. In the US, the FCC takes a lighter touch at 915 MHz, trusting operators to self-regulate. Both approaches aim for the same goal: make sure the spectrum stays usable for everyone.
+
+## Our Approach
+
+Boorker Watchdog defaults to the **strictest standard across all supported regions**, regardless of which region you're in. A US device enforces the same 10% duty cycle as a EU device. We believe the conservative default is the right default — not because US law requires it, but because shared spectrum deserves shared respect.
+
+If a US operator has a legitimate need for higher duty cycles (high-frequency sensor polling, real-time monitoring), the limit can be adjusted at build time. The firmware caps the override at the region's legal maximum — you cannot exceed your jurisdiction's laws even if you try.
+
+This is a deliberate design choice. We'd rather a developer spend 30 seconds changing a build setting than have a device silently interfere with its neighbors because the defaults were permissive.
+
 ## Hardware Certification
 
 The Heltec WiFi LoRa 32 V3 module carries modular type approval:
@@ -13,11 +27,9 @@ This firmware operates within the certified parameters of the module. No separat
 
 ## Default Behavior
 
-Boorker Watchdog applies **conservative defaults across all regions**:
-
-- **Duty cycle: 10%** — the firmware enforces a 10% airtime limit (360 seconds per hour) regardless of region. This matches the strictest ISM band requirement (ETSI EN 300 220 for EU 868 MHz) and is applied as the universal default.
-- **Duty cycle enforcement is blocking** — when the airtime budget is exhausted, transmissions are rejected until the rolling window resets.
+- **Duty cycle: 10%** — the firmware enforces a 10% airtime limit (360 seconds per hour) regardless of region. Enforcement is blocking — when the budget is exhausted, transmissions are rejected until the rolling window resets.
 - **TX power** is set per-region and cannot exceed the regional regulatory maximum.
+- **Dwell time** limits are enforced where applicable (AU_915: 400ms max per transmission).
 
 ## Regional Limits
 
@@ -28,7 +40,7 @@ Boorker Watchdog applies **conservative defaults across all regions**:
 | EU_433 | 433.875 MHz | +10 dBm ERP | 10% | None | ETSI EN 300 220 |
 | AU_915 | 915 MHz | +22 dBm | No federal limit* | 400ms max | AS/NZS 4268 |
 
-*US and AU regions have no duty cycle requirement, but this firmware defaults to 10% for all regions. This default can be adjusted via build configuration up to the region's legal maximum.
+*This firmware defaults to 10% duty cycle for all regions. The default can be adjusted via build configuration up to the region's legal maximum.
 
 ## Antenna Considerations
 
