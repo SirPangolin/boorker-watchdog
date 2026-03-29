@@ -183,6 +183,11 @@ esp_err_t system_state_set_led(const system_led_t *led);
 esp_err_t system_state_set_buzzer(const system_buzzer_t *buzzer);
 esp_err_t system_state_set_display(const system_display_t *display);
 esp_err_t system_state_set_buttons(uint8_t count);
+static inline const char *system_ota_state_name(uint8_t state) {
+    static const char *names[] = { "idle", "downloading", "verifying", "pending_reboot" };
+    return state < 4 ? names[state] : "unknown";
+}
+
 esp_err_t system_state_set_system(const char *firmware_version, const char *idf_version,
                                    uint8_t chip_major, uint8_t chip_minor, uint8_t chip_cores,
                                    uint32_t heap_free, uint32_t heap_total,

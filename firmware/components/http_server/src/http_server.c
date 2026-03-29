@@ -854,7 +854,7 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
 
     bool ok = true;
     ok = ok && cJSON_AddStringToObject(json, "state",
-             system_state_ota_name(system_state_get_ota()));
+             system_ota_state_name(system_state_get()->ota.state));
     ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
 
     ota_update_info_t update;
