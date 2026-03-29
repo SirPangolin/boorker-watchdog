@@ -377,8 +377,9 @@ static void render_current_screen(void)
 
     case SCREEN_FIRST_BOOT: {
         const credentials_t *creds = credentials_get();
-        // TODO: get actual IP when available
-        screen_first_boot(&s_ctx.u8g2, creds, "--");
+        const system_state_t *ss = system_state_get();
+        screen_first_boot(&s_ctx.u8g2, creds,
+                          ss->wifi.ip[0] != '\0' ? ss->wifi.ip : "--");
         break;
     }
 

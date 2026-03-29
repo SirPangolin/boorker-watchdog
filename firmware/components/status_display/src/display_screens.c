@@ -16,13 +16,8 @@
 #include <math.h>
 #include "u8g2.h"
 #include "event_bus.h"
-#include "credentials.h"
-#include "esp_wifi.h"
+#include "system_state.h"
 #include "esp_log.h"
-#include "esp_chip_info.h"
-#include "esp_timer.h"
-#include "esp_system.h"
-#include "version.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -333,33 +328,29 @@ void screen_network(u8g2_t *u8g2)
 {
     draw_header(u8g2, "NETWORK", NULL);
 
-    wifi_ap_record_t ap;
+    const system_state_t *ss = system_state_get();
     char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "SSID:%s", (char *)ap.ssid);
+    if (ss->wifi.connected) {
+        snprintf(buf, sizeof(buf), "SSID:%s", ss->wifi.ssid);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
-        snprintf(buf, sizeof(buf), "RSSI:%d dBm", ap.rssi);
+        snprintf(buf, sizeof(buf), "RSSI:%d dBm", ss->wifi.rssi);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
     } else {
         u8g2_DrawStr(u8g2, 0, y, "WiFi: not connected"); y += 8;
     }
 
-    esp_netif_ip_info_t ip_info;
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "IP:" IPSTR, IP2STR(&ip_info.ip));
+    if (ss->wifi.ip[0] != '\0') {
+        snprintf(buf, sizeof(buf), "IP:%s", ss->wifi.ip);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
     }
 
-    uint8_t mac[6];
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "MAC:%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        u8g2_DrawStr(u8g2, 0, y, buf);
-    }
+    snprintf(buf, sizeof(buf), "MAC:%02X:%02X:%02X:%02X:%02X:%02X",
+             ss->wifi.mac[0], ss->wifi.mac[1], ss->wifi.mac[2],
+             ss->wifi.mac[3], ss->wifi.mac[4], ss->wifi.mac[5]);
+    u8g2_DrawStr(u8g2, 0, y, buf);
 
     draw_footer_dots(u8g2, NAV_IDX_NETWORK, NAV_TOTAL);
 }
@@ -368,12 +359,19 @@ void screen_lora(u8g2_t *u8g2)
 {
     draw_header(u8g2, "LORA", NULL);
 
+    const system_state_t *ss = system_state_get();
+    char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
-    u8g2_DrawStr(u8g2, 0, y, "Freq: 915 MHz"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "TX Pwr: +22 dBm"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "Status: Not impl"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "Peers: --");
+
+    snprintf(buf, sizeof(buf), "Freq: %lu MHz", (unsigned long)ss->lora.frequency_mhz);
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "TX Pwr: %+d dBm", ss->lora.tx_power_dbm);
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "Status: %s", ss->lora.connected ? "Connected" : "Not impl");
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "Peers: %d", ss->lora.peer_count);
+    u8g2_DrawStr(u8g2, 0, y, buf);
 
     draw_footer_dots(u8g2, NAV_IDX_LORA, NAV_TOTAL);
 }
@@ -382,22 +380,22 @@ void screen_system(u8g2_t *u8g2)
 {
     draw_header(u8g2, "SYSTEM", NULL);
 
+    const system_state_t *ss = system_state_get();
     char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    snprintf(buf, sizeof(buf), "FW: v%s", BOORKER_VERSION_STRING);
+    snprintf(buf, sizeof(buf), "FW: v%s", ss->firmware_version);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    esp_chip_info_t chip;
-    esp_chip_info(&chip);
-    snprintf(buf, sizeof(buf), "Chip: ESP32-S3 r%d.%d", chip.revision / 100, chip.revision % 100);
+    snprintf(buf, sizeof(buf), "Chip: ESP32-S3 r%d.%d",
+             ss->chip_revision_major, ss->chip_revision_minor);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    snprintf(buf, sizeof(buf), "Heap: %lu KB", esp_get_free_heap_size() / 1024);
+    snprintf(buf, sizeof(buf), "Heap: %lu KB", (unsigned long)ss->heap_free / 1024);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    int64_t uptime_s = esp_timer_get_time() / 1000000;
+    int64_t uptime_s = ss->uptime_us / 1000000;
     int days = uptime_s / 86400;
     int hours = (uptime_s % 86400) / 3600;
     int mins = (uptime_s % 3600) / 60;
@@ -411,13 +409,10 @@ void screen_nodes(u8g2_t *u8g2)
 {
     draw_header(u8g2, "NODES", NULL);
 
+    const system_state_t *ss = system_state_get();
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
-    // For now, only local node
-    const credentials_t *creds = credentials_get();
-    if (creds) {
-        u8g2_DrawStr(u8g2, 0, 18, creds->node_name);
-        u8g2_DrawStr(u8g2, 90, 18, "LOCAL");
-    }
+    u8g2_DrawStr(u8g2, 0, 18, ss->node_name);
+    u8g2_DrawStr(u8g2, 90, 18, "LOCAL");
     u8g2_DrawStr(u8g2, 0, 30, "Mesh: not implemented");
 
     draw_footer_dots(u8g2, NAV_IDX_NODES, NAV_TOTAL);

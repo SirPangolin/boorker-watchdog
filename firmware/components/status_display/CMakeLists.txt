@@ -5,8 +5,7 @@ idf_component_register(
          "src/display_logo.c"
          "src/display_console.c"
     INCLUDE_DIRS "include"
-    REQUIRES event_bus
-             credentials system_state nvs_flash log esp_timer
-             driver main nixy4__u8g2 esp_wifi esp_netif
+    REQUIRES event_bus credentials system_state
+             nvs_flash log esp_timer driver main nixy4__u8g2
     PRIV_REQUIRES freertos
 )
