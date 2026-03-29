@@ -6,13 +6,13 @@
 #pragma once
 
 #include "u8g2.h"
-#include "credentials.h"
+#include "secrets.h"
 #include <stdbool.h>
 #include <stddef.h>
 
 // Screen rendering functions (from display_screens.c)
 void screen_splash(u8g2_t *u8g2, int throbber_phase);
-void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str);
+void screen_first_boot(u8g2_t *u8g2, const secrets_t *creds, const char *ip_str);
 void screen_dashboard_card(u8g2_t *u8g2, int metric_index);
 int screen_get_metric_count(void);
 void screen_alert(u8g2_t *u8g2, const char *source, const char *message, bool silenced);

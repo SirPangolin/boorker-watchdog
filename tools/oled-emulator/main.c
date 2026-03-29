@@ -50,7 +50,7 @@ static void render_screen(u8g2_t *u8g2, int index) {
         screen_splash(u8g2, index % 3);
         break;
     case 1:
-        screen_first_boot(u8g2, credentials_get(), "192.168.68.54");
+        screen_first_boot(u8g2, secrets_get(), "192.168.68.54");
         break;
     case 2:
         screen_dashboard_card(u8g2, 0);  // Temperature

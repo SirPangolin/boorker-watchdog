@@ -4,7 +4,7 @@
 #include <string.h>
 
 #include "esp_log.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "esp_wifi.h"
 #include "wifi_provisioning/manager.h"
 #include "wifi_provisioning/scheme_ble.h"
@@ -93,7 +93,7 @@ esp_err_t wifi_prov_start(const char *device_name)
 
     // Configure security (with Proof-of-Possession from credentials)
     wifi_prov_security_t security = WIFI_PROV_SECURITY_1;
-    const credentials_t *identity = credentials_get();
+    const secrets_t *identity = secrets_get();
     if (identity == NULL) {
         ESP_LOGE(TAG, "credentials not initialized");
         wifi_prov_mgr_deinit();

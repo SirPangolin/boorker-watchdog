@@ -18,7 +18,7 @@
 #if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
 #endif
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
 #include "event_bus.h"
 #include "web_auth.h"
@@ -337,13 +337,13 @@ void app_main(void)
     }
 
     // Initialize credentials (generates secrets on first boot)
-    ret = credentials_init();
+    ret = secrets_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Credentials init failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    const credentials_t *identity = credentials_get();
+    const secrets_t *identity = secrets_get();
     if (identity == NULL) {
         ESP_LOGE(TAG, "Failed to get credentials");
         return;
@@ -352,7 +352,7 @@ void app_main(void)
 
     // Publish identity + claimed state to system_state
     system_state_set_identity(identity->node_name, identity->node_suffix);
-    system_state_set_claimed(!credentials_is_first_boot());
+    system_state_set_claimed(!secrets_is_first_boot());
 
     // Publish boot-time system info
     esp_chip_info_t chip;

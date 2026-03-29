@@ -45,7 +45,7 @@ static inline const char *sensor_status_name(sensor_status_t status) {
     }
 }
 
-// Credentials (mirrors firmware/components/credentials/include/credentials.h)
+// Credentials (mirrors firmware/components/credentials/include/secrets.h)
 #define CRED_NODE_NAME_LEN  32
 #define CRED_WEB_PASSWORD_LEN 33
 #define CRED_AP_PASSWORD_LEN  33
@@ -58,7 +58,7 @@ typedef struct {
     char ap_password[CRED_AP_PASSWORD_LEN];
     char ble_pop[CRED_BLE_POP_LEN];
     char node_suffix[CRED_NODE_SUFFIX_LEN];
-} credentials_t;
+} secrets_t;
 
 // WiFi types
 typedef struct {

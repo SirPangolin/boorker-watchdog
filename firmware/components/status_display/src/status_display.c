@@ -13,7 +13,7 @@
 #include "status_display.h"
 #include "display_hal.h"
 #include "event_bus.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
 #include "u8g2.h"
 #include "esp_log.h"
@@ -376,7 +376,7 @@ static void render_current_screen(void)
         break;
 
     case SCREEN_FIRST_BOOT: {
-        const credentials_t *creds = credentials_get();
+        const secrets_t *creds = secrets_get();
         const system_state_t *ss = system_state_get();
         screen_first_boot(&s_ctx.u8g2, creds,
                           ss->wifi.ip[0] != '\0' ? ss->wifi.ip : "--");

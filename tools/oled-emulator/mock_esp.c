@@ -2,7 +2,7 @@
  * @file mock_esp.c
  * @brief Mock implementations of ESP-IDF functions for desktop emulator
  *
- * Returns fake sensor data, credentials, WiFi info, and system stats
+ * Returns fake sensor data, secrets, WiFi info, and system stats
  * so display_screens.c renders realistic content without real hardware.
  */
 
@@ -50,10 +50,10 @@ const char *sensor_manager_get_sensor_id(size_t index) {
 }
 
 // --------------------------------------------------------------------------
-// Mock credentials (intentionally fake — not real device secrets)
+// Mock secrets (intentionally fake — not real device secrets)
 // --------------------------------------------------------------------------
 
-static credentials_t mock_creds = {
+static secrets_t mock_secrets = {
     .node_name = "boorker-MOCK",
     .web_password = "mock-web-pass",
     .ap_password = "mock-ap-pass",
@@ -61,8 +61,8 @@ static credentials_t mock_creds = {
     .node_suffix = "MOCK",
 };
 
-const credentials_t *credentials_get(void) {
-    return &mock_creds;
+const secrets_t *secrets_get(void) {
+    return &mock_secrets;
 }
 
 // --------------------------------------------------------------------------

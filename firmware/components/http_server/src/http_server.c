@@ -1,6 +1,6 @@
 #include "http_server.h"
 #include "web_auth.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
 #include "event_bus.h"
 #include "sys_console.h"
@@ -642,7 +642,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     // Only expose credentials during first boot period (security measure)
-    if (!credentials_is_first_boot()) {
+    if (!secrets_is_first_boot()) {
         ESP_LOGW(TAG, "QR endpoint accessed after first boot - credentials hidden");
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Credentials only available during first boot\"}");
@@ -650,7 +650,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     }
 
     char qr_json[256];
-    esp_err_t err = credentials_get_qr_json(qr_json, sizeof(qr_json));
+    esp_err_t err = secrets_get_qr_json(qr_json, sizeof(qr_json));
 
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, qr_json);
@@ -1060,8 +1060,8 @@ esp_err_t http_server_start(void)
 
     // Configure and start server
 #if CONFIG_HTTP_SERVER_HTTPS_ENABLED
-    const char *cert = credentials_get_tls_cert();
-    const char *pkey = credentials_get_tls_key();
+    const char *cert = secrets_get_tls_cert();
+    const char *pkey = secrets_get_tls_key();
     if (cert == NULL || pkey == NULL) {
         ESP_LOGE(TAG, "TLS cert/key not available — cannot start HTTPS");
         return ESP_FAIL;
