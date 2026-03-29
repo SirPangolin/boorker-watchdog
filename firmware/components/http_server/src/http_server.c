@@ -533,8 +533,12 @@ static esp_err_t api_system_status(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    system_state_t ss_buf;
-    system_state_copy(&ss_buf);
+    system_state_t ss_buf = {0};
+    if (system_state_copy(&ss_buf) != ESP_OK) {
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     const system_state_t *ss = &ss_buf;
     bool ok = true;
 
@@ -589,8 +593,11 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_OK;
     }
 
-    system_state_t ss_info_buf;
-    system_state_copy(&ss_info_buf);
+    system_state_t ss_info_buf = {0};
+    if (system_state_copy(&ss_info_buf) != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     const system_state_t *ss = &ss_info_buf;
 
     cJSON *json = cJSON_CreateObject();
@@ -819,8 +826,12 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    system_state_t ss_ota_buf;
-    system_state_copy(&ss_ota_buf);
+    system_state_t ss_ota_buf = {0};
+    if (system_state_copy(&ss_ota_buf) != ESP_OK) {
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     bool ok = true;
     ok = ok && cJSON_AddStringToObject(json, "state",
              system_ota_state_name(ss_ota_buf.ota.state));
@@ -1019,9 +1030,9 @@ static esp_err_t redirect_to_https(httpd_req_t *req)
 {
     char host[64] = {0};
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
-        const system_state_t *ss_redirect = system_state_get();
-        if (ss_redirect->wifi.ip[0] != '\0') {
-            strncpy(host, ss_redirect->wifi.ip, sizeof(host) - 1);
+        system_state_t ss_redirect = {0};
+        if (system_state_copy(&ss_redirect) == ESP_OK && ss_redirect.wifi.ip[0] != '\0') {
+            strncpy(host, ss_redirect.wifi.ip, sizeof(host) - 1);
         }
         if (host[0] == '\0') {
             ESP_LOGW(TAG, "Cannot determine host for HTTPS redirect");

@@ -137,6 +137,18 @@ esp_err_t system_state_set_ota(const system_ota_t *ota)
     return ESP_OK;
 }
 
+esp_err_t system_state_set_ota_state(uint8_t state)
+{
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
+
+    s_ctx.state.ota.state = state;
+
+    xSemaphoreGive(s_ctx.mutex);
+    notify_section(SYSTEM_STATE_OTA_UPDATED);
+    return ESP_OK;
+}
+
 esp_err_t system_state_set_reboot(bool pending, uint32_t remaining_seconds)
 {
     if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;

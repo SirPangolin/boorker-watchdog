@@ -178,6 +178,7 @@ bool system_state_is_claimed(void);
 esp_err_t system_state_set_identity(const char *node_name, const char *node_suffix);
 esp_err_t system_state_set_claimed(bool claimed);
 esp_err_t system_state_set_ota(const system_ota_t *ota);
+esp_err_t system_state_set_ota_state(uint8_t state);
 esp_err_t system_state_set_reboot(bool pending, uint32_t remaining_seconds);
 esp_err_t system_state_set_wifi(const system_wifi_t *wifi);
 esp_err_t system_state_set_lora(const system_lora_t *lora);
