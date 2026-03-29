@@ -259,6 +259,7 @@ esp_err_t lora_manager_send(const uint8_t *data, size_t len)
 {
     if (!s_lora.initialized) return ESP_ERR_INVALID_STATE;
     if (data == NULL || len == 0) return ESP_ERR_INVALID_ARG;
+    if (len > 255) return ESP_ERR_INVALID_SIZE;
 
     reset_airtime_window_if_needed();
 

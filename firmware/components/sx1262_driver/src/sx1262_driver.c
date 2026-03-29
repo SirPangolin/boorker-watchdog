@@ -19,10 +19,14 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <math.h>
 
 static const char *TAG = "sx1262";
+
+// Max SPI frame: 4 header + 255 payload
+#define SPI_BUF_SIZE 260
 
 // ---------------------------------------------------------------------------
 // Instance struct
@@ -37,6 +41,7 @@ struct sx1262_inst {
     gpio_num_t pin_dio1;
     TaskHandle_t irq_task;
     SemaphoreHandle_t tx_done;
+    SemaphoreHandle_t spi_mutex;
     sx1262_rx_cb_t rx_cb;
     void *rx_ctx;
     bool initialized;
@@ -44,10 +49,13 @@ struct sx1262_inst {
     uint32_t frequency_hz;
     int8_t tx_power_dbm;
     sx1262_pkt_params_t pkt_params;
+    // DMA-aligned SPI buffers (heap-allocated from DMA-capable memory)
+    uint8_t *spi_tx;
+    uint8_t *spi_rx;
 };
 
 // ---------------------------------------------------------------------------
-// SPI helpers
+// SPI helpers (caller must hold spi_mutex)
 // ---------------------------------------------------------------------------
 
 static esp_err_t wait_busy(sx1262_handle_t handle, uint32_t timeout_ms)
@@ -68,19 +76,20 @@ static esp_err_t wait_busy(sx1262_handle_t handle, uint32_t timeout_ms)
 static esp_err_t write_command(sx1262_handle_t handle, uint8_t opcode,
                                 const uint8_t *params, size_t param_len)
 {
+    if (param_len > SPI_BUF_SIZE - 1) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 1 + param_len;
-    uint8_t tx_buf[total];
-    tx_buf[0] = opcode;
+    handle->spi_tx[0] = opcode;
     if (param_len > 0 && params != NULL) {
-        memcpy(&tx_buf[1], params, param_len);
+        memcpy(&handle->spi_tx[1], params, param_len);
     }
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
+        .tx_buffer = handle->spi_tx,
     };
     return spi_device_transmit(handle->spi, &t);
 }
@@ -88,23 +97,23 @@ static esp_err_t write_command(sx1262_handle_t handle, uint8_t opcode,
 static esp_err_t read_command(sx1262_handle_t handle, uint8_t opcode,
                                uint8_t *result, size_t result_len)
 {
+    if (result_len > SPI_BUF_SIZE - 2) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 1 + 1 + result_len;
-    uint8_t tx_buf[total];
-    uint8_t rx_buf[total];
-    memset(tx_buf, SX1262_CMD_NOP, total);
-    tx_buf[0] = opcode;
+    memset(handle->spi_tx, SX1262_SPI_FILLER, total);
+    handle->spi_tx[0] = opcode;
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf,
+        .tx_buffer = handle->spi_tx,
+        .rx_buffer = handle->spi_rx,
     };
     err = spi_device_transmit(handle->spi, &t);
     if (err == ESP_OK && result != NULL) {
-        memcpy(result, &rx_buf[2], result_len);
+        memcpy(result, &handle->spi_rx[2], result_len);
     }
     return err;
 }
@@ -112,19 +121,20 @@ static esp_err_t read_command(sx1262_handle_t handle, uint8_t opcode,
 static esp_err_t write_register(sx1262_handle_t handle, uint16_t addr,
                                  const uint8_t *data, size_t len)
 {
+    if (len > SPI_BUF_SIZE - 3) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 3 + len;
-    uint8_t tx_buf[total];
-    tx_buf[0] = SX1262_CMD_WRITE_REGISTER;
-    tx_buf[1] = (addr >> 8) & 0xFF;
-    tx_buf[2] = addr & 0xFF;
-    memcpy(&tx_buf[3], data, len);
+    handle->spi_tx[0] = SX1262_CMD_WRITE_REGISTER;
+    handle->spi_tx[1] = (addr >> 8) & 0xFF;
+    handle->spi_tx[2] = addr & 0xFF;
+    memcpy(&handle->spi_tx[3], data, len);
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
+        .tx_buffer = handle->spi_tx,
     };
     return spi_device_transmit(handle->spi, &t);
 }
@@ -132,25 +142,25 @@ static esp_err_t write_register(sx1262_handle_t handle, uint16_t addr,
 static esp_err_t read_register(sx1262_handle_t handle, uint16_t addr,
                                 uint8_t *data, size_t len)
 {
+    if (len > SPI_BUF_SIZE - 4) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 4 + len;
-    uint8_t tx_buf[total];
-    uint8_t rx_buf[total];
-    memset(tx_buf, SX1262_CMD_NOP, total);
-    tx_buf[0] = SX1262_CMD_READ_REGISTER;
-    tx_buf[1] = (addr >> 8) & 0xFF;
-    tx_buf[2] = addr & 0xFF;
+    memset(handle->spi_tx, SX1262_SPI_FILLER, total);
+    handle->spi_tx[0] = SX1262_CMD_READ_REGISTER;
+    handle->spi_tx[1] = (addr >> 8) & 0xFF;
+    handle->spi_tx[2] = addr & 0xFF;
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf,
+        .tx_buffer = handle->spi_tx,
+        .rx_buffer = handle->spi_rx,
     };
     err = spi_device_transmit(handle->spi, &t);
     if (err == ESP_OK) {
-        memcpy(data, &rx_buf[4], len);
+        memcpy(data, &handle->spi_rx[4], len);
     }
     return err;
 }
@@ -158,18 +168,19 @@ static esp_err_t read_register(sx1262_handle_t handle, uint16_t addr,
 static esp_err_t write_buffer(sx1262_handle_t handle, uint8_t offset,
                                const uint8_t *data, size_t len)
 {
+    if (len > SPI_BUF_SIZE - 2) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 2 + len;
-    uint8_t tx_buf[total];
-    tx_buf[0] = SX1262_CMD_WRITE_BUFFER;
-    tx_buf[1] = offset;
-    memcpy(&tx_buf[2], data, len);
+    handle->spi_tx[0] = SX1262_CMD_WRITE_BUFFER;
+    handle->spi_tx[1] = offset;
+    memcpy(&handle->spi_tx[2], data, len);
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
+        .tx_buffer = handle->spi_tx,
     };
     return spi_device_transmit(handle->spi, &t);
 }
@@ -177,24 +188,24 @@ static esp_err_t write_buffer(sx1262_handle_t handle, uint8_t offset,
 static esp_err_t read_buffer(sx1262_handle_t handle, uint8_t offset,
                               uint8_t *data, size_t len)
 {
+    if (len > SPI_BUF_SIZE - 3) return ESP_ERR_INVALID_SIZE;
+
     esp_err_t err = wait_busy(handle, 1000);
     if (err != ESP_OK) return err;
 
     size_t total = 3 + len;
-    uint8_t tx_buf[total];
-    uint8_t rx_buf[total];
-    memset(tx_buf, SX1262_CMD_NOP, total);
-    tx_buf[0] = SX1262_CMD_READ_BUFFER;
-    tx_buf[1] = offset;
+    memset(handle->spi_tx, SX1262_SPI_FILLER, total);
+    handle->spi_tx[0] = SX1262_CMD_READ_BUFFER;
+    handle->spi_tx[1] = offset;
 
     spi_transaction_t t = {
         .length = total * 8,
-        .tx_buffer = tx_buf,
-        .rx_buffer = rx_buf,
+        .tx_buffer = handle->spi_tx,
+        .rx_buffer = handle->spi_rx,
     };
     err = spi_device_transmit(handle->spi, &t);
     if (err == ESP_OK) {
-        memcpy(data, &rx_buf[3], len);
+        memcpy(data, &handle->spi_rx[3], len);
     }
     return err;
 }
@@ -242,9 +253,15 @@ static void irq_handler_task(void *arg)
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+        if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+            ESP_LOGE(TAG, "IRQ handler: SPI mutex timeout");
+            continue;
+        }
+
         uint8_t irq_buf[2];
         if (read_command(handle, SX1262_CMD_GET_IRQ_STATUS, irq_buf, 2) != ESP_OK) {
             ESP_LOGW(TAG, "Failed to read IRQ status");
+            xSemaphoreGive(handle->spi_mutex);
             continue;
         }
         uint16_t irq = ((uint16_t)irq_buf[0] << 8) | irq_buf[1];
@@ -255,7 +272,9 @@ static void irq_handler_task(void *arg)
         }
 
         if (irq & SX1262_IRQ_TX_DONE) {
+            xSemaphoreGive(handle->spi_mutex);
             xSemaphoreGive(handle->tx_done);
+            continue;
         }
 
         if (irq & SX1262_IRQ_RX_DONE) {
@@ -277,6 +296,13 @@ static void irq_handler_task(void *arg)
                             ESP_LOGW(TAG, "Failed to read packet status, RSSI/SNR unavailable");
                         }
 
+                        if (handle->receiving) {
+                            rearm_rx(handle);
+                        }
+
+                        xSemaphoreGive(handle->spi_mutex);
+
+                        // Callback outside mutex — may call back into manager
                         if (handle->rx_cb) {
                             sx1262_rx_packet_t packet = {
                                 .data = pkt_data,
@@ -286,6 +312,7 @@ static void irq_handler_task(void *arg)
                             };
                             handle->rx_cb(&packet, handle->rx_ctx);
                         }
+                        continue;
                     }
                 }
             }
@@ -305,6 +332,8 @@ static void irq_handler_task(void *arg)
                 rearm_rx(handle);
             }
         }
+
+        xSemaphoreGive(handle->spi_mutex);
     }
 }
 
@@ -321,11 +350,25 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
     struct sx1262_inst *inst = calloc(1, sizeof(struct sx1262_inst));
     if (inst == NULL) return ESP_ERR_NO_MEM;
 
+    // DMA-aligned SPI buffers
+    inst->spi_tx = heap_caps_malloc(SPI_BUF_SIZE, MALLOC_CAP_DMA);
+    inst->spi_rx = heap_caps_malloc(SPI_BUF_SIZE, MALLOC_CAP_DMA);
+    if (inst->spi_tx == NULL || inst->spi_rx == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate DMA-aligned SPI buffers");
+        heap_caps_free(inst->spi_tx);
+        heap_caps_free(inst->spi_rx);
+        free(inst);
+        return ESP_ERR_NO_MEM;
+    }
+
     inst->pin_nss = config->pin_nss;
     inst->pin_rst = config->pin_rst;
     inst->pin_busy = config->pin_busy;
     inst->pin_dio1 = config->pin_dio1;
     inst->spi_host = config->spi_host;
+
+    // SPI mutex
+    inst->spi_mutex = xSemaphoreCreateMutex();
 
     // SPI bus
     spi_bus_config_t bus_cfg = {
@@ -334,13 +377,12 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
         .sclk_io_num = config->pin_sck,
         .quadwp_io_num = -1,
         .quadhd_io_num = -1,
-        .max_transfer_sz = 256 + 8,
+        .max_transfer_sz = SPI_BUF_SIZE,
     };
     esp_err_t err = spi_bus_initialize(config->spi_host, &bus_cfg, SPI_DMA_CH_AUTO);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI bus init failed: %s", esp_err_to_name(err));
-        free(inst);
-        return err;
+        goto fail_alloc;
     }
 
     spi_device_interface_config_t dev_cfg = {
@@ -353,15 +395,14 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "SPI device add failed: %s", esp_err_to_name(err));
         spi_bus_free(config->spi_host);
-        free(inst);
-        return err;
+        goto fail_alloc;
     }
 
     // GPIO: RST output, BUSY + DIO1 input
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << config->pin_rst),
         .mode = GPIO_MODE_OUTPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
     };
     err = gpio_config(&io_conf);
     if (err != ESP_OK) {
@@ -371,7 +412,6 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
 
     io_conf.pin_bit_mask = (1ULL << config->pin_busy);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     err = gpio_config(&io_conf);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "BUSY GPIO %d config failed: %s", config->pin_busy, esp_err_to_name(err));
@@ -380,7 +420,6 @@ esp_err_t sx1262_create(const sx1262_config_t *config, sx1262_handle_t *out)
 
     io_conf.pin_bit_mask = (1ULL << config->pin_dio1);
     io_conf.mode = GPIO_MODE_INPUT;
-    io_conf.pull_up_en = GPIO_PULLUP_DISABLE;
     err = gpio_config(&io_conf);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "DIO1 GPIO %d config failed: %s", config->pin_dio1, esp_err_to_name(err));
@@ -481,8 +520,12 @@ fail:
     if (inst->irq_task) vTaskDelete(inst->irq_task);
     if (inst->tx_done) vSemaphoreDelete(inst->tx_done);
 fail_spi:
-    spi_bus_remove_device(inst->spi);
+    if (inst->spi) spi_bus_remove_device(inst->spi);
     spi_bus_free(config->spi_host);
+fail_alloc:
+    if (inst->spi_mutex) vSemaphoreDelete(inst->spi_mutex);
+    heap_caps_free(inst->spi_tx);
+    heap_caps_free(inst->spi_rx);
     free(inst);
     return err;
 }
@@ -493,21 +536,30 @@ esp_err_t sx1262_destroy(sx1262_handle_t handle)
 
     handle->initialized = false;
 
+    // Sleep the radio before tearing down (best-effort)
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+        uint8_t sleep_cfg = SX1262_SLEEP_WARM_START;
+        esp_err_t sleep_err = write_command(handle, SX1262_CMD_SET_SLEEP, &sleep_cfg, 1);
+        if (sleep_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to sleep radio during destroy: %s", esp_err_to_name(sleep_err));
+        }
+        xSemaphoreGive(handle->spi_mutex);
+    }
+
     gpio_isr_handler_remove(handle->pin_dio1);
     if (handle->irq_task) vTaskDelete(handle->irq_task);
     if (handle->tx_done) vSemaphoreDelete(handle->tx_done);
-
-    uint8_t sleep_cfg = SX1262_SLEEP_WARM_START;
-    write_command(handle, SX1262_CMD_SET_SLEEP, &sleep_cfg, 1);
-
-    spi_bus_remove_device(handle->spi);
+    if (handle->spi) spi_bus_remove_device(handle->spi);
     spi_bus_free(handle->spi_host);
+    if (handle->spi_mutex) vSemaphoreDelete(handle->spi_mutex);
+    heap_caps_free(handle->spi_tx);
+    heap_caps_free(handle->spi_rx);
     free(handle);
     return ESP_OK;
 }
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Configuration (all take spi_mutex)
 // ---------------------------------------------------------------------------
 
 static const uint8_t bw_lookup[] = {
@@ -521,7 +573,13 @@ esp_err_t sx1262_set_frequency(sx1262_handle_t handle, uint32_t freq_hz)
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     uint32_t old_freq = handle->frequency_hz;
+    esp_err_t err = ESP_OK;
+
     if (old_freq == 0 || (freq_hz > old_freq + 4000000) || (old_freq > freq_hz + 4000000)) {
         uint8_t cal_freq[2];
         if (freq_hz >= 902000000) {
@@ -537,8 +595,8 @@ esp_err_t sx1262_set_frequency(sx1262_handle_t handle, uint32_t freq_hz)
             cal_freq[0] = SX1262_CAL_IMG_430_MHZ_1;
             cal_freq[1] = SX1262_CAL_IMG_430_MHZ_2;
         }
-        esp_err_t err = write_command(handle, SX1262_CMD_CALIBRATE_IMAGE, cal_freq, 2);
-        if (err != ESP_OK) return err;
+        err = write_command(handle, SX1262_CMD_CALIBRATE_IMAGE, cal_freq, 2);
+        if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
     }
 
     uint32_t frf = (uint32_t)((float)freq_hz / SX1262_FREQ_STEP);
@@ -548,11 +606,12 @@ esp_err_t sx1262_set_frequency(sx1262_handle_t handle, uint32_t freq_hz)
         (uint8_t)((frf >> 8) & 0xFF),
         (uint8_t)(frf & 0xFF),
     };
-    esp_err_t err = write_command(handle, SX1262_CMD_SET_RF_FREQUENCY, buf, 4);
+    err = write_command(handle, SX1262_CMD_SET_RF_FREQUENCY, buf, 4);
     if (err == ESP_OK) {
         handle->frequency_hz = freq_hz;
         ESP_LOGI(TAG, "Frequency: %lu Hz", (unsigned long)freq_hz);
     }
+    xSemaphoreGive(handle->spi_mutex);
     return err;
 }
 
@@ -567,9 +626,13 @@ esp_err_t sx1262_set_tx_power(sx1262_handle_t handle, int8_t power_dbm)
     int idx = power_dbm - SX1262_PA_TABLE_MIN_DBM;
     const sx1262_pa_entry_t *pa = &sx1262_pa_table[idx];
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     uint8_t pa_config[4] = { pa->pa_duty_cycle, pa->hp_max, SX1262_PA_CONFIG_SX1262, 0x01 };
     esp_err_t err = write_command(handle, SX1262_CMD_SET_PA_CONFIG, pa_config, 4);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
 
     uint8_t tx_params[2] = { (uint8_t)pa->pa_val, SX1262_TX_RAMP_200US };
     err = write_command(handle, SX1262_CMD_SET_TX_PARAMS, tx_params, 2);
@@ -577,6 +640,7 @@ esp_err_t sx1262_set_tx_power(sx1262_handle_t handle, int8_t power_dbm)
         handle->tx_power_dbm = power_dbm;
         ESP_LOGI(TAG, "TX power: %d dBm", power_dbm);
     }
+    xSemaphoreGive(handle->spi_mutex);
     return err;
 }
 
@@ -585,6 +649,10 @@ esp_err_t sx1262_set_modulation(sx1262_handle_t handle, const sx1262_mod_params_
     if (handle == NULL || params == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     uint8_t bw = (params->bandwidth < 3) ? bw_lookup[params->bandwidth] : SX1262_LORA_BW_125;
     uint8_t buf[4] = {
         params->spreading_factor,
@@ -592,13 +660,19 @@ esp_err_t sx1262_set_modulation(sx1262_handle_t handle, const sx1262_mod_params_
         params->coding_rate - 4,
         params->low_data_rate_optimize ? 0x01 : 0x00,
     };
-    return write_command(handle, SX1262_CMD_SET_MODULATION_PARAMS, buf, 4);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_MODULATION_PARAMS, buf, 4);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 esp_err_t sx1262_set_packet_params(sx1262_handle_t handle, const sx1262_pkt_params_t *params)
 {
     if (handle == NULL || params == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
+
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
 
     handle->pkt_params = *params;
 
@@ -610,7 +684,9 @@ esp_err_t sx1262_set_packet_params(sx1262_handle_t handle, const sx1262_pkt_para
         params->crc_on ? SX1262_LORA_CRC_ON : SX1262_LORA_CRC_OFF,
         params->invert_iq ? SX1262_LORA_IQ_INVERTED : SX1262_LORA_IQ_STANDARD,
     };
-    return write_command(handle, SX1262_CMD_SET_PACKET_PARAMS, buf, 6);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_PACKET_PARAMS, buf, 6);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 // ---------------------------------------------------------------------------
@@ -624,12 +700,16 @@ esp_err_t sx1262_transmit(sx1262_handle_t handle, const uint8_t *data,
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
     if (len == 0 || len > SX1262_MAX_PACKET_LENGTH) return ESP_ERR_INVALID_SIZE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     uint8_t standby = SX1262_STANDBY_RC;
     esp_err_t err = write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
 
     err = write_buffer(handle, 0x00, data, len);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
 
     // Update packet params with actual payload length
     sx1262_pkt_params_t tx_pkt = handle->pkt_params;
@@ -643,17 +723,23 @@ esp_err_t sx1262_transmit(sx1262_handle_t handle, const uint8_t *data,
         tx_pkt.invert_iq ? SX1262_LORA_IQ_INVERTED : SX1262_LORA_IQ_STANDARD,
     };
     err = write_command(handle, SX1262_CMD_SET_PACKET_PARAMS, pkt_buf, 6);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
 
     xSemaphoreTake(handle->tx_done, 0);
 
     uint8_t tx_params[3] = { 0x00, 0x00, 0x00 };
     err = write_command(handle, SX1262_CMD_SET_TX, tx_params, 3);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) { xSemaphoreGive(handle->spi_mutex); return err; }
+
+    // Release mutex before waiting — IRQ task needs it to process TX_DONE
+    xSemaphoreGive(handle->spi_mutex);
 
     if (xSemaphoreTake(handle->tx_done, pdMS_TO_TICKS(timeout_ms)) != pdTRUE) {
         ESP_LOGE(TAG, "TX timeout after %lu ms", (unsigned long)timeout_ms);
-        write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+        if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+            write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+            xSemaphoreGive(handle->spi_mutex);
+        }
         return ESP_ERR_TIMEOUT;
     }
 
@@ -665,12 +751,18 @@ esp_err_t sx1262_start_receive(sx1262_handle_t handle, sx1262_rx_cb_t callback, 
     if (handle == NULL || callback == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     handle->rx_cb = callback;
     handle->rx_ctx = ctx;
     handle->receiving = true;
 
     uint8_t rx_params[3] = { 0xFF, 0xFF, 0xFF };
-    return write_command(handle, SX1262_CMD_SET_RX, rx_params, 3);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_RX, rx_params, 3);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 esp_err_t sx1262_stop_receive(sx1262_handle_t handle)
@@ -678,12 +770,18 @@ esp_err_t sx1262_stop_receive(sx1262_handle_t handle)
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     handle->receiving = false;
     handle->rx_cb = NULL;
     handle->rx_ctx = NULL;
 
     uint8_t standby = SX1262_STANDBY_RC;
-    return write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 esp_err_t sx1262_sleep(sx1262_handle_t handle)
@@ -691,9 +789,15 @@ esp_err_t sx1262_sleep(sx1262_handle_t handle)
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     handle->receiving = false;
     uint8_t sleep_cfg = SX1262_SLEEP_WARM_START;
-    return write_command(handle, SX1262_CMD_SET_SLEEP, &sleep_cfg, 1);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_SLEEP, &sleep_cfg, 1);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 esp_err_t sx1262_standby(sx1262_handle_t handle)
@@ -701,9 +805,15 @@ esp_err_t sx1262_standby(sx1262_handle_t handle)
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     handle->receiving = false;
     uint8_t standby = SX1262_STANDBY_RC;
-    return write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+    esp_err_t err = write_command(handle, SX1262_CMD_SET_STANDBY, &standby, 1);
+    xSemaphoreGive(handle->spi_mutex);
+    return err;
 }
 
 // ---------------------------------------------------------------------------
@@ -715,12 +825,17 @@ esp_err_t sx1262_get_packet_status(sx1262_handle_t handle, int16_t *rssi, int8_t
     if (handle == NULL) return ESP_ERR_INVALID_ARG;
     if (!handle->initialized) return ESP_ERR_INVALID_STATE;
 
+    if (xSemaphoreTake(handle->spi_mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        return ESP_ERR_TIMEOUT;
+    }
+
     uint8_t buf[3];
     esp_err_t err = read_command(handle, SX1262_CMD_GET_PACKET_STATUS, buf, 3);
     if (err == ESP_OK) {
         if (rssi) *rssi = -(int16_t)buf[0] / 2;
         if (snr) *snr = (int8_t)buf[1] / 4;
     }
+    xSemaphoreGive(handle->spi_mutex);
     return err;
 }
 

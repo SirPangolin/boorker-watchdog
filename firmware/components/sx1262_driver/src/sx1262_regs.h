@@ -60,7 +60,9 @@
 #define SX1262_CMD_CLEAR_DEVICE_ERRORS      0x07
 #define SX1262_CMD_GET_STATS                0x10
 #define SX1262_CMD_RESET_STATS              0x00
-#define SX1262_CMD_NOP                      0x00
+
+// Filler byte for SPI read transactions (MOSI don't-care during read phase)
+#define SX1262_SPI_FILLER                   0x00
 
 // ---------------------------------------------------------------------------
 // IRQ flags (16-bit bitmask)
