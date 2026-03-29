@@ -258,13 +258,15 @@ Single USB-C connector providing both interfaces:
 
 - **Form factor**: Breadboard compatible (2.54mm spacing, 23mm width)
 - **Headers**: 2x 18-pin (J2 right, J3 left)
-- **Antenna connectors**: WiFi (PCB spring), LoRa (IPEX — external antenna required for TX)
+- **Antenna connectors**: WiFi (PCB spring), LoRa (IPEX/U.FL — external antenna required for TX)
+- **LoRa antenna (indoor)**: 915MHz 2dBi omnidirectional stub, 8cm, U.FL connector. ERP at max TX: +24 dBm
+- **LoRa antenna (outdoor)**: 915MHz 10dBi omnidirectional, 20cm, SMA male (requires U.FL→SMA adapter). ERP at max TX: +32 dBm. Waterproof.
 - **Battery**: JST SH 1.25-2 connector, TP4054 charging IC
 
 ## Notes
 
 1. **No PSRAM**: 512KB internal SRAM only. ~379KB free heap at boot.
-2. **LoRa GPIO 8-14**: Not on headers — connect directly to SX1262 on PCB.
+2. **LoRa GPIO 8-14**: Not on headers — connect directly to SX1262 on PCB. **Always attach the LoRa antenna before enabling the radio.** Transmitting without an antenna reflects energy back into the SX1262 PA (power amplifier) and can damage it over time.
 3. **OLED GPIO 17, 18**: Not on headers — connect directly to SSD1306 on PCB. GPIO21 (OLED RST) is on J2-16.
 4. **SPI Flash GPIO 33, 34, 37, 38, 26**: On headers but must not be used — connected to internal flash/SubSPI.
 5. **ADC2 + WiFi**: ADC2 channels (GPIO 15-20) unavailable when WiFi is active. Use ADC1 (GPIO 1-7) for analog reads.

@@ -31,6 +31,7 @@
 #endif
 #include "sensor_manager.h"
 #include "ota_manager.h"
+#include "lora_manager.h"
 
 static const char *TAG = "boorker";
 
@@ -168,6 +169,12 @@ static void init_console(void)
     ret = sensor_manager_register_console();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
+    }
+
+    // Register LoRa console commands
+    ret = lora_manager_register_console();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "LoRa console init failed: %s", esp_err_to_name(ret));
     }
 
 
@@ -407,6 +414,13 @@ void app_main(void)
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Sensor polling start failed: %s", esp_err_to_name(ret));
         }
+    }
+
+    // Initialize LoRa radio
+    ret = lora_manager_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "LoRa manager init failed: %s (continuing without LoRa)",
+                 esp_err_to_name(ret));
     }
 
     // Show credentials on first boot (serial console + OLED display)

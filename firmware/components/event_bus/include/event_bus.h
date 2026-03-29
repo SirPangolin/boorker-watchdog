@@ -80,6 +80,7 @@ typedef enum {
     EVENT_NOTIFY_SENSOR_READING,
     EVENT_NOTIFY_SENSORS_READY,
     EVENT_NOTIFY_SYSTEM_STATE,
+    EVENT_NOTIFY_LORA_RX,
     EVENT_NOTIFY_TYPE_MAX
 } event_notify_type_t;
 
@@ -118,6 +119,12 @@ typedef struct {
         struct {
             uint8_t section;
         } system_state;
+        struct {
+            const uint8_t *data;
+            size_t length;
+            int16_t rssi;
+            int8_t snr;
+        } lora_rx;
     };
 } event_notify_t;
 

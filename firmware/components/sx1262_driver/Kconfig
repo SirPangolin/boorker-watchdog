@@ -1,0 +1,47 @@
+menu "SX1262 Driver"
+
+    config SX1262_PIN_NSS
+        int "NSS (chip select) GPIO"
+        default 8
+
+    config SX1262_PIN_SCK
+        int "SCK (SPI clock) GPIO"
+        default 9
+
+    config SX1262_PIN_MOSI
+        int "MOSI (SPI data out) GPIO"
+        default 10
+
+    config SX1262_PIN_MISO
+        int "MISO (SPI data in) GPIO"
+        default 11
+
+    config SX1262_PIN_RST
+        int "RST (radio reset) GPIO"
+        default 12
+
+    config SX1262_PIN_BUSY
+        int "BUSY (radio busy) GPIO"
+        default 13
+
+    config SX1262_PIN_DIO1
+        int "DIO1 (radio interrupt) GPIO"
+        default 14
+
+    config SX1262_SPI_CLOCK_HZ
+        int "SPI clock speed (Hz)"
+        default 8000000
+        range 1000000 16000000
+
+    config SX1262_TASK_STACK_SIZE
+        int "DIO1 handler task stack size"
+        default 4096
+
+    config SX1262_TASK_PRIORITY
+        int "DIO1 handler task priority"
+        default 6
+        range 1 24
+        help
+            Higher than sensors (5) since radio events are time-sensitive.
+
+endmenu

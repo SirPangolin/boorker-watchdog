@@ -45,6 +45,7 @@ static const char *notify_type_names[] = {
     [EVENT_NOTIFY_SENSOR_READING] = "SENSOR_READING",
     [EVENT_NOTIFY_SENSORS_READY]  = "SENSORS_READY",
     [EVENT_NOTIFY_SYSTEM_STATE]   = "SYSTEM_STATE",
+    [EVENT_NOTIFY_LORA_RX]        = "LORA_RX",
 };
 
 _Static_assert(sizeof(notify_type_names) / sizeof(notify_type_names[0]) == EVENT_NOTIFY_TYPE_MAX,
