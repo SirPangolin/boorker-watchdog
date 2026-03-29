@@ -1,167 +1,193 @@
-/**
- * @file system_state.h
- * @brief System lifecycle state management
- *
- * Manages system lifecycle states including:
- * - Claimed status (whether device password has been changed from default)
- * - Factory reset state machine
- * - OTA update state machine
- *
- * All state changes are persisted to NVS immediately and are thread-safe.
- */
-
 #pragma once
 
 #include "esp_err.h"
 #include <stdbool.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/**
- * @brief Factory reset state machine
- */
-typedef enum {
-    SYSTEM_FACTORY_RESET_NONE = 0,       /**< No factory reset requested */
-    SYSTEM_FACTORY_RESET_PENDING,        /**< Reset requested, awaiting confirmation/execution */
-    SYSTEM_FACTORY_RESET_IN_PROGRESS,    /**< Reset in progress */
-} system_factory_reset_t;
+// ---------------------------------------------------------------------------
+// Transport structs
+// ---------------------------------------------------------------------------
 
-/**
- * @brief OTA update state machine
- */
-typedef enum {
-    SYSTEM_OTA_IDLE = 0,         /**< No OTA in progress */
-    SYSTEM_OTA_DOWNLOADING,      /**< Downloading firmware image */
-    SYSTEM_OTA_VERIFYING,        /**< Verifying downloaded image */
-    SYSTEM_OTA_PENDING_REBOOT,   /**< OTA complete, pending reboot to apply */
-} system_ota_state_t;
+typedef struct {
+    bool connected;
+    char ssid[33];
+    int8_t rssi;
+    char ip[16];
+    uint8_t mac[6];
+} system_wifi_t;
 
-/**
- * @brief Initialize system state component
- *
- * Loads persisted state from NVS. Must be called before other system_state functions.
- * Safe to call multiple times (returns ESP_OK if already initialized).
- *
- * @return ESP_OK on success
- * @return ESP_ERR_NO_MEM if mutex creation fails
- * @return ESP_ERR_NVS_* on NVS errors
- */
+typedef struct {
+    bool connected;
+    uint32_t frequency_mhz;
+    int8_t tx_power_dbm;
+    uint8_t peer_count;
+} system_lora_t;
+
+// ---------------------------------------------------------------------------
+// OTA
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    bool available;
+    char version[32];
+    uint32_t size_bytes;
+} system_ota_update_t;
+
+typedef struct {
+    uint8_t state;
+    uint32_t progress_bytes;
+    uint32_t total_bytes;
+    system_ota_update_t update;
+} system_ota_t;
+
+enum {
+    SYSTEM_OTA_IDLE = 0,
+    SYSTEM_OTA_DOWNLOADING,
+    SYSTEM_OTA_VERIFYING,
+    SYSTEM_OTA_PENDING_REBOOT,
+};
+
+// ---------------------------------------------------------------------------
+// Reboot
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    bool pending;
+    uint32_t remaining_seconds;
+} system_reboot_t;
+
+// ---------------------------------------------------------------------------
+// Sensors
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    uint8_t configured;
+    uint8_t online;
+    uint8_t offline;
+    uint8_t error;
+} system_sensors_t;
+
+// ---------------------------------------------------------------------------
+// Peripherals
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    bool enabled;
+    bool on;
+    uint8_t brightness;
+} system_led_t;
+
+typedef struct {
+    bool enabled;
+    bool alerts_only;
+    uint8_t volume;
+} system_buzzer_t;
+
+typedef struct {
+    bool enabled;
+    bool on;
+    uint8_t contrast;
+} system_display_t;
+
+typedef struct {
+    uint8_t count;
+} system_buttons_t;
+
+// ---------------------------------------------------------------------------
+// Full system state
+// ---------------------------------------------------------------------------
+
+typedef struct {
+    // Identity
+    char node_name[32];
+    char node_suffix[5];
+
+    // Lifecycle
+    bool claimed;
+
+    // OTA
+    system_ota_t ota;
+
+    // Reboot
+    system_reboot_t reboot;
+
+    // Transports
+    system_wifi_t wifi;
+    system_lora_t lora;
+
+    // Sensors
+    system_sensors_t sensors;
+
+    // Peripherals
+    system_led_t led;
+    system_buzzer_t buzzer;
+    system_display_t display;
+    system_buttons_t buttons;
+
+    // System
+    char firmware_version[16];
+    char idf_version[32];
+    uint8_t chip_revision_major;
+    uint8_t chip_revision_minor;
+    uint8_t chip_cores;
+    uint32_t heap_free;
+    uint32_t heap_total;
+    uint32_t psram_free;
+    uint32_t psram_total;
+    int64_t uptime_us;
+} system_state_t;
+
+// ---------------------------------------------------------------------------
+// Section change notifications
+// ---------------------------------------------------------------------------
+
+typedef enum {
+    SYSTEM_STATE_IDENTITY_UPDATED = 0,
+    SYSTEM_STATE_LIFECYCLE_UPDATED,
+    SYSTEM_STATE_OTA_UPDATED,
+    SYSTEM_STATE_REBOOT_UPDATED,
+    SYSTEM_STATE_WIFI_UPDATED,
+    SYSTEM_STATE_LORA_UPDATED,
+    SYSTEM_STATE_SENSORS_UPDATED,
+    SYSTEM_STATE_PERIPHERALS_UPDATED,
+    SYSTEM_STATE_SYSTEM_UPDATED,
+    SYSTEM_STATE_SECTION_MAX,
+} system_state_section_t;
+
+// ---------------------------------------------------------------------------
+// API
+// ---------------------------------------------------------------------------
+
 esp_err_t system_state_init(void);
-
-/**
- * @brief Deinitialize system state component
- *
- * Releases resources. State remains in NVS.
- *
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- */
 esp_err_t system_state_deinit(void);
 
-/**
- * @brief Check if device has been claimed
- *
- * A device is "claimed" when the user has changed the default password,
- * indicating they have taken ownership of the device.
- *
- * @return true if device has been claimed
- * @return false if unclaimed or not initialized
- */
+/** Read-only snapshot of the full state. */
+const system_state_t *system_state_get(void);
+
+/** Convenience — most common query. */
 bool system_state_is_claimed(void);
 
-/**
- * @brief Set device claimed status
- *
- * @param claimed true to mark device as claimed, false to unclaim
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- * @return ESP_ERR_NVS_* on NVS errors
- */
+// Section setters — each fires event_bus_notify with section tag
+esp_err_t system_state_set_identity(const char *node_name, const char *node_suffix);
 esp_err_t system_state_set_claimed(bool claimed);
-
-/**
- * @brief Get current factory reset state
- *
- * @return Current factory reset state, or SYSTEM_FACTORY_RESET_NONE if not initialized
- */
-system_factory_reset_t system_state_get_factory_reset(void);
-
-/**
- * @brief Request a factory reset
- *
- * Sets state to SYSTEM_FACTORY_RESET_PENDING. Caller is responsible for
- * transitioning to IN_PROGRESS and executing the actual reset.
- *
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- * @return ESP_ERR_NVS_* on NVS errors
- */
-esp_err_t system_state_request_factory_reset(void);
-
-/**
- * @brief Set factory reset to in-progress state
- *
- * Call this when actually beginning the factory reset process.
- *
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if not initialized or not in PENDING state
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- * @return ESP_ERR_NVS_* on NVS errors
- */
-esp_err_t system_state_begin_factory_reset(void);
-
-/**
- * @brief Clear factory reset state
- *
- * Sets state back to SYSTEM_FACTORY_RESET_NONE. Call after reset completes
- * or to cancel a pending reset.
- *
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- * @return ESP_ERR_NVS_* on NVS errors
- */
-esp_err_t system_state_clear_factory_reset(void);
-
-/**
- * @brief Get current OTA state
- *
- * @return Current OTA state, or SYSTEM_OTA_IDLE if not initialized
- */
-system_ota_state_t system_state_get_ota(void);
-
-/**
- * @brief Set OTA state
- *
- * @param state New OTA state
- * @return ESP_OK on success
- * @return ESP_ERR_INVALID_ARG if state is invalid
- * @return ESP_ERR_INVALID_STATE if not initialized
- * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
- * @return ESP_ERR_NVS_* on NVS errors
- */
-esp_err_t system_state_set_ota(system_ota_state_t state);
-
-/**
- * @brief Get string name for factory reset state
- *
- * @param state Factory reset state
- * @return Human-readable state name
- */
-const char *system_state_factory_reset_name(system_factory_reset_t state);
-
-/**
- * @brief Get string name for OTA state
- *
- * @param state OTA state
- * @return Human-readable state name
- */
-const char *system_state_ota_name(system_ota_state_t state);
+esp_err_t system_state_set_ota(const system_ota_t *ota);
+esp_err_t system_state_set_reboot(bool pending, uint32_t remaining_seconds);
+esp_err_t system_state_set_wifi(const system_wifi_t *wifi);
+esp_err_t system_state_set_lora(const system_lora_t *lora);
+esp_err_t system_state_set_sensors(const system_sensors_t *sensors);
+esp_err_t system_state_set_led(const system_led_t *led);
+esp_err_t system_state_set_buzzer(const system_buzzer_t *buzzer);
+esp_err_t system_state_set_display(const system_display_t *display);
+esp_err_t system_state_set_buttons(uint8_t count);
+esp_err_t system_state_set_system(const char *firmware_version, const char *idf_version,
+                                   uint8_t chip_major, uint8_t chip_minor, uint8_t chip_cores,
+                                   uint32_t heap_free, uint32_t heap_total,
+                                   uint32_t psram_free, uint32_t psram_total,
+                                   int64_t uptime_us);
 
 #ifdef __cplusplus
 }

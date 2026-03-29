@@ -79,6 +79,7 @@ typedef enum {
     EVENT_NOTIFY_BUTTON = 0,
     EVENT_NOTIFY_SENSOR_READING,
     EVENT_NOTIFY_SENSORS_READY,
+    EVENT_NOTIFY_SYSTEM_STATE,
     EVENT_NOTIFY_TYPE_MAX
 } event_notify_type_t;
 
@@ -114,6 +115,9 @@ typedef struct {
             float value2;
             uint8_t status;
         } sensor_reading;
+        struct {
+            uint8_t section;
+        } system_state;
     };
 } event_notify_t;
 
