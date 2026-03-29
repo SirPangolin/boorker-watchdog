@@ -19,4 +19,5 @@ idf_component_register(
     PRIV_REQUIRES
         mdns
         credentials
+        system_state
 )

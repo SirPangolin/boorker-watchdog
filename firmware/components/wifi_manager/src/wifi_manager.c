@@ -2,6 +2,7 @@
 #include "wifi_prov_internal.h"
 #include "wifi_mdns_internal.h"
 #include "wifi_power_internal.h"
+#include "system_state.h"
 #include "sdkconfig.h"
 
 #include "esp_log.h"
@@ -193,6 +194,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             wifi_event_sta_disconnected_t *event = (wifi_event_sta_disconnected_t *)event_data;
             ESP_LOGW(TAG, "Disconnected from AP (reason: %d)", event->reason);
 
+            // Clear WiFi state
+            system_wifi_t wifi_clear = { .connected = false };
+            system_state_set_wifi(&wifi_clear);
+
             // Stop mDNS since we're no longer connected
             wifi_mdns_stop();
 
@@ -246,6 +251,20 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
         if (ps_ret != ESP_OK) {
             ESP_LOGW(TAG, "Power save not enabled: %s", esp_err_to_name(ps_ret));
         }
+
+        // Publish WiFi state
+        wifi_ap_record_t ap;
+        uint8_t mac[6];
+        system_wifi_t wifi_state = { .connected = true };
+        if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
+            strncpy(wifi_state.ssid, (const char *)ap.ssid, sizeof(wifi_state.ssid) - 1);
+            wifi_state.rssi = ap.rssi;
+        }
+        snprintf(wifi_state.ip, sizeof(wifi_state.ip), IPSTR, IP2STR(&event->ip_info.ip));
+        if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
+            memcpy(wifi_state.mac, mac, 6);
+        }
+        system_state_set_wifi(&wifi_state);
 
         notify_callback(WIFI_MGR_EVENT_CONNECTED);
     }

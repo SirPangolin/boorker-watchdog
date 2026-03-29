@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_chip_info.h"
+#include "esp_timer.h"
 #include "esp_console.h"
 #include "nvs_flash.h"
 #include "esp_partition.h"
@@ -348,6 +350,21 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
+    // Publish identity to system_state
+    system_state_set_identity(identity->node_name, identity->node_suffix);
+
+    // Publish boot-time system info
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    system_state_set_system(
+        BOORKER_VERSION_STRING, esp_get_idf_version(),
+        chip.revision / 100, chip.revision % 100, chip.cores,
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+        esp_timer_get_time());
+
     // Initialize event bus before publishers
     ret = event_bus_init();
     if (ret != ESP_OK) {
@@ -483,18 +500,21 @@ void app_main(void)
     ESP_LOGI(TAG, "Tailscale disabled in config");
 #endif
 
-    // Main loop - heartbeat
+    // Main loop - heartbeat + system_state refresh
     while (1) {
-#if CONFIG_TS_MGR_ENABLED
-        ESP_LOGI(TAG, "Heartbeat - WiFi: %s, Tailscale: %s, heap: %lu",
-                 wifi_mgr_get_state_name(),
-                 ts_mgr_get_state_name(),
-                 esp_get_free_heap_size());
-#else
+        const system_state_t *ss = system_state_get();
+        system_state_set_system(
+            ss->firmware_version, ss->idf_version,
+            ss->chip_revision_major, ss->chip_revision_minor, ss->chip_cores,
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+            esp_timer_get_time());
+
         ESP_LOGI(TAG, "Heartbeat - WiFi: %s, heap: %lu",
                  wifi_mgr_get_state_name(),
-                 esp_get_free_heap_size());
-#endif
+                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
