@@ -155,15 +155,21 @@ static void queue_sensor_reading(const event_notify_t *event)
 // Called from display task only — moves pending into the reading cache
 static void flush_pending_readings(void)
 {
+    cached_reading_t local[MAX_CACHED_READINGS];
+    size_t count;
+
     portENTER_CRITICAL(&s_pending_spinlock);
-    size_t count = s_ctx.pending_count;
+    count = s_ctx.pending_count;
+    if (count > 0) {
+        memcpy(local, s_ctx.pending, count * sizeof(cached_reading_t));
+    }
     s_ctx.pending_count = 0;
     portEXIT_CRITICAL(&s_pending_spinlock);
 
     if (count == 0) return;
 
     for (size_t p = 0; p < count; p++) {
-        const cached_reading_t *incoming = &s_ctx.pending[p];
+        const cached_reading_t *incoming = &local[p];
         bool found = false;
 
         for (size_t i = 0; i < s_ctx.reading_count; i++) {
@@ -452,6 +458,10 @@ static void display_task(void *arg)
         screen_splash(&s_ctx.u8g2, i % 3);
         u8g2_SendBuffer(&s_ctx.u8g2);
         vTaskDelay(pdMS_TO_TICKS(CONFIG_STATUS_DISPLAY_THROBBER_MS));
+    }
+
+    if (s_ctx.reading_count == 0 && !s_ctx.sensors_ready) {
+        ESP_LOGW(TAG, "Splash timeout — no sensor data received");
     }
 
     // Transition based on what arrived during splash

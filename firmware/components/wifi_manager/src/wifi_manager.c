@@ -196,7 +196,10 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
 
             // Clear WiFi state
             system_wifi_t wifi_clear = { .connected = false };
-            system_state_set_wifi(&wifi_clear);
+            esp_err_t ss_ret = system_state_set_wifi(&wifi_clear);
+            if (ss_ret != ESP_OK) {
+                ESP_LOGW(TAG, "Failed to clear WiFi state: %s", esp_err_to_name(ss_ret));
+            }
 
             // Stop mDNS since we're no longer connected
             wifi_mdns_stop();
@@ -264,7 +267,10 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base,
         if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
             memcpy(wifi_state.mac, mac, 6);
         }
-        system_state_set_wifi(&wifi_state);
+        esp_err_t ss_ret = system_state_set_wifi(&wifi_state);
+        if (ss_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to set WiFi state: %s", esp_err_to_name(ss_ret));
+        }
 
         notify_callback(WIFI_MGR_EVENT_CONNECTED);
     }

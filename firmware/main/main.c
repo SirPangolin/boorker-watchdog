@@ -350,6 +350,13 @@ void app_main(void)
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
+    // Initialize event bus before any system_state writes (notify needs event_bus)
+    ret = event_bus_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Event bus init failed: %s", esp_err_to_name(ret));
+        return;
+    }
+
     // Publish identity + claimed state to system_state
     system_state_set_identity(identity->node_name, identity->node_suffix);
     system_state_set_claimed(!secrets_is_first_boot());
@@ -366,8 +373,8 @@ void app_main(void)
         heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
         esp_timer_get_time());
 
-    // Initialize event bus before publishers
-    ret = event_bus_init();
+    // Initialize status LED (registers with event bus)
+    ret = status_led_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Event bus init failed: %s", esp_err_to_name(ret));
         return;

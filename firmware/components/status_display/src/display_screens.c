@@ -135,7 +135,7 @@ void screen_splash(u8g2_t *u8g2, int throbber_phase)
 // 2. First Boot
 // --------------------------------------------------------------------------
 
-void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str)
+void screen_first_boot(u8g2_t *u8g2, const secrets_t *creds, const char *ip_str)
 {
     if (!creds) return;
 

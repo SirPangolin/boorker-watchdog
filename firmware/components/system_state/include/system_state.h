@@ -165,8 +165,11 @@ typedef enum {
 esp_err_t system_state_init(void);
 esp_err_t system_state_deinit(void);
 
-/** Read-only snapshot of the full state. */
+/** Direct pointer to state (fast, no copy, possible torn reads on dual-core). */
 const system_state_t *system_state_get(void);
+
+/** Thread-safe copy of the full state (slower, no torn reads). */
+esp_err_t system_state_copy(system_state_t *out);
 
 /** Convenience — most common query. */
 bool system_state_is_claimed(void);

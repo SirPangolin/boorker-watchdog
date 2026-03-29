@@ -76,6 +76,16 @@ const system_state_t *system_state_get(void)
     return &s_ctx.state;
 }
 
+esp_err_t system_state_copy(system_state_t *out)
+{
+    if (!out) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
+    *out = s_ctx.state;
+    xSemaphoreGive(s_ctx.mutex);
+    return ESP_OK;
+}
+
 bool system_state_is_claimed(void)
 {
     return s_ctx.initialized ? s_ctx.state.claimed : false;
@@ -116,7 +126,8 @@ esp_err_t system_state_set_claimed(bool claimed)
 
 esp_err_t system_state_set_ota(const system_ota_t *ota)
 {
-    if (!s_ctx.initialized || !ota) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!ota) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.ota = *ota;
@@ -141,7 +152,8 @@ esp_err_t system_state_set_reboot(bool pending, uint32_t remaining_seconds)
 
 esp_err_t system_state_set_wifi(const system_wifi_t *wifi)
 {
-    if (!s_ctx.initialized || !wifi) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!wifi) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.wifi = *wifi;
@@ -153,7 +165,8 @@ esp_err_t system_state_set_wifi(const system_wifi_t *wifi)
 
 esp_err_t system_state_set_lora(const system_lora_t *lora)
 {
-    if (!s_ctx.initialized || !lora) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!lora) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.lora = *lora;
@@ -165,7 +178,8 @@ esp_err_t system_state_set_lora(const system_lora_t *lora)
 
 esp_err_t system_state_set_sensors(const system_sensors_t *sensors)
 {
-    if (!s_ctx.initialized || !sensors) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!sensors) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.sensors = *sensors;
@@ -177,7 +191,8 @@ esp_err_t system_state_set_sensors(const system_sensors_t *sensors)
 
 esp_err_t system_state_set_led(const system_led_t *led)
 {
-    if (!s_ctx.initialized || !led) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!led) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.led = *led;
@@ -189,7 +204,8 @@ esp_err_t system_state_set_led(const system_led_t *led)
 
 esp_err_t system_state_set_buzzer(const system_buzzer_t *buzzer)
 {
-    if (!s_ctx.initialized || !buzzer) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!buzzer) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.buzzer = *buzzer;
@@ -201,7 +217,8 @@ esp_err_t system_state_set_buzzer(const system_buzzer_t *buzzer)
 
 esp_err_t system_state_set_display(const system_display_t *display)
 {
-    if (!s_ctx.initialized || !display) return ESP_ERR_INVALID_ARG;
+    if (!s_ctx.initialized) return ESP_ERR_INVALID_STATE;
+    if (!display) return ESP_ERR_INVALID_ARG;
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) return ESP_ERR_TIMEOUT;
 
     s_ctx.state.display = *display;

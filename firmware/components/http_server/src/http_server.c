@@ -533,7 +533,9 @@ static esp_err_t api_system_status(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    const system_state_t *ss = system_state_get();
+    system_state_t ss_buf;
+    system_state_copy(&ss_buf);
+    const system_state_t *ss = &ss_buf;
     bool ok = true;
 
     ok = ok && cJSON_AddStringToObject(json, "firmware_version", ss->firmware_version);
@@ -587,7 +589,9 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_OK;
     }
 
-    const system_state_t *ss = system_state_get();
+    system_state_t ss_info_buf;
+    system_state_copy(&ss_info_buf);
+    const system_state_t *ss = &ss_info_buf;
 
     cJSON *json = cJSON_CreateObject();
     if (json == NULL) {
