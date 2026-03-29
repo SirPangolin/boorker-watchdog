@@ -15,15 +15,9 @@
 
 #include <math.h>
 #include "u8g2.h"
-#include "sensor_manager.h"
-#include "sensor_types.h"
-#include "credentials.h"
-#include "esp_wifi.h"
+#include "event_bus.h"
+#include "system_state.h"
 #include "esp_log.h"
-#include "esp_chip_info.h"
-#include "esp_timer.h"
-#include "esp_system.h"
-#include "version.h"
 
 #include <ctype.h>
 #include <string.h>
@@ -141,7 +135,7 @@ void screen_splash(u8g2_t *u8g2, int throbber_phase)
 // 2. First Boot
 // --------------------------------------------------------------------------
 
-void screen_first_boot(u8g2_t *u8g2, const credentials_t *creds, const char *ip_str)
+void screen_first_boot(u8g2_t *u8g2, const secrets_t *creds, const char *ip_str)
 {
     if (!creds) return;
 
@@ -216,42 +210,43 @@ static bool resolve_metric(int metric_index, char *label, size_t label_len,
                            char *value_str, size_t value_len)
 {
     int metric_count = 0;
-    size_t sensor_count = sensor_manager_get_sensor_count();
+    size_t sensor_count = display_get_reading_count();
 
     for (size_t s = 0; s < sensor_count; s++) {
-        sensor_reading_t reading;
-        const char *id = sensor_manager_get_sensor_id(s);
-        if (sensor_manager_get_reading_by_index(s, &reading) != ESP_OK) continue;
+        const char *id = NULL;
+        float value = NAN, value2 = NAN;
+        uint8_t status = 0;
+        if (!display_get_reading(s, &id, &value, &value2, &status)) continue;
 
         // Primary value
         if (metric_index == metric_count) {
-            if (!isnan(reading.value)) {
+            if (!isnan(value)) {
                 if (id && strstr(id, "temp")) {
                     snprintf(label, label_len, "TEMPERATURE");
-                    snprintf(value_str, value_len, "%.1f F", reading.value);
+                    snprintf(value_str, value_len, "%.1f F", value);
                 } else {
                     snprintf(label, label_len, "%s", id ? id : "SENSOR");
                     for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
-                    snprintf(value_str, value_len, "%.1f", reading.value);
+                    snprintf(value_str, value_len, "%.1f", value);
                 }
             } else {
                 snprintf(label, label_len, "%s", id ? id : "SENSOR");
                 for (char *p = label; *p; p++) *p = toupper((unsigned char)*p);
-                snprintf(value_str, value_len, "%s", sensor_status_name(reading.status));
+                snprintf(value_str, value_len, "%s", event_sensor_status_name(status));
             }
             return true;
         }
         metric_count++;
 
         // Secondary value (e.g., humidity from DHT22)
-        if (!isnan(reading.value2)) {
+        if (!isnan(value2)) {
             if (metric_index == metric_count) {
                 if (id && strstr(id, "temp")) {
                     snprintf(label, label_len, "HUMIDITY");
-                    snprintf(value_str, value_len, "%.0f%%", reading.value2);
+                    snprintf(value_str, value_len, "%.0f%%", value2);
                 } else {
                     snprintf(label, label_len, "%s (2)", id ? id : "SENSOR");
-                    snprintf(value_str, value_len, "%.1f", reading.value2);
+                    snprintf(value_str, value_len, "%.1f", value2);
                 }
                 return true;
             }
@@ -287,12 +282,12 @@ void screen_dashboard_card(u8g2_t *u8g2, int metric_index)
 int screen_get_metric_count(void)
 {
     int count = 0;
-    size_t sensor_count = sensor_manager_get_sensor_count();
+    size_t sensor_count = display_get_reading_count();
     for (size_t s = 0; s < sensor_count; s++) {
-        sensor_reading_t reading;
-        if (sensor_manager_get_reading_by_index(s, &reading) != ESP_OK) continue;
+        float value2 = NAN;
+        if (!display_get_reading(s, NULL, NULL, &value2, NULL)) continue;
         count++;
-        if (!isnan(reading.value2)) {
+        if (!isnan(value2)) {
             count++;
         }
     }
@@ -333,33 +328,29 @@ void screen_network(u8g2_t *u8g2)
 {
     draw_header(u8g2, "NETWORK", NULL);
 
-    wifi_ap_record_t ap;
+    const system_state_t *ss = system_state_get();
     char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    if (esp_wifi_sta_get_ap_info(&ap) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "SSID:%s", (char *)ap.ssid);
+    if (ss->wifi.connected) {
+        snprintf(buf, sizeof(buf), "SSID:%s", ss->wifi.ssid);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
-        snprintf(buf, sizeof(buf), "RSSI:%d dBm", ap.rssi);
+        snprintf(buf, sizeof(buf), "RSSI:%d dBm", ss->wifi.rssi);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
     } else {
         u8g2_DrawStr(u8g2, 0, y, "WiFi: not connected"); y += 8;
     }
 
-    esp_netif_ip_info_t ip_info;
-    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
-    if (netif && esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "IP:" IPSTR, IP2STR(&ip_info.ip));
+    if (ss->wifi.ip[0] != '\0') {
+        snprintf(buf, sizeof(buf), "IP:%s", ss->wifi.ip);
         u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
     }
 
-    uint8_t mac[6];
-    if (esp_wifi_get_mac(WIFI_IF_STA, mac) == ESP_OK) {
-        snprintf(buf, sizeof(buf), "MAC:%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        u8g2_DrawStr(u8g2, 0, y, buf);
-    }
+    snprintf(buf, sizeof(buf), "MAC:%02X:%02X:%02X:%02X:%02X:%02X",
+             ss->wifi.mac[0], ss->wifi.mac[1], ss->wifi.mac[2],
+             ss->wifi.mac[3], ss->wifi.mac[4], ss->wifi.mac[5]);
+    u8g2_DrawStr(u8g2, 0, y, buf);
 
     draw_footer_dots(u8g2, NAV_IDX_NETWORK, NAV_TOTAL);
 }
@@ -368,12 +359,19 @@ void screen_lora(u8g2_t *u8g2)
 {
     draw_header(u8g2, "LORA", NULL);
 
+    const system_state_t *ss = system_state_get();
+    char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
-    u8g2_DrawStr(u8g2, 0, y, "Freq: 915 MHz"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "TX Pwr: +22 dBm"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "Status: Not impl"); y += 8;
-    u8g2_DrawStr(u8g2, 0, y, "Peers: --");
+
+    snprintf(buf, sizeof(buf), "Freq: %lu MHz", (unsigned long)ss->lora.frequency_mhz);
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "TX Pwr: %+d dBm", ss->lora.tx_power_dbm);
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "Status: %s", ss->lora.connected ? "Connected" : "Not impl");
+    u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
+    snprintf(buf, sizeof(buf), "Peers: %d", ss->lora.peer_count);
+    u8g2_DrawStr(u8g2, 0, y, buf);
 
     draw_footer_dots(u8g2, NAV_IDX_LORA, NAV_TOTAL);
 }
@@ -382,22 +380,22 @@ void screen_system(u8g2_t *u8g2)
 {
     draw_header(u8g2, "SYSTEM", NULL);
 
+    const system_state_t *ss = system_state_get();
     char buf[48];
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    snprintf(buf, sizeof(buf), "FW: v%s", BOORKER_VERSION_STRING);
+    snprintf(buf, sizeof(buf), "FW: v%s", ss->firmware_version);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    esp_chip_info_t chip;
-    esp_chip_info(&chip);
-    snprintf(buf, sizeof(buf), "Chip: ESP32-S3 r%d.%d", chip.revision / 100, chip.revision % 100);
+    snprintf(buf, sizeof(buf), "Chip: ESP32-S3 r%d.%d",
+             ss->chip_revision_major, ss->chip_revision_minor);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    snprintf(buf, sizeof(buf), "Heap: %lu KB", esp_get_free_heap_size() / 1024);
+    snprintf(buf, sizeof(buf), "Heap: %lu KB", (unsigned long)ss->heap_free / 1024);
     u8g2_DrawStr(u8g2, 0, y, buf); y += 8;
 
-    int64_t uptime_s = esp_timer_get_time() / 1000000;
+    int64_t uptime_s = ss->uptime_us / 1000000;
     int days = uptime_s / 86400;
     int hours = (uptime_s % 86400) / 3600;
     int mins = (uptime_s % 3600) / 60;
@@ -411,13 +409,10 @@ void screen_nodes(u8g2_t *u8g2)
 {
     draw_header(u8g2, "NODES", NULL);
 
+    const system_state_t *ss = system_state_get();
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
-    // For now, only local node
-    const credentials_t *creds = credentials_get();
-    if (creds) {
-        u8g2_DrawStr(u8g2, 0, 18, creds->node_name);
-        u8g2_DrawStr(u8g2, 90, 18, "LOCAL");
-    }
+    u8g2_DrawStr(u8g2, 0, 18, ss->node_name);
+    u8g2_DrawStr(u8g2, 90, 18, "LOCAL");
     u8g2_DrawStr(u8g2, 0, 30, "Mesh: not implemented");
 
     draw_footer_dots(u8g2, NAV_IDX_NODES, NAV_TOTAL);
@@ -430,16 +425,17 @@ void screen_sensors(u8g2_t *u8g2)
     u8g2_SetFont(u8g2, u8g2_font_tom_thumb_4x6_tf);
     int y = 18;
 
-    size_t count = sensor_manager_get_sensor_count();
+    size_t count = display_get_reading_count();
     for (size_t i = 0; i < count && i < 5; i++) {
-        sensor_reading_t reading;
-        const char *id = sensor_manager_get_sensor_id(i);
-        if (sensor_manager_get_reading_by_index(i, &reading) == ESP_OK) {
+        const char *id = NULL;
+        float value = NAN;
+        uint8_t status = 0;
+        if (display_get_reading(i, &id, &value, NULL, &status)) {
             char buf[48];
-            if (!isnan(reading.value)) {
-                snprintf(buf, sizeof(buf), "%s: %.1f", id ? id : "?", reading.value);
+            if (!isnan(value)) {
+                snprintf(buf, sizeof(buf), "%s: %.1f", id ? id : "?", value);
             } else {
-                snprintf(buf, sizeof(buf), "%s: %s", id ? id : "?", sensor_status_name(reading.status));
+                snprintf(buf, sizeof(buf), "%s: %s", id ? id : "?", event_sensor_status_name(status));
             }
             u8g2_DrawStr(u8g2, 0, y, buf);
             y += 8;

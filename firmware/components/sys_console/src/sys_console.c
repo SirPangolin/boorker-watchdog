@@ -1,21 +1,13 @@
 #include "sys_console.h"
+#include "system_state.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "esp_console.h"
 #include "esp_system.h"
 #include "esp_timer.h"
-#include "esp_chip_info.h"
-#include "esp_idf_version.h"
-#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "argtable3/argtable3.h"
-#include "version.h"
-#include "credentials.h"
-#include "wifi_manager.h"
-#include "event_bus.h"
-#if CONFIG_TS_MGR_ENABLED
-#include "tailscale_manager.h"
-#endif
 #include <string.h>
 #include <stdio.h>
 
@@ -252,60 +244,47 @@ static int cmd_reboot(int argc, char **argv)
 
 static int cmd_version(int argc, char **argv)
 {
-    esp_chip_info_t chip_info;
-    esp_chip_info(&chip_info);
-
-    printf("Boorker v%s\n", BOORKER_VERSION_STRING);
-    printf("ESP-IDF %s\n", esp_get_idf_version());
-    printf("Chip: ESP32-S3 rev%d, %d cores\n", chip_info.revision, chip_info.cores);
-
+    const system_state_t *ss = system_state_get();
+    printf("Boorker v%s\n", ss->firmware_version);
+    printf("ESP-IDF %s\n", ss->idf_version);
+    printf("Chip: ESP32-S3 r%d.%d, %d cores\n",
+           ss->chip_revision_major, ss->chip_revision_minor, ss->chip_cores);
     return 0;
 }
 
 static int cmd_free(int argc, char **argv)
 {
+    const system_state_t *ss = system_state_get();
     printf("Memory:\n");
-    printf("  Heap:  %lu bytes free (min: %lu)\n",
-           (unsigned long)esp_get_free_heap_size(),
-           (unsigned long)esp_get_minimum_free_heap_size());
-
-    // Check for PSRAM - returns 0 if not available
-    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    if (psram_free > 0) {
-        printf("  PSRAM: %lu bytes free\n", (unsigned long)psram_free);
+    printf("  Heap:  %lu / %lu bytes free\n",
+           (unsigned long)ss->heap_free, (unsigned long)ss->heap_total);
+    if (ss->psram_total > 0) {
+        printf("  PSRAM: %lu / %lu bytes free\n",
+               (unsigned long)ss->psram_free, (unsigned long)ss->psram_total);
     }
-
     return 0;
 }
 
 static int cmd_uptime(int argc, char **argv)
 {
-    uint64_t uptime_us = esp_timer_get_time();
-    uint64_t uptime_sec = uptime_us / 1000000;
-
+    const system_state_t *ss = system_state_get();
+    uint64_t uptime_sec = ss->uptime_us / 1000000;
     uint32_t hours = (uint32_t)(uptime_sec / 3600);
     uint32_t minutes = (uint32_t)((uptime_sec % 3600) / 60);
     uint32_t seconds = (uint32_t)(uptime_sec % 60);
-
     printf("Uptime: %luh %lum %lus\n",
            (unsigned long)hours, (unsigned long)minutes, (unsigned long)seconds);
-
     return 0;
 }
 
 static int cmd_status(int argc, char **argv)
 {
-    // Header with version and node name
-    const credentials_t *id = credentials_get();
-    printf("Boorker v%s", BOORKER_VERSION_STRING);
-    if (id) {
-        printf(" - %s", id->node_name);
-    }
-    printf("\n");
+    const system_state_t *ss = system_state_get();
+
+    printf("Boorker v%s - %s\n", ss->firmware_version, ss->node_name);
 
     // Uptime
-    uint64_t uptime_us = esp_timer_get_time();
-    uint64_t uptime_sec = uptime_us / 1000000;
+    uint64_t uptime_sec = ss->uptime_us / 1000000;
     uint32_t hours = (uint32_t)(uptime_sec / 3600);
     uint32_t minutes = (uint32_t)((uptime_sec % 3600) / 60);
     uint32_t seconds = (uint32_t)(uptime_sec % 60);
@@ -314,31 +293,17 @@ static int cmd_status(int argc, char **argv)
 
     // Memory
     printf("Memory:\n");
-    printf("  Heap:  %lu bytes free\n", (unsigned long)esp_get_free_heap_size());
-    size_t psram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-    if (psram_free > 0) {
-        printf("  PSRAM: %lu bytes free\n", (unsigned long)psram_free);
+    printf("  Heap:  %lu bytes free\n", (unsigned long)ss->heap_free);
+    if (ss->psram_total > 0) {
+        printf("  PSRAM: %lu bytes free\n", (unsigned long)ss->psram_free);
     }
 
-    // WiFi status
-    char ip[16] = {0};
-    printf("WiFi: %s", wifi_mgr_get_state_name());
-    if (wifi_mgr_get_ip(ip, sizeof(ip)) == ESP_OK && ip[0] != '\0') {
-        printf(" (%s)", ip);
+    // WiFi
+    printf("WiFi: %s", ss->wifi.connected ? "CONNECTED" : "DISCONNECTED");
+    if (ss->wifi.connected && ss->wifi.ip[0] != '\0') {
+        printf(" (%s)", ss->wifi.ip);
     }
     printf("\n");
-
-#if CONFIG_TS_MGR_ENABLED
-    // Tailscale status
-    char ts_ip[16] = {0};
-    printf("Tailscale: %s", ts_mgr_get_state_name());
-    if (ts_mgr_get_ip(ts_ip, sizeof(ts_ip)) == ESP_OK && ts_ip[0] != '\0') {
-        printf(" (%s)", ts_ip);
-    }
-    printf("\n");
-#else
-    printf("Tailscale: disabled\n");
-#endif
 
     return 0;
 }

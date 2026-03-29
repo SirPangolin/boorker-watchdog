@@ -59,18 +59,6 @@ esp_err_t sensor_manager_start(void);
 esp_err_t sensor_manager_stop(void);
 
 /**
- * @brief Register callback for sensor readings
- *
- * Only one callback supported. Subsequent calls replace previous.
- *
- * @param callback Function to call with readings (NULL to unregister)
- * @param user_data Context passed to callback
- * @return ESP_OK on success
- * @return ESP_ERR_TIMEOUT if mutex acquisition fails
- */
-esp_err_t sensor_manager_register_callback(sensor_callback_t callback, void *user_data);
-
-/**
  * @brief Get last reading for a sensor
  *
  * @param sensor_id Sensor identifier

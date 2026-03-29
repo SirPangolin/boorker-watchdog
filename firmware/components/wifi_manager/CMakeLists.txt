@@ -18,5 +18,6 @@ idf_component_register(
         log
     PRIV_REQUIRES
         mdns
-        credentials
+        secrets
+        system_state
 )

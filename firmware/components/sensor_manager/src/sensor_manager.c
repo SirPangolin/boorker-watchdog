@@ -6,6 +6,8 @@
 #include "sensor_manager.h"
 #include "dht22_driver.h"
 #include "sw420_driver.h"
+#include "button_driver.h"
+#include "event_bus.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -54,15 +56,50 @@ static struct {
     sensor_instance_t sensors[CONFIG_SENSOR_MAX_COUNT];
     size_t sensor_count;
 
-    sensor_callback_t callback;
-    void *callback_user_data;
 } s_ctx = {0};
 
-// Forward declarations
 static void sensor_task(void *arg);
 static esp_err_t load_config_from_nvs(void);
 static esp_err_t init_default_sensor(void);
 static uint32_t calculate_backoff(uint8_t fail_count, uint32_t base_interval);
+
+static void button_event_handler(int button_id, button_press_t type, void *ctx)
+{
+    (void)ctx;
+    uint8_t press;
+    switch (type) {
+    case BUTTON_PRESS_SHORT:     press = EVENT_PRESS_SHORT;     break;
+    case BUTTON_PRESS_LONG:      press = EVENT_PRESS_LONG;      break;
+    case BUTTON_PRESS_VERY_LONG: press = EVENT_PRESS_VERY_LONG; break;
+    default: return;
+    }
+    event_notify_t event = {
+        .type = EVENT_NOTIFY_BUTTON,
+        .button = { .button_id = (uint8_t)button_id, .press = press },
+    };
+    esp_err_t ret = event_bus_notify(&event);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Button notify failed: %s", esp_err_to_name(ret));
+    }
+}
+
+static void publish_reading(const sensor_reading_t *reading)
+{
+    event_notify_t event = {
+        .type = EVENT_NOTIFY_SENSOR_READING,
+    };
+    strncpy(event.sensor_reading.sensor_id,
+            reading->sensor_id ? reading->sensor_id : "?",
+            sizeof(event.sensor_reading.sensor_id) - 1);
+    event.sensor_reading.value = reading->value;
+    event.sensor_reading.value2 = reading->value2;
+    event.sensor_reading.status = (uint8_t)reading->status;
+    esp_err_t ret = event_bus_notify(&event);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Reading notify failed for '%s': %s",
+                 reading->sensor_id ? reading->sensor_id : "?", esp_err_to_name(ret));
+    }
+}
 
 esp_err_t sensor_manager_init(void)
 {
@@ -137,8 +174,36 @@ esp_err_t sensor_manager_init(void)
         }
     }
 
+    // Register buttons
+    esp_err_t btn_ret = button_driver_init();
+    if (btn_ret != ESP_OK && btn_ret != ESP_ERR_INVALID_STATE) {
+        ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(btn_ret));
+    }
+
+    if (btn_ret == ESP_OK || btn_ret == ESP_ERR_INVALID_STATE) {
+        button_config_t prg_cfg = {
+            .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
+#ifdef CONFIG_BUTTON_DRIVER_PRG_ACTIVE_HIGH
+            .active_high = true,
+#endif
+            .mode = BUTTON_MODE_MOMENTARY,
+            .debounce_ms = CONFIG_BUTTON_DRIVER_DEBOUNCE_MS,
+            .long_press_ms = CONFIG_BUTTON_DRIVER_LONG_PRESS_MS,
+            .very_long_press_ms = CONFIG_BUTTON_DRIVER_VERY_LONG_PRESS_MS,
+            .callback = button_event_handler,
+            .ctx = NULL,
+        };
+        int prg_id = button_driver_register(&prg_cfg);
+        if (prg_id < 0) {
+            ESP_LOGW(TAG, "Failed to register PRG button");
+        } else {
+            ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)",
+                     prg_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
+        }
+    }
+
     s_ctx.initialized = true;
-    ESP_LOGI(TAG, "Sensor manager initialized with %d sensor(s)", s_ctx.sensor_count);
+    ESP_LOGI(TAG, "Sensor manager initialized with %zu sensor(s)", s_ctx.sensor_count);
     return ESP_OK;
 }
 
@@ -241,20 +306,6 @@ esp_err_t sensor_manager_stop(void)
     return ESP_OK;
 }
 
-esp_err_t sensor_manager_register_callback(sensor_callback_t callback, void *user_data)
-{
-    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        ESP_LOGE(TAG, "Failed to acquire mutex");
-        return ESP_ERR_TIMEOUT;
-    }
-
-    s_ctx.callback = callback;
-    s_ctx.callback_user_data = user_data;
-
-    xSemaphoreGive(s_ctx.mutex);
-    ESP_LOGI(TAG, "Callback %s", callback ? "registered" : "unregistered");
-    return ESP_OK;
-}
 
 esp_err_t sensor_manager_get_reading(const char *sensor_id, sensor_reading_t *out)
 {
@@ -458,8 +509,6 @@ static void sensor_task(void *arg)
             float temp = 0, humidity = 0;
             esp_err_t err = ESP_FAIL;
             sensor_reading_t reading_copy = {0};
-            sensor_callback_t cb = NULL;
-            void *cb_user_data = NULL;
 
             if (strcmp(sensor->driver, "dht22") == 0) {
                 err = dht22_driver_read(&temp, &humidity);
@@ -478,10 +527,7 @@ static void sensor_task(void *arg)
                         sensor->last_reading.value2 = humidity;
                         sensor->last_reading.status = SENSOR_STATUS_ONLINE;
 
-                        // Copy reading and callback info for invocation outside mutex
                         reading_copy = sensor->last_reading;
-                        cb = s_ctx.callback;
-                        cb_user_data = s_ctx.callback_user_data;
                     } else {
                         // Failure
                         if (sensor->status == SENSOR_STATUS_ONLINE) {
@@ -499,9 +545,8 @@ static void sensor_task(void *arg)
                     }
                     xSemaphoreGive(s_ctx.mutex);
 
-                    // Invoke callback outside mutex to prevent deadlock
-                    if (cb != NULL) {
-                        cb(&reading_copy, cb_user_data);
+                    if (err == ESP_OK) {
+                        publish_reading(&reading_copy);
                     }
                 } else {
                     ESP_LOGW(TAG, "Failed to acquire mutex after reading sensor '%s' "
@@ -542,13 +587,9 @@ static void sensor_task(void *arg)
                         sensor->last_reading.status = SENSOR_STATUS_ONLINE;
 
                         reading_copy = sensor->last_reading;
-                        cb = s_ctx.callback;
-                        cb_user_data = s_ctx.callback_user_data;
                         xSemaphoreGive(s_ctx.mutex);
 
-                        if (cb != NULL) {
-                            cb(&reading_copy, cb_user_data);
-                        }
+                        publish_reading(&reading_copy);
                     } else {
                         ESP_LOGW(TAG, "Mutex timeout updating '%s' after successful read",
                                  sensor->id);
@@ -576,6 +617,17 @@ static void sensor_task(void *arg)
                         ESP_LOGW(TAG, "Mutex timeout updating '%s' status", sensor->id);
                     }
                 }
+            }
+        }
+
+        // Signal first poll complete
+        static bool first_poll_done = false;
+        if (!first_poll_done) {
+            first_poll_done = true;
+            event_notify_t ready = { .type = EVENT_NOTIFY_SENSORS_READY };
+            esp_err_t notify_ret = event_bus_notify(&ready);
+            if (notify_ret != ESP_OK) {
+                ESP_LOGW(TAG, "SENSORS_READY notify failed: %s", esp_err_to_name(notify_ret));
             }
         }
 

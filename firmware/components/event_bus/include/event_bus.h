@@ -75,21 +75,63 @@ typedef struct {
 
 #define EVENT_BUS_MAX_MOTDS 4    /**< Maximum concurrent MOTDs */
 
+typedef enum {
+    EVENT_NOTIFY_BUTTON = 0,
+    EVENT_NOTIFY_SENSOR_READING,
+    EVENT_NOTIFY_SENSORS_READY,
+    EVENT_NOTIFY_SYSTEM_STATE,
+    EVENT_NOTIFY_TYPE_MAX
+} event_notify_type_t;
+
+enum {
+    EVENT_PRESS_SHORT     = 0,
+    EVENT_PRESS_LONG      = 1,
+    EVENT_PRESS_VERY_LONG = 2,
+};
+
+enum {
+    EVENT_SENSOR_ONLINE   = 0,
+    EVENT_SENSOR_OFFLINE  = 1,
+    EVENT_SENSOR_DISABLED = 2,
+    EVENT_SENSOR_ERROR    = 3,
+    EVENT_SENSOR_STATUS_MAX
+};
+
+static inline const char *event_sensor_status_name(uint8_t status) {
+    static const char *names[] = { "ONLINE", "OFFLINE", "DISABLED", "ERROR" };
+    return status < EVENT_SENSOR_STATUS_MAX ? names[status] : "UNKNOWN";
+}
+
+typedef struct {
+    event_notify_type_t type;
+    union {
+        struct {
+            uint8_t button_id;
+            uint8_t press;
+        } button;
+        struct {
+            char sensor_id[32];
+            float value;
+            float value2;
+            uint8_t status;
+        } sensor_reading;
+        struct {
+            uint8_t section;
+        } system_state;
+    };
+} event_notify_t;
+
 /**
- * @brief Channel callback function signature
- *
- * Called when the active event state changes. Channels should update their
- * output (LED pattern, buzzer tone, etc.) based on the new state.
- *
- * @note Initial callback during registration is called WITHOUT event_bus mutex held.
- *       Subsequent state change callbacks MAY be called with event_bus mutex held.
- *       Callbacks MUST NOT call back into event_bus (deadlock risk).
- *       Callbacks should be fast and non-blocking.
- *
  * @param new_state The new active event state
  * @param ctx User context pointer passed during registration
  */
 typedef void (*event_channel_cb_t)(event_state_t new_state, void *ctx);
+
+/**
+ * @param event Ephemeral event with type tag + payload
+ * @param ctx User context pointer passed during registration
+ */
+typedef void (*event_notify_cb_t)(const event_notify_t *event, void *ctx);
 
 /**
  * @brief Initialize event bus
@@ -170,6 +212,16 @@ event_state_t event_bus_get_active_state(void);
  * @return ESP_ERR_TIMEOUT if mutex cannot be acquired
  */
 esp_err_t event_bus_register_channel(const char *name, event_channel_cb_t cb, void *ctx);
+
+/**
+ * Register a channel with both state and notify callbacks.
+ * @param notify_cb Called for ephemeral events (NULL to ignore them)
+ */
+esp_err_t event_bus_register_channel_ex(const char *name, event_channel_cb_t state_cb,
+                                         event_notify_cb_t notify_cb, void *ctx);
+
+/** Fire an ephemeral event to all registered channels. */
+esp_err_t event_bus_notify(const event_notify_t *event);
 
 /**
  * @brief Check if a state is a business state

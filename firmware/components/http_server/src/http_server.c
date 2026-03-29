@@ -1,20 +1,14 @@
 #include "http_server.h"
 #include "web_auth.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
-#include "wifi_manager.h"
 #include "event_bus.h"
 #include "sys_console.h"
 #include "version.h"
 #include "ota_manager.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
 #include "esp_littlefs.h"
 #include "esp_system.h"
-#include "esp_chip_info.h"
-#include "esp_timer.h"
-#include "esp_mac.h"
-#include "esp_wifi.h"
 #include "esp_partition.h"
 #include "nvs_flash.h"
 #if CONFIG_HTTP_SERVER_HTTPS_ENABLED
@@ -539,55 +533,36 @@ static esp_err_t api_system_status(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Check all cJSON_Add* return values for NULL (allocation failure)
+    system_state_t ss_buf = {0};
+    if (system_state_copy(&ss_buf) != ESP_OK) {
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    const system_state_t *ss = &ss_buf;
     bool ok = true;
 
-    // Firmware version
-    ok = ok && cJSON_AddStringToObject(json, "firmware_version", BOORKER_VERSION_STRING);
+    ok = ok && cJSON_AddStringToObject(json, "firmware_version", ss->firmware_version);
+    ok = ok && cJSON_AddStringToObject(json, "device_name", ss->node_name);
+    ok = ok && cJSON_AddNumberToObject(json, "uptime_seconds", ss->uptime_us / 1000000);
+    ok = ok && cJSON_AddNumberToObject(json, "heap_free", ss->heap_free);
+    ok = ok && cJSON_AddNumberToObject(json, "heap_total", ss->heap_total);
+    ok = ok && cJSON_AddNumberToObject(json, "psram_free", ss->psram_free);
+    ok = ok && cJSON_AddNumberToObject(json, "psram_total", ss->psram_total);
 
-    // Device identity
-    const credentials_t *id = credentials_get();
-    if (id) {
-        ok = ok && cJSON_AddStringToObject(json, "device_name", id->node_name);
+    ok = ok && cJSON_AddBoolToObject(json, "wifi_connected", ss->wifi.connected);
+    if (ss->wifi.connected) {
+        ok = ok && cJSON_AddStringToObject(json, "wifi_ssid", ss->wifi.ssid);
+        ok = ok && cJSON_AddNumberToObject(json, "wifi_rssi", ss->wifi.rssi);
     }
-
-    // Uptime
-    ok = ok && cJSON_AddNumberToObject(json, "uptime_seconds", esp_timer_get_time() / 1000000);
-
-    // Memory: internal heap free/total (separate from PSRAM)
-    ok = ok && cJSON_AddNumberToObject(json, "heap_free",
-        heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
-    ok = ok && cJSON_AddNumberToObject(json, "heap_total",
-        heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
-    ok = ok && cJSON_AddNumberToObject(json, "psram_free",
-        heap_caps_get_free_size(MALLOC_CAP_SPIRAM));
-    ok = ok && cJSON_AddNumberToObject(json, "psram_total",
-        heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
-
-    // WiFi status
-    wifi_ap_record_t ap_info;
-    esp_err_t wifi_err = esp_wifi_sta_get_ap_info(&ap_info);
-    bool wifi_connected = (wifi_err == ESP_OK);
-    ok = ok && cJSON_AddBoolToObject(json, "wifi_connected", wifi_connected);
-    if (wifi_connected) {
-        ok = ok && cJSON_AddStringToObject(json, "wifi_ssid", (const char *)ap_info.ssid);
-        ok = ok && cJSON_AddNumberToObject(json, "wifi_rssi", ap_info.rssi);
+    if (ss->wifi.ip[0] != '\0') {
+        ok = ok && cJSON_AddStringToObject(json, "ip_address", ss->wifi.ip);
     }
-
-    // IP address
-    char ip_buf[16] = {0};
-    if (wifi_mgr_get_ip(ip_buf, sizeof(ip_buf)) == ESP_OK) {
-        ok = ok && cJSON_AddStringToObject(json, "ip_address", ip_buf);
-    }
-
-    // MAC address
-    uint8_t mac[6];
-    if (esp_read_mac(mac, ESP_MAC_WIFI_STA) == ESP_OK) {
-        char mac_str[18];
-        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        ok = ok && cJSON_AddStringToObject(json, "mac_address", mac_str);
-    }
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             ss->wifi.mac[0], ss->wifi.mac[1], ss->wifi.mac[2],
+             ss->wifi.mac[3], ss->wifi.mac[4], ss->wifi.mac[5]);
+    ok = ok && cJSON_AddStringToObject(json, "mac_address", mac_str);
 
     if (!ok) {
         ESP_LOGE(TAG, "Failed to build status JSON - memory allocation failed");
@@ -618,8 +593,12 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_OK;
     }
 
-    esp_chip_info_t chip_info;
-    esp_chip_info(&chip_info);
+    system_state_t ss_info_buf = {0};
+    if (system_state_copy(&ss_info_buf) != ESP_OK) {
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
+    const system_state_t *ss = &ss_info_buf;
 
     cJSON *json = cJSON_CreateObject();
     if (json == NULL) {
@@ -628,24 +607,19 @@ static esp_err_t api_system_info(httpd_req_t *req)
         return ESP_FAIL;
     }
 
-    // Check all cJSON_Add* return values for NULL (allocation failure)
     bool ok = true;
-    ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
-    ok = ok && cJSON_AddStringToObject(json, "idf_version", esp_get_idf_version());
-    ok = ok && cJSON_AddNumberToObject(json, "chip_revision", chip_info.revision);
-    ok = ok && cJSON_AddNumberToObject(json, "cores", chip_info.cores);
+    ok = ok && cJSON_AddStringToObject(json, "version", ss->firmware_version);
+    ok = ok && cJSON_AddStringToObject(json, "idf_version", ss->idf_version);
+    char chip_rev[8];
+    snprintf(chip_rev, sizeof(chip_rev), "%d.%d", ss->chip_revision_major, ss->chip_revision_minor);
+    ok = ok && cJSON_AddStringToObject(json, "chip_revision", chip_rev);
+    ok = ok && cJSON_AddNumberToObject(json, "cores", ss->chip_cores);
 
-    uint8_t mac[6];
-    esp_err_t mac_ret = esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    if (mac_ret == ESP_OK) {
-        char mac_str[18];
-        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
-                 mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-        ok = ok && cJSON_AddStringToObject(json, "mac", mac_str);
-    } else {
-        ESP_LOGW(TAG, "Failed to read MAC address: %s", esp_err_to_name(mac_ret));
-        ok = ok && cJSON_AddStringToObject(json, "mac", "unknown");
-    }
+    char mac_str[18];
+    snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+             ss->wifi.mac[0], ss->wifi.mac[1], ss->wifi.mac[2],
+             ss->wifi.mac[3], ss->wifi.mac[4], ss->wifi.mac[5]);
+    ok = ok && cJSON_AddStringToObject(json, "mac", mac_str);
 
     if (!ok) {
         ESP_LOGE(TAG, "Failed to build info JSON - memory allocation failed");
@@ -679,7 +653,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     httpd_resp_set_type(req, "application/json");
 
     // Only expose credentials during first boot period (security measure)
-    if (!credentials_is_first_boot()) {
+    if (!secrets_is_first_boot()) {
         ESP_LOGW(TAG, "QR endpoint accessed after first boot - credentials hidden");
         httpd_resp_set_status(req, "403 Forbidden");
         httpd_resp_sendstr(req, "{\"error\":true,\"message\":\"Credentials only available during first boot\"}");
@@ -687,7 +661,7 @@ static esp_err_t api_system_qr(httpd_req_t *req)
     }
 
     char qr_json[256];
-    esp_err_t err = credentials_get_qr_json(qr_json, sizeof(qr_json));
+    esp_err_t err = secrets_get_qr_json(qr_json, sizeof(qr_json));
 
     if (err == ESP_OK) {
         httpd_resp_sendstr(req, qr_json);
@@ -852,9 +826,15 @@ static esp_err_t api_ota_status_get(httpd_req_t *req)
         return ESP_FAIL;
     }
 
+    system_state_t ss_ota_buf = {0};
+    if (system_state_copy(&ss_ota_buf) != ESP_OK) {
+        cJSON_Delete(json);
+        httpd_resp_send_500(req);
+        return ESP_FAIL;
+    }
     bool ok = true;
     ok = ok && cJSON_AddStringToObject(json, "state",
-             system_state_ota_name(system_state_get_ota()));
+             system_ota_state_name(ss_ota_buf.ota.state));
     ok = ok && cJSON_AddStringToObject(json, "version", BOORKER_VERSION_STRING);
 
     ota_update_info_t update;
@@ -1050,7 +1030,11 @@ static esp_err_t redirect_to_https(httpd_req_t *req)
 {
     char host[64] = {0};
     if (httpd_req_get_hdr_value_str(req, "Host", host, sizeof(host)) != ESP_OK) {
-        if (wifi_mgr_get_ip(host, sizeof(host)) != ESP_OK) {
+        system_state_t ss_redirect = {0};
+        if (system_state_copy(&ss_redirect) == ESP_OK && ss_redirect.wifi.ip[0] != '\0') {
+            strncpy(host, ss_redirect.wifi.ip, sizeof(host) - 1);
+        }
+        if (host[0] == '\0') {
             ESP_LOGW(TAG, "Cannot determine host for HTTPS redirect");
             httpd_resp_send_500(req);
             return ESP_FAIL;
@@ -1093,8 +1077,8 @@ esp_err_t http_server_start(void)
 
     // Configure and start server
 #if CONFIG_HTTP_SERVER_HTTPS_ENABLED
-    const char *cert = credentials_get_tls_cert();
-    const char *pkey = credentials_get_tls_key();
+    const char *cert = secrets_get_tls_cert();
+    const char *pkey = secrets_get_tls_key();
     if (cert == NULL || pkey == NULL) {
         ESP_LOGE(TAG, "TLS cert/key not available — cannot start HTTPS");
         return ESP_FAIL;

@@ -79,13 +79,10 @@ static void apply_defaults(button_config_t *cfg)
     }
 }
 
-/**
- * @brief Read GPIO accounting for active_low
- */
 static inline bool read_pressed(const button_slot_t *slot)
 {
     int level = gpio_get_level(slot->config.gpio);
-    return slot->config.active_low ? (level == 0) : (level == 1);
+    return slot->config.active_high ? (level == 1) : (level == 0);
 }
 
 /**
@@ -281,8 +278,8 @@ int button_driver_register(const button_config_t *config)
     gpio_config_t io_conf = {
         .pin_bit_mask = (1ULL << config->gpio),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = config->active_low ? GPIO_PULLUP_ENABLE : GPIO_PULLUP_DISABLE,
-        .pull_down_en = config->active_low ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE,
+        .pull_up_en = config->active_high ? GPIO_PULLUP_DISABLE : GPIO_PULLUP_ENABLE,
+        .pull_down_en = config->active_high ? GPIO_PULLDOWN_ENABLE : GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,  // No ISR — polling only
     };
     esp_err_t ret = gpio_config(&io_conf);
@@ -303,7 +300,7 @@ int button_driver_register(const button_config_t *config)
 
     ESP_LOGI(TAG, "Registered button %d on GPIO %d (%s, %s, debounce %dms)",
              slot_id, config->gpio,
-             config->active_low ? "active LOW" : "active HIGH",
+             config->active_high ? "active HIGH" : "active LOW",
              config->mode == BUTTON_MODE_MOMENTARY ? "momentary" : "latched",
              slot->config.debounce_ms);
 

@@ -7,7 +7,6 @@
  */
 
 #include "event_bus.h"
-#include "system_state.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
@@ -41,10 +40,20 @@ static const char *state_names[] = {
 _Static_assert(sizeof(state_names) / sizeof(state_names[0]) == EVENT_MAX,
                "state_names array size must match EVENT_MAX");
 
-// Channel registration structure
+static const char *notify_type_names[] = {
+    [EVENT_NOTIFY_BUTTON]         = "BUTTON",
+    [EVENT_NOTIFY_SENSOR_READING] = "SENSOR_READING",
+    [EVENT_NOTIFY_SENSORS_READY]  = "SENSORS_READY",
+    [EVENT_NOTIFY_SYSTEM_STATE]   = "SYSTEM_STATE",
+};
+
+_Static_assert(sizeof(notify_type_names) / sizeof(notify_type_names[0]) == EVENT_NOTIFY_TYPE_MAX,
+               "notify_type_names must match EVENT_NOTIFY_TYPE_MAX");
+
 typedef struct {
     const char *name;
     event_channel_cb_t cb;
+    event_notify_cb_t notify_cb;
     void *ctx;
 } event_channel_t;
 
@@ -208,12 +217,6 @@ esp_err_t event_bus_set_state(event_state_t state)
         return ESP_ERR_INVALID_STATE;
     }
 
-    // Check business state gate before acquiring mutex
-    if (event_bus_is_business_state(state) && !system_state_is_claimed()) {
-        ESP_LOGD(TAG, "Business state %s blocked (device unclaimed)", state_names[state]);
-        return ESP_ERR_NOT_ALLOWED;
-    }
-
     if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
         ESP_LOGW(TAG, "Mutex timeout in set_state");
         return ESP_ERR_TIMEOUT;
@@ -299,6 +302,7 @@ esp_err_t event_bus_register_channel(const char *name, event_channel_cb_t cb, vo
     size_t idx = s_ctx.channel_count;
     s_ctx.channels[idx].name = name;
     s_ctx.channels[idx].cb = cb;
+    s_ctx.channels[idx].notify_cb = NULL;
     s_ctx.channels[idx].ctx = ctx;
     s_ctx.channel_count++;
 
@@ -312,6 +316,86 @@ esp_err_t event_bus_register_channel(const char *name, event_channel_cb_t cb, vo
     // Call callback outside mutex to avoid deadlock
     ESP_LOGD(TAG, "Initial notify to '%s': %s", name, state_names[current]);
     cb(current, ctx);
+
+    return ESP_OK;
+}
+
+esp_err_t event_bus_register_channel_ex(const char *name, event_channel_cb_t state_cb,
+                                        event_notify_cb_t notify_cb, void *ctx)
+{
+    if (name == NULL || state_cb == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in register_channel_ex");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    if (s_ctx.channel_count >= CONFIG_EVENT_BUS_MAX_CHANNELS) {
+        ESP_LOGE(TAG, "Max channels (%d) reached, cannot register '%s'",
+                 CONFIG_EVENT_BUS_MAX_CHANNELS, name);
+        xSemaphoreGive(s_ctx.mutex);
+        return ESP_ERR_NO_MEM;
+    }
+
+    size_t idx = s_ctx.channel_count;
+    s_ctx.channels[idx].name = name;
+    s_ctx.channels[idx].cb = state_cb;
+    s_ctx.channels[idx].notify_cb = notify_cb;
+    s_ctx.channels[idx].ctx = ctx;
+    s_ctx.channel_count++;
+
+    ESP_LOGI(TAG, "Registered channel '%s' (%zu/%d)%s",
+             name, s_ctx.channel_count, CONFIG_EVENT_BUS_MAX_CHANNELS,
+             notify_cb ? " +notify" : "");
+
+    event_state_t current = s_ctx.current_active;
+    xSemaphoreGive(s_ctx.mutex);
+
+    state_cb(current, ctx);
+
+    return ESP_OK;
+}
+
+esp_err_t event_bus_notify(const event_notify_t *event)
+{
+    if (event == NULL || event->type >= EVENT_NOTIFY_TYPE_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (!s_ctx.initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    if (xSemaphoreTake(s_ctx.mutex, pdMS_TO_TICKS(MUTEX_TIMEOUT_MS)) != pdTRUE) {
+        ESP_LOGW(TAG, "Mutex timeout in notify");
+        return ESP_ERR_TIMEOUT;
+    }
+
+    ESP_LOGD(TAG, "Notify: %s", notify_type_names[event->type]);
+
+    // Snapshot callbacks under mutex, invoke outside (prevents deadlock)
+    event_notify_cb_t cbs[CONFIG_EVENT_BUS_MAX_CHANNELS];
+    void *ctxs[CONFIG_EVENT_BUS_MAX_CHANNELS];
+    size_t cb_count = 0;
+    for (size_t i = 0; i < s_ctx.channel_count; i++) {
+        if (s_ctx.channels[i].notify_cb != NULL) {
+            cbs[cb_count] = s_ctx.channels[i].notify_cb;
+            ctxs[cb_count] = s_ctx.channels[i].ctx;
+            cb_count++;
+        }
+    }
+
+    xSemaphoreGive(s_ctx.mutex);
+
+    for (size_t i = 0; i < cb_count; i++) {
+        cbs[i](event, ctxs[i]);
+    }
 
     return ESP_OK;
 }

@@ -12,12 +12,9 @@
 
 #include "status_display.h"
 #include "display_hal.h"
-#include "button_driver.h"
 #include "event_bus.h"
-#include "sensor_manager.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
-#include "status_buzzer.h"
 #include "u8g2.h"
 #include "esp_log.h"
 #include "esp_timer.h"
@@ -56,6 +53,16 @@ typedef enum {
 #define NOTIFY_BUTTON_SHORT  (1 << 1)
 #define NOTIFY_BUTTON_LONG   (1 << 2)
 #define NOTIFY_BUTTON_VLONG  (1 << 3)
+#define NOTIFY_READING_UPDATE (1 << 4)
+
+#define MAX_CACHED_READINGS CONFIG_STATUS_DISPLAY_MAX_SENSORS
+
+typedef struct {
+    char sensor_id[32];
+    float value;
+    float value2;
+    uint8_t status;
+} cached_reading_t;
 
 // --------------------------------------------------------------------------
 // Context
@@ -66,16 +73,24 @@ static struct {
     bool initialized;
 
     u8g2_t u8g2;
-    int prg_button_id;
 
     // Screen state
     screen_state_t screen;
-    screen_state_t pre_alert_screen;  // Screen to return to after alert ack
+    screen_state_t pre_alert_screen;
     bool display_on;
     bool alert_silenced;
 
     // Event bus state
     event_state_t event_state;
+
+    // Sensor reading cache (written by display task only)
+    cached_reading_t readings[MAX_CACHED_READINGS];
+    size_t reading_count;
+    bool sensors_ready;
+
+    // Pending readings from notify callback (consumed by display task)
+    cached_reading_t pending[MAX_CACHED_READINGS];
+    size_t pending_count;
 
     // Rotation
     int rotate_page;
@@ -87,36 +102,126 @@ static struct {
     .display_on = true,
     .screen = SCREEN_SPLASH,
     .event_state = EVENT_OFF,
-    .prg_button_id = -1,
 };
 
+static portMUX_TYPE s_pending_spinlock = portMUX_INITIALIZER_UNLOCKED;
+
 // --------------------------------------------------------------------------
-// Button callback (fires from timer daemon task)
+// Reading cache accessors (used by display_screens.c)
 // --------------------------------------------------------------------------
 
-static void prg_button_handler(int button_id, button_press_t type, void *ctx)
+size_t display_get_reading_count(void)
 {
-    (void)button_id;
-    (void)ctx;
+    return s_ctx.reading_count;
+}
 
-    if (!s_ctx.task) return;
+bool display_get_reading(size_t index, const char **sensor_id,
+                         float *value, float *value2, uint8_t *status)
+{
+    if (index >= s_ctx.reading_count) return false;
+    const cached_reading_t *r = &s_ctx.readings[index];
+    if (sensor_id) *sensor_id = r->sensor_id;
+    if (value) *value = r->value;
+    if (value2) *value2 = r->value2;
+    if (status) *status = r->status;
+    return true;
+}
 
-    uint32_t bits = 0;
-    switch (type) {
-    case BUTTON_PRESS_SHORT:
-        bits = NOTIFY_BUTTON_SHORT;
-        break;
-    case BUTTON_PRESS_LONG:
-        bits = NOTIFY_BUTTON_LONG;
-        break;
-    case BUTTON_PRESS_VERY_LONG:
-        bits = NOTIFY_BUTTON_VLONG;
-        break;
-    default:
+// --------------------------------------------------------------------------
+// Event bus notify callback
+// --------------------------------------------------------------------------
+
+// Called from notify callback (sensor_manager's task) — writes to pending buffer
+static void queue_sensor_reading(const event_notify_t *event)
+{
+    portENTER_CRITICAL(&s_pending_spinlock);
+    size_t idx = s_ctx.pending_count;
+    if (idx >= MAX_CACHED_READINGS) {
+        portEXIT_CRITICAL(&s_pending_spinlock);
+        ESP_LOGW(TAG, "Pending buffer full, dropping '%s'", event->sensor_reading.sensor_id);
         return;
     }
 
-    xTaskNotify(s_ctx.task, bits, eSetBits);
+    cached_reading_t *r = &s_ctx.pending[idx];
+    strncpy(r->sensor_id, event->sensor_reading.sensor_id,
+            sizeof(r->sensor_id) - 1);
+    r->value = event->sensor_reading.value;
+    r->value2 = event->sensor_reading.value2;
+    r->status = event->sensor_reading.status;
+    s_ctx.pending_count = idx + 1;
+    portEXIT_CRITICAL(&s_pending_spinlock);
+}
+
+// Called from display task only — moves pending into the reading cache
+static void flush_pending_readings(void)
+{
+    cached_reading_t local[MAX_CACHED_READINGS];
+    size_t count;
+
+    portENTER_CRITICAL(&s_pending_spinlock);
+    count = s_ctx.pending_count;
+    if (count > 0) {
+        memcpy(local, s_ctx.pending, count * sizeof(cached_reading_t));
+    }
+    s_ctx.pending_count = 0;
+    portEXIT_CRITICAL(&s_pending_spinlock);
+
+    if (count == 0) return;
+
+    for (size_t p = 0; p < count; p++) {
+        const cached_reading_t *incoming = &local[p];
+        bool found = false;
+
+        for (size_t i = 0; i < s_ctx.reading_count; i++) {
+            if (strncmp(s_ctx.readings[i].sensor_id, incoming->sensor_id,
+                        sizeof(s_ctx.readings[i].sensor_id)) == 0) {
+                s_ctx.readings[i].value = incoming->value;
+                s_ctx.readings[i].value2 = incoming->value2;
+                s_ctx.readings[i].status = incoming->status;
+                found = true;
+                break;
+            }
+        }
+
+        if (!found) {
+            if (s_ctx.reading_count < MAX_CACHED_READINGS) {
+                s_ctx.readings[s_ctx.reading_count++] = *incoming;
+            } else {
+                ESP_LOGW(TAG, "Reading cache full (%d), dropping '%s'",
+                         MAX_CACHED_READINGS, incoming->sensor_id);
+            }
+        }
+    }
+}
+
+static void on_notify(const event_notify_t *event, void *ctx)
+{
+    (void)ctx;
+    if (!s_ctx.task) return;
+
+    switch (event->type) {
+    case EVENT_NOTIFY_BUTTON: {
+        uint32_t bits = 0;
+        switch (event->button.press) {
+        case EVENT_PRESS_SHORT:     bits = NOTIFY_BUTTON_SHORT; break;
+        case EVENT_PRESS_LONG:      bits = NOTIFY_BUTTON_LONG;  break;
+        case EVENT_PRESS_VERY_LONG: bits = NOTIFY_BUTTON_VLONG; break;
+        default: return;
+        }
+        xTaskNotify(s_ctx.task, bits, eSetBits);
+        break;
+    }
+    case EVENT_NOTIFY_SENSOR_READING:
+        queue_sensor_reading(event);
+        xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
+        break;
+    case EVENT_NOTIFY_SENSORS_READY:
+        s_ctx.sensors_ready = true;
+        xTaskNotify(s_ctx.task, NOTIFY_READING_UPDATE, eSetBits);
+        break;
+    default:
+        break;
+    }
 }
 
 // --------------------------------------------------------------------------
@@ -182,9 +287,6 @@ static void handle_button_short(void)
 {
     s_ctx.last_interaction_us = esp_timer_get_time();
 
-    // Chirp on every short press
-    status_buzzer_play(BUZZER_PRESET_CHIRP);
-
     switch (s_ctx.screen) {
     case SCREEN_OFF:
         // Wake display
@@ -199,8 +301,7 @@ static void handle_button_short(void)
         if (!s_ctx.alert_silenced) {
             // First press: silence buzzer
             s_ctx.alert_silenced = true;
-            status_buzzer_stop();
-            ESP_LOGI(TAG, "Alert buzzer silenced");
+            ESP_LOGI(TAG, "Alert silenced");
         } else {
             // Second press: acknowledge alert
             ESP_LOGI(TAG, "Alert acknowledged");
@@ -246,7 +347,6 @@ static void handle_button_long(void)
     s_ctx.display_on = false;
     s_ctx.screen = SCREEN_OFF;
     u8g2_SetPowerSave(&s_ctx.u8g2, 1);
-    status_buzzer_play(BUZZER_PRESET_DOUBLE_BEEP);
     ESP_LOGI(TAG, "Display off (long press)");
 }
 
@@ -282,9 +382,10 @@ static void render_current_screen(void)
         break;
 
     case SCREEN_FIRST_BOOT: {
-        const credentials_t *creds = credentials_get();
-        // TODO: get actual IP when available
-        screen_first_boot(&s_ctx.u8g2, creds, "--");
+        const secrets_t *creds = secrets_get();
+        const system_state_t *ss = system_state_get();
+        screen_first_boot(&s_ctx.u8g2, creds,
+                          ss->wifi.ip[0] != '\0' ? ss->wifi.ip : "--");
         break;
     }
 
@@ -335,25 +436,36 @@ static void display_task(void *arg)
 {
     (void)arg;
 
-    // Phase 1: Splash screen with animated throbber
-    int splash_frames = CONFIG_STATUS_DISPLAY_SPLASH_DELAY_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
-    for (int i = 0; i < splash_frames; i++) {
-        u8g2_ClearBuffer(&s_ctx.u8g2);
-        screen_splash(&s_ctx.u8g2, i % 3);
-        u8g2_SendBuffer(&s_ctx.u8g2);
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_STATUS_DISPLAY_THROBBER_MS));
-    }
-
-    // Phase 2: Register with event_bus
-    esp_err_t ret = event_bus_register_channel("display", on_event_state_change, NULL);
+    // Register with event_bus so readings cache during splash
+    esp_err_t ret = event_bus_register_channel_ex("display", on_event_state_change, on_notify, NULL);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to register event bus channel: %s", esp_err_to_name(ret));
     } else {
         ESP_LOGI(TAG, "Registered as event bus channel");
     }
 
-    // Determine initial screen
-    if (!system_state_is_claimed()) {
+    // Splash: show Millie logo, wait for system ready
+    // Break when: min branding time met AND (readings arrived OR sensors_ready OR timeout)
+    int min_frames = CONFIG_STATUS_DISPLAY_SPLASH_MIN_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
+    int max_frames = CONFIG_STATUS_DISPLAY_SPLASH_TIMEOUT_MS / CONFIG_STATUS_DISPLAY_THROBBER_MS;
+    for (int i = 0; i < max_frames; i++) {
+        bool min_met = (i >= min_frames);
+        bool data_ready = (s_ctx.reading_count > 0 || s_ctx.sensors_ready);
+        bool first_boot = (s_ctx.event_state == EVENT_FIRST_BOOT);
+        if (min_met && (data_ready || first_boot)) break;
+
+        u8g2_ClearBuffer(&s_ctx.u8g2);
+        screen_splash(&s_ctx.u8g2, i % 3);
+        u8g2_SendBuffer(&s_ctx.u8g2);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_STATUS_DISPLAY_THROBBER_MS));
+    }
+
+    if (s_ctx.reading_count == 0 && !s_ctx.sensors_ready) {
+        ESP_LOGW(TAG, "Splash timeout — no sensor data received");
+    }
+
+    // Transition based on what arrived during splash
+    if (s_ctx.event_state == EVENT_FIRST_BOOT) {
         s_ctx.screen = SCREEN_FIRST_BOOT;
     } else {
         s_ctx.screen = SCREEN_DASHBOARD;
@@ -386,6 +498,9 @@ static void display_task(void *arg)
         }
         if (notify_value & NOTIFY_BUTTON_SHORT) {
             handle_button_short();
+        }
+        if (notify_value & NOTIFY_READING_UPDATE) {
+            flush_pending_readings();
         }
         if (notify_value & NOTIFY_EVENT_CHANGE) {
             handle_event_change();
@@ -448,42 +563,12 @@ esp_err_t status_display_init(void)
 
     ESP_LOGI(TAG, "u8g2 SSD1306 128x64 initialized");
 
-    // Initialize button driver and register PRG button
-    ret = button_driver_init();
-    if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
-        // ESP_ERR_INVALID_STATE = already initialized (OK)
-        ESP_LOGE(TAG, "Button driver init failed: %s", esp_err_to_name(ret));
-        display_hal_deinit();
-        return ret;
-    }
-
-    button_config_t prg_cfg = {
-        .gpio = CONFIG_BUTTON_DRIVER_PRG_GPIO,
-        .active_low = true,
-        .mode = BUTTON_MODE_MOMENTARY,
-        .debounce_ms = 0,             // Kconfig default
-        .long_press_ms = 3000,        // Display off
-        .very_long_press_ms = 10000,  // Reboot
-        .callback = prg_button_handler,
-        .ctx = NULL,
-    };
-    s_ctx.prg_button_id = button_driver_register(&prg_cfg);
-    if (s_ctx.prg_button_id < 0) {
-        ESP_LOGW(TAG, "Failed to register PRG button (continuing without button)");
-    } else {
-        ESP_LOGI(TAG, "PRG button registered (id=%d, GPIO%d)", s_ctx.prg_button_id, CONFIG_BUTTON_DRIVER_PRG_GPIO);
-    }
-
     // Create display task
     BaseType_t task_ret = xTaskCreate(display_task, "display",
         CONFIG_STATUS_DISPLAY_TASK_STACK, NULL,
         CONFIG_STATUS_DISPLAY_TASK_PRIORITY, &s_ctx.task);
     if (task_ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create display task");
-        if (s_ctx.prg_button_id >= 0) {
-            button_driver_unregister(s_ctx.prg_button_id);
-        }
-        button_driver_deinit();
         display_hal_deinit();
         return ESP_ERR_NO_MEM;
     }
@@ -506,12 +591,6 @@ esp_err_t status_display_deinit(void)
     if (s_ctx.task) {
         vTaskDelete(s_ctx.task);
         s_ctx.task = NULL;
-    }
-
-    // Unregister button
-    if (s_ctx.prg_button_id >= 0) {
-        button_driver_unregister(s_ctx.prg_button_id);
-        s_ctx.prg_button_id = -1;
     }
 
     // Turn off display

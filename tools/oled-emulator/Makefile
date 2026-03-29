@@ -12,12 +12,16 @@
 # Paths
 U8G2_SRC     = u8g2/csrc
 FIRMWARE_SRC = ../../firmware/components/status_display/src
+FIRMWARE_INC = ../../firmware/components
 
-# Compiler
+# Compiler — local shims (.) override ESP-IDF headers, then real firmware headers
 CC = gcc
 CFLAGS = -g -Wall -Wno-unused-function \
-         -I$(U8G2_SRC) \
          -I. \
+         -I$(U8G2_SRC) \
+         -I$(FIRMWARE_INC)/system_state/include \
+         -I$(FIRMWARE_INC)/event_bus/include \
+         -I$(FIRMWARE_INC)/secrets/include \
          $(shell sdl2-config --cflags) \
          -DCONFIG_STATUS_DISPLAY_ENABLED=1
 

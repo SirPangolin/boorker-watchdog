@@ -1,5 +1,5 @@
 #include "web_auth.h"
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
 #include "event_bus.h"
 #include "esp_log.h"
@@ -200,7 +200,7 @@ static esp_err_t load_or_create_password(void)
 
     if (ret == ESP_ERR_NVS_NOT_FOUND) {
         // First time - hash the default password from credentials
-        const credentials_t *id = credentials_get();
+        const secrets_t *id = secrets_get();
         if (id == NULL) {
             ESP_LOGE(TAG, "credentials not initialized");
             nvs_close(handle);
@@ -639,7 +639,7 @@ esp_err_t web_auth_change_password(const char *current_password, const char *new
     }
 
     // Clear credential first-boot flag so creds stop printing on serial
-    esp_err_t cred_ret = credentials_ack_first_boot();
+    esp_err_t cred_ret = secrets_ack_first_boot();
     if (cred_ret != ESP_OK) {
         ESP_LOGW(TAG, "Failed to ack credential first boot: %s", esp_err_to_name(cred_ret));
     }

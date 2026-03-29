@@ -34,7 +34,14 @@ menu "Button Driver"
         default 0
         range 0 48
         help
-            GPIO for the on-board PRG button. Active LOW (internal pull-up).
+            GPIO for the on-board PRG button.
             Override in board sdkconfig overlay if needed.
+
+    config BUTTON_DRIVER_PRG_ACTIVE_HIGH
+        bool "PRG button is active HIGH"
+        default n
+        help
+            Enable for buttons that read HIGH when pressed.
+            Most buttons (including strapping pins) are active LOW.
 
 endmenu

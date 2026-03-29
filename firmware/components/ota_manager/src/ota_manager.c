@@ -30,6 +30,20 @@ ota_ctx_t g_ota;
 // Forward declarations
 static void ota_check_task(void *arg);
 
+static uint8_t ota_get_state(void)
+{
+    return system_state_get()->ota.state;
+}
+
+static void ota_set_state(uint8_t state)
+{
+    esp_err_t ret = system_state_set_ota_state(state);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set OTA state to %s: %s",
+                 system_ota_state_name(state), esp_err_to_name(ret));
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -208,7 +222,7 @@ esp_err_t ota_manager_check_now(void)
         ESP_LOGW(TAG, "Update check failed: %s", esp_err_to_name(err));
     }
 
-    system_state_set_ota(SYSTEM_OTA_IDLE);
+    ota_set_state(SYSTEM_OTA_IDLE);
 
     /* Only persist last_check timestamp on success */
     if (err == ESP_OK) {
@@ -253,7 +267,7 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (system_state_get_ota() != SYSTEM_OTA_IDLE) {
+    if (ota_get_state() != SYSTEM_OTA_IDLE) {
         ESP_LOGE(TAG, "OTA already in progress");
         OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
@@ -265,7 +279,7 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
         return ESP_ERR_INVALID_STATE;
     }
 
-    system_state_set_ota(SYSTEM_OTA_DOWNLOADING);
+    ota_set_state(SYSTEM_OTA_DOWNLOADING);
     g_ota.session.progress_cb = cb;
     g_ota.session.progress_ctx = ctx;
 
@@ -285,12 +299,12 @@ esp_err_t ota_manager_start_update(ota_progress_cb_t cb, void *ctx)
     }
 
     if (err == ESP_OK) {
-        system_state_set_ota(SYSTEM_OTA_PENDING_REBOOT);
+        ota_set_state(SYSTEM_OTA_PENDING_REBOOT);
         event_bus_post_motd("ota", "Firmware updated, reboot required",
                             MOTD_PRIORITY_WARNING);
         ESP_LOGI(TAG, "Update complete, pending reboot");
     } else {
-        system_state_set_ota(SYSTEM_OTA_IDLE);
+        ota_set_state(SYSTEM_OTA_IDLE);
         ESP_LOGE(TAG, "Update failed: %s", esp_err_to_name(err));
     }
 
@@ -310,7 +324,7 @@ esp_err_t ota_manager_start_upload(uint32_t size, const char *expected_sha256,
         return ESP_ERR_INVALID_STATE;
     }
 
-    if (system_state_get_ota() != SYSTEM_OTA_IDLE) {
+    if (ota_get_state() != SYSTEM_OTA_IDLE) {
         ESP_LOGE(TAG, "OTA already in progress");
         OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
@@ -323,7 +337,7 @@ esp_err_t ota_manager_start_upload(uint32_t size, const char *expected_sha256,
         return err;
     }
 
-    system_state_set_ota(SYSTEM_OTA_DOWNLOADING);
+    ota_set_state(SYSTEM_OTA_DOWNLOADING);
     g_ota.session.total_bytes = size;
     g_ota.session.bytes_written = 0;
     g_ota.session.progress_cb = cb;
@@ -353,7 +367,7 @@ esp_err_t ota_manager_write_upload_chunk(const void *data, size_t len)
         return ESP_ERR_TIMEOUT;
     }
 
-    if (system_state_get_ota() != SYSTEM_OTA_DOWNLOADING) {
+    if (ota_get_state() != SYSTEM_OTA_DOWNLOADING) {
         OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
     }
@@ -386,12 +400,12 @@ esp_err_t ota_manager_finish_upload(void)
         return ESP_ERR_TIMEOUT;
     }
 
-    if (system_state_get_ota() != SYSTEM_OTA_DOWNLOADING) {
+    if (ota_get_state() != SYSTEM_OTA_DOWNLOADING) {
         OTA_UNLOCK();
         return ESP_ERR_INVALID_STATE;
     }
 
-    system_state_set_ota(SYSTEM_OTA_VERIFYING);
+    ota_set_state(SYSTEM_OTA_VERIFYING);
 
     // Copy SHA256 state under lock, then release for blocking flash ops
     bool has_sha256 = g_ota.session.has_expected_sha256;
@@ -405,7 +419,7 @@ esp_err_t ota_manager_finish_upload(void)
     /* Guard: abort() may have cleared the session while we released the lock */
     if (g_ota.session.ota_handle == 0) {
         ESP_LOGW(TAG, "Flash session aborted during finalization");
-        system_state_set_ota(SYSTEM_OTA_IDLE);
+        ota_set_state(SYSTEM_OTA_IDLE);
         return ESP_ERR_INVALID_STATE;
     }
 
@@ -413,7 +427,7 @@ esp_err_t ota_manager_finish_upload(void)
         esp_err_t err = ota_flash_verify_hash(sha256_copy);
         if (err != ESP_OK) {
             ESP_LOGE(TAG, "SHA-256 verification failed");
-            system_state_set_ota(SYSTEM_OTA_IDLE);
+            ota_set_state(SYSTEM_OTA_IDLE);
             ota_flash_abort();
             return err;
         }
@@ -422,11 +436,11 @@ esp_err_t ota_manager_finish_upload(void)
     esp_err_t err = ota_flash_end();
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "Flash finalize failed: %s", esp_err_to_name(err));
-        system_state_set_ota(SYSTEM_OTA_IDLE);
+        ota_set_state(SYSTEM_OTA_IDLE);
         return err;
     }
 
-    system_state_set_ota(SYSTEM_OTA_PENDING_REBOOT);
+    ota_set_state(SYSTEM_OTA_PENDING_REBOOT);
     event_bus_post_motd("ota", "Firmware uploaded, reboot required",
                         MOTD_PRIORITY_WARNING);
     ESP_LOGI(TAG, "Upload complete, pending reboot");
@@ -448,7 +462,7 @@ esp_err_t ota_manager_abort(void)
     esp_err_t err = ota_flash_abort();
 
     event_bus_clear_motds_from("ota");
-    system_state_set_ota(SYSTEM_OTA_IDLE);
+    ota_set_state(SYSTEM_OTA_IDLE);
 
     memset(&g_ota.session, 0, sizeof(g_ota.session));
 

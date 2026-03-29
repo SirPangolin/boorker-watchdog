@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "src/http_server.c"
     INCLUDE_DIRS "include"
-    REQUIRES esp_http_server esp_https_server web_auth credentials system_state wifi_manager event_bus sys_console joltwallet__littlefs json esp_wifi log esp_timer ota_manager
+    REQUIRES esp_http_server esp_https_server web_auth secrets system_state event_bus sys_console joltwallet__littlefs json log ota_manager
     PRIV_REQUIRES main
 )

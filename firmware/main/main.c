@@ -4,6 +4,8 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "esp_heap_caps.h"
+#include "esp_chip_info.h"
+#include "esp_timer.h"
 #include "esp_console.h"
 #include "nvs_flash.h"
 #include "esp_partition.h"
@@ -16,7 +18,7 @@
 #if CONFIG_TS_MGR_ENABLED
 #include "tailscale_manager.h"
 #endif
-#include "credentials.h"
+#include "secrets.h"
 #include "system_state.h"
 #include "event_bus.h"
 #include "web_auth.h"
@@ -29,9 +31,6 @@
 #endif
 #include "sensor_manager.h"
 #include "ota_manager.h"
-#if CONFIG_SW420_DRIVER_ENABLED
-#include "sw420_driver.h"
-#endif
 
 static const char *TAG = "boorker";
 
@@ -123,28 +122,6 @@ static void wifi_event_callback(wifi_mgr_event_t event, void *ctx)
     }
 }
 
-static void on_sensor_reading(const sensor_reading_t *reading, void *ctx)
-{
-    (void)ctx;
-
-    // Digital sensors (vibration, float_switch) use value=0/1, value2=duration_ms
-    if (strstr(reading->sensor_id, "vibration") != NULL ||
-        strstr(reading->sensor_id, "float") != NULL) {
-        ESP_LOGI(TAG, "Sensor '%s': %s, duration %.0fms [%s]",
-                 reading->sensor_id,
-                 reading->value > 0.5f ? "ACTIVE" : "IDLE",
-                 reading->value2,
-                 sensor_status_name(reading->status));
-    } else {
-        // Analog sensors (temp/humidity)
-        ESP_LOGI(TAG, "Sensor '%s': %.1f F, %.1f%% humidity [%s]",
-                 reading->sensor_id,
-                 reading->value,
-                 reading->value2,
-                 sensor_status_name(reading->status));
-    }
-}
-
 static void init_console(void)
 {
     esp_err_t ret;
@@ -193,13 +170,6 @@ static void init_console(void)
         ESP_LOGW(TAG, "Sensor console init failed: %s", esp_err_to_name(ret));
     }
 
-#if CONFIG_SW420_DRIVER_ENABLED
-    // Register SW420 vibration sensor console commands
-    ret = sw420_driver_register_console(NULL);  // Uses singleton
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "SW420 console init failed: %s", esp_err_to_name(ret));
-    }
-#endif
 
 #if CONFIG_STATUS_DISPLAY_ENABLED
     ret = status_display_register_console();
@@ -367,25 +337,41 @@ void app_main(void)
     }
 
     // Initialize credentials (generates secrets on first boot)
-    ret = credentials_init();
+    ret = secrets_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Credentials init failed: %s", esp_err_to_name(ret));
         return;
     }
 
-    const credentials_t *identity = credentials_get();
+    const secrets_t *identity = secrets_get();
     if (identity == NULL) {
         ESP_LOGE(TAG, "Failed to get credentials");
         return;
     }
     ESP_LOGI(TAG, "Device: %s", identity->node_name);
 
-    // Initialize event bus before publishers
+    // Initialize event bus before any system_state writes (notify needs event_bus)
     ret = event_bus_init();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Event bus init failed: %s", esp_err_to_name(ret));
         return;
     }
+
+    // Publish identity + claimed state to system_state
+    system_state_set_identity(identity->node_name, identity->node_suffix);
+    system_state_set_claimed(!secrets_is_first_boot());
+
+    // Publish boot-time system info
+    esp_chip_info_t chip;
+    esp_chip_info(&chip);
+    system_state_set_system(
+        BOORKER_VERSION_STRING, esp_get_idf_version(),
+        chip.revision / 100, chip.revision % 100, chip.cores,
+        heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+        heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+        heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+        esp_timer_get_time());
 
     // Initialize status LED (registers with event bus)
     ret = status_led_init();
@@ -417,7 +403,6 @@ void app_main(void)
         ESP_LOGW(TAG, "Sensor manager init failed: %s", esp_err_to_name(ret));
         // Continue without sensors - not critical for basic operation
     } else {
-        sensor_manager_register_callback(on_sensor_reading, NULL);
         ret = sensor_manager_start();
         if (ret != ESP_OK) {
             ESP_LOGW(TAG, "Sensor polling start failed: %s", esp_err_to_name(ret));
@@ -516,18 +501,21 @@ void app_main(void)
     ESP_LOGI(TAG, "Tailscale disabled in config");
 #endif
 
-    // Main loop - heartbeat
+    // Main loop - heartbeat + system_state refresh
     while (1) {
-#if CONFIG_TS_MGR_ENABLED
-        ESP_LOGI(TAG, "Heartbeat - WiFi: %s, Tailscale: %s, heap: %lu",
-                 wifi_mgr_get_state_name(),
-                 ts_mgr_get_state_name(),
-                 esp_get_free_heap_size());
-#else
+        const system_state_t *ss = system_state_get();
+        system_state_set_system(
+            ss->firmware_version, ss->idf_version,
+            ss->chip_revision_major, ss->chip_revision_minor, ss->chip_cores,
+            heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+            heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+            heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+            heap_caps_get_total_size(MALLOC_CAP_SPIRAM),
+            esp_timer_get_time());
+
         ESP_LOGI(TAG, "Heartbeat - WiFi: %s, heap: %lu",
                  wifi_mgr_get_state_name(),
-                 esp_get_free_heap_size());
-#endif
+                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
         vTaskDelay(pdMS_TO_TICKS(10000));
     }
 }
