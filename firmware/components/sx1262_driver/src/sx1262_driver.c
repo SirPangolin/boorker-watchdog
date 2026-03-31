@@ -290,8 +290,23 @@ static void irq_handler_task(void *arg)
                         int8_t snr = 0;
                         uint8_t pkt_status[3];
                         if (read_command(handle, SX1262_CMD_GET_PACKET_STATUS, pkt_status, 3) == ESP_OK) {
-                            rssi = -(int16_t)pkt_status[0] / 2;
                             snr = (int8_t)pkt_status[1] / 4;
+                            // Use SignalRssiPkt (byte 2) if RssiPkt (byte 0) is 0
+                            // SX1262 sometimes returns 0 for RssiPkt at high SNR
+                            if (pkt_status[0] != 0) {
+                                rssi = -(int16_t)pkt_status[0] / 2;
+                            } else if (pkt_status[2] != 0) {
+                                rssi = -(int16_t)pkt_status[2] / 2;
+                            }
+                            // If both are 0, try instantaneous RSSI
+                            if (rssi == 0) {
+                                uint8_t rssi_raw[1];
+                                if (read_command(handle, SX1262_CMD_GET_RSSI_INST, rssi_raw, 1) == ESP_OK) {
+                                    rssi = -(int16_t)rssi_raw[0] / 2;
+                                }
+                            }
+                            ESP_LOGD(TAG, "PacketStatus raw: [0x%02X, 0x%02X, 0x%02X] rssi=%d snr=%d",
+                                     pkt_status[0], pkt_status[1], pkt_status[2], rssi, snr);
                         } else {
                             ESP_LOGW(TAG, "Failed to read packet status, RSSI/SNR unavailable");
                         }

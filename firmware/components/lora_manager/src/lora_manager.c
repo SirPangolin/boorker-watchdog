@@ -117,8 +117,24 @@ static void on_rx_packet(const sx1262_rx_packet_t *packet, void *ctx)
 {
     (void)ctx;
 
-    ESP_LOGI(TAG, "[RX] %zu bytes | RSSI:%d SNR:%d",
-             packet->length, packet->rssi, packet->snr);
+    // Print as string if printable ASCII, otherwise hex
+    bool printable = true;
+    for (size_t i = 0; i < packet->length && printable; i++) {
+        if (packet->data[i] < 0x20 || packet->data[i] > 0x7E) {
+            printable = false;
+        }
+    }
+
+    // TODO: production builds should log RX data at DEBUG level only
+    if (printable && packet->length > 0) {
+        ESP_LOGI(TAG, "[RX] %zu bytes | RSSI:%d SNR:%d | \"%.*s\"",
+                 packet->length, packet->rssi, packet->snr,
+                 (int)packet->length, (const char *)packet->data);
+    } else {
+        ESP_LOGI(TAG, "[RX] %zu bytes | RSSI:%d SNR:%d",
+                 packet->length, packet->rssi, packet->snr);
+        ESP_LOG_BUFFER_HEX_LEVEL(TAG, packet->data, packet->length, ESP_LOG_INFO);
+    }
 
     if (packet->rssi > -130) {
         s_lora.antenna_verified = true;
