@@ -58,6 +58,14 @@ typedef struct {
     int8_t snr;
 } sx1262_rx_packet_t;
 
+/**
+ * @brief RX packet callback.
+ *
+ * Called from the driver's IRQ handler task when a packet is received.
+ * The packet data pointer is valid ONLY for the duration of this callback.
+ * Do not store the pointer — copy the data if async processing is needed.
+ * A future packet_pool component will provide safe async buffer ownership.
+ */
 typedef void (*sx1262_rx_cb_t)(const sx1262_rx_packet_t *packet, void *ctx);
 
 typedef struct {

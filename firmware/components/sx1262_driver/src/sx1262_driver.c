@@ -29,6 +29,46 @@ static const char *TAG = "sx1262";
 #define SPI_BUF_SIZE 260
 
 // ---------------------------------------------------------------------------
+// PA optimization table (data — type in sx1262_pa_table.h)
+// Values from RadioLib (see ATTRIBUTIONS.md)
+// ---------------------------------------------------------------------------
+
+static const sx1262_pa_entry_t sx1262_pa_table[SX1262_PA_TABLE_SIZE] = {
+    /* -9 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -9 },
+    /* -8 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -8 },
+    /* -7 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -7 },
+    /* -6 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -6 },
+    /* -5 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -5 },
+    /* -4 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -4 },
+    /* -3 dBm */ { .pa_duty_cycle = 0, .hp_max = 0, .pa_val = -3 },
+    /* -2 dBm */ { .pa_duty_cycle = 1, .hp_max = 0, .pa_val = -2 },
+    /* -1 dBm */ { .pa_duty_cycle = 1, .hp_max = 0, .pa_val = -1 },
+    /*  0 dBm */ { .pa_duty_cycle = 1, .hp_max = 0, .pa_val =  2 },
+    /*  1 dBm */ { .pa_duty_cycle = 1, .hp_max = 0, .pa_val =  3 },
+    /*  2 dBm */ { .pa_duty_cycle = 1, .hp_max = 0, .pa_val =  4 },
+    /*  3 dBm */ { .pa_duty_cycle = 1, .hp_max = 1, .pa_val =  5 },
+    /*  4 dBm */ { .pa_duty_cycle = 1, .hp_max = 1, .pa_val =  6 },
+    /*  5 dBm */ { .pa_duty_cycle = 1, .hp_max = 1, .pa_val =  7 },
+    /*  6 dBm */ { .pa_duty_cycle = 1, .hp_max = 2, .pa_val =  8 },
+    /*  7 dBm */ { .pa_duty_cycle = 1, .hp_max = 2, .pa_val =  9 },
+    /*  8 dBm */ { .pa_duty_cycle = 2, .hp_max = 2, .pa_val = 10 },
+    /*  9 dBm */ { .pa_duty_cycle = 2, .hp_max = 2, .pa_val = 11 },
+    /* 10 dBm */ { .pa_duty_cycle = 2, .hp_max = 3, .pa_val = 13 },
+    /* 11 dBm */ { .pa_duty_cycle = 2, .hp_max = 3, .pa_val = 14 },
+    /* 12 dBm */ { .pa_duty_cycle = 3, .hp_max = 3, .pa_val = 15 },
+    /* 13 dBm */ { .pa_duty_cycle = 3, .hp_max = 4, .pa_val = 16 },
+    /* 14 dBm */ { .pa_duty_cycle = 3, .hp_max = 5, .pa_val = 17 },
+    /* 15 dBm */ { .pa_duty_cycle = 3, .hp_max = 5, .pa_val = 18 },
+    /* 16 dBm */ { .pa_duty_cycle = 3, .hp_max = 5, .pa_val = 19 },
+    /* 17 dBm */ { .pa_duty_cycle = 4, .hp_max = 6, .pa_val = 20 },
+    /* 18 dBm */ { .pa_duty_cycle = 4, .hp_max = 6, .pa_val = 20 },
+    /* 19 dBm */ { .pa_duty_cycle = 4, .hp_max = 6, .pa_val = 21 },
+    /* 20 dBm */ { .pa_duty_cycle = 4, .hp_max = 7, .pa_val = 22 },
+    /* 21 dBm */ { .pa_duty_cycle = 4, .hp_max = 7, .pa_val = 22 },
+    /* 22 dBm */ { .pa_duty_cycle = 4, .hp_max = 7, .pa_val = 22 },
+};
+
+// ---------------------------------------------------------------------------
 // Instance struct
 // ---------------------------------------------------------------------------
 

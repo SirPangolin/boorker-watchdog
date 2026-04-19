@@ -139,43 +139,54 @@ esp_err_t lora_manager_register_console(void)
     s_send_args.message = arg_str1(NULL, NULL, "<message>", "message to transmit");
     s_send_args.end = arg_end(2);
 
-    // Register subcommands with "lora_" prefix
-    esp_console_cmd_register(&(esp_console_cmd_t){
+    esp_err_t err = ESP_OK;
+    esp_err_t ret;
+
+    ret = esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_send",
         .help = "Transmit a LoRa message",
         .hint = "<message>",
         .func = cmd_lora_send,
         .argtable = &s_send_args,
     });
+    if (ret != ESP_OK) { err = ret; }
 
-    esp_console_cmd_register(&(esp_console_cmd_t){
+    ret = esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_listen",
         .help = "Start LoRa continuous receive",
         .hint = NULL,
         .func = cmd_lora_listen,
     });
+    if (ret != ESP_OK) { err = ret; }
 
-    esp_console_cmd_register(&(esp_console_cmd_t){
+    ret = esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_stop",
         .help = "Stop LoRa receive",
         .hint = NULL,
         .func = cmd_lora_stop,
     });
+    if (ret != ESP_OK) { err = ret; }
 
-    esp_console_cmd_register(&(esp_console_cmd_t){
+    ret = esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_status",
         .help = "Show LoRa radio status",
         .hint = NULL,
         .func = cmd_lora_status,
     });
+    if (ret != ESP_OK) { err = ret; }
 
-    esp_console_cmd_register(&(esp_console_cmd_t){
+    ret = esp_console_cmd_register(&(esp_console_cmd_t){
         .command = "lora_config",
         .help = "Show LoRa modulation config",
         .hint = NULL,
         .func = cmd_lora_config,
     });
+    if (ret != ESP_OK) { err = ret; }
 
-    ESP_LOGI(TAG, "Registered commands: lora_send, lora_listen, lora_stop, lora_status, lora_config");
-    return ESP_OK;
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "Registered commands: lora_send, lora_listen, lora_stop, lora_status, lora_config");
+    } else {
+        ESP_LOGE(TAG, "Failed to register one or more commands: %s", esp_err_to_name(err));
+    }
+    return err;
 }

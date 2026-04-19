@@ -18,6 +18,19 @@
 static const char *TAG = "lora_manager";
 
 // ---------------------------------------------------------------------------
+// Region table (data defined here, type in lora_regions.h)
+// ---------------------------------------------------------------------------
+
+static const lora_region_config_t lora_regions[] = {
+    /* US_915 */ { "US_915",  915000000, 22, 100,   0, true  },
+    /* EU_868 */ { "EU_868",  869525000, 14,  10,   0, false },
+    /* EU_433 */ { "EU_433",  433875000, 10,  10,   0, false },
+    /* AU_915 */ { "AU_915",  915000000, 22, 100, 400, false },
+};
+
+#define LORA_REGION_COUNT (sizeof(lora_regions) / sizeof(lora_regions[0]))
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
@@ -29,6 +42,8 @@ static struct {
     uint8_t bandwidth;
     uint8_t coding_rate;
     uint16_t preamble_length;
+    bool crc_on;
+    bool implicit_header;
     bool initialized;
     bool listening;
     bool antenna_verified;
@@ -75,9 +90,13 @@ static uint32_t calculate_time_on_air_ms(size_t payload_len)
 
     bool de = (sf >= 11 && bw_khz <= 125.0f);
     float de_val = de ? 1.0f : 0.0f;
+    float crc_val = s_lora.crc_on ? 1.0f : 0.0f;
+    float ih_val = s_lora.implicit_header ? 1.0f : 0.0f;
+    // Semtech AN1200.13: 8 + max(ceil((8*PL - 4*SF + 28 + 16*CRC - 20*IH) / (4*(SF - 2*DE))) * (CR+4), 0)
+    // s_lora.coding_rate is stored as 5-8, which equals (CR+4) where CR=1-4
     float payload_symbols = 8.0f + fmaxf(
-        ceilf((8.0f * payload_len - 4.0f * sf + 28.0f + 16.0f) /
-              (4.0f * (sf - 2.0f * de_val))) * (cr),
+        ceilf((8.0f * payload_len - 4.0f * sf + 28.0f + 16.0f * crc_val - 20.0f * ih_val) /
+              (4.0f * (sf - 2.0f * de_val))) * cr,
         0.0f);
 
     float t_payload = payload_symbols * t_sym;
@@ -125,7 +144,6 @@ static void on_rx_packet(const sx1262_rx_packet_t *packet, void *ctx)
         }
     }
 
-    // TODO: production builds should log RX data at DEBUG level only
     if (printable && packet->length > 0) {
         ESP_LOGI(TAG, "[RX] %zu bytes | RSSI:%d SNR:%d | \"%.*s\"",
                  packet->length, packet->rssi, packet->snr,
@@ -140,16 +158,27 @@ static void on_rx_packet(const sx1262_rx_packet_t *packet, void *ctx)
         s_lora.antenna_verified = true;
     }
 
+    // Copy packet data off the driver's stack buffer before dispatching.
+    // event_bus_notify is synchronous — subscribers see the data before
+    // we free it. A future packet_pool will replace this with pooled buffers.
+    uint8_t *data_copy = malloc(packet->length);
+    if (data_copy == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate %zu bytes for RX event dispatch", packet->length);
+        return;
+    }
+    memcpy(data_copy, packet->data, packet->length);
+
     event_notify_t evt = {
         .type = EVENT_NOTIFY_LORA_RX,
         .lora_rx = {
-            .data = packet->data,
+            .data = data_copy,
             .length = packet->length,
             .rssi = packet->rssi,
             .snr = packet->snr,
         },
     };
     event_bus_notify(&evt);
+    free(data_copy);
 }
 
 // ---------------------------------------------------------------------------
@@ -235,6 +264,8 @@ esp_err_t lora_manager_init(void)
     s_lora.bandwidth = CONFIG_LORA_MANAGER_BANDWIDTH;
     s_lora.coding_rate = CONFIG_LORA_MANAGER_CODING_RATE;
     s_lora.preamble_length = CONFIG_LORA_MANAGER_PREAMBLE_LENGTH;
+    s_lora.crc_on = true;
+    s_lora.implicit_header = false;
 
     bool ldro = (s_lora.spreading_factor >= 11 && s_lora.bandwidth == 0);
     sx1262_mod_params_t mod = {
@@ -248,9 +279,9 @@ esp_err_t lora_manager_init(void)
 
     sx1262_pkt_params_t pkt = {
         .preamble_length = s_lora.preamble_length,
-        .implicit_header = false,
+        .implicit_header = s_lora.implicit_header,
         .payload_length = 255,
-        .crc_on = true,
+        .crc_on = s_lora.crc_on,
         .invert_iq = false,
     };
     err = sx1262_set_packet_params(s_lora.radio, &pkt);

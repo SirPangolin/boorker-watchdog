@@ -1,6 +1,6 @@
 /**
  * @file lora_regions.h
- * @brief LoRa regional configuration table
+ * @brief LoRa regional configuration types
  *
  * Regional regulatory maximums. The lora_manager enforces duty cycle
  * (blocking) and caps TX power per region. The duty_cycle_pct field
@@ -22,12 +22,3 @@ typedef struct {
     uint16_t max_dwell_time_ms;  // 0 = no dwell time limit
     bool tested;
 } lora_region_config_t;
-
-static const lora_region_config_t lora_regions[] = {
-    /* US_915 */ { "US_915",  915000000, 22, 100,   0, true  },
-    /* EU_868 */ { "EU_868",  869525000, 14,  10,   0, false },
-    /* EU_433 */ { "EU_433",  433875000, 10,  10,   0, false },
-    /* AU_915 */ { "AU_915",  915000000, 22, 100, 400, false },
-};
-
-#define LORA_REGION_COUNT (sizeof(lora_regions) / sizeof(lora_regions[0]))
