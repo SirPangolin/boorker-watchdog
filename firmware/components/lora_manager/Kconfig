@@ -1,0 +1,66 @@
+menu "LoRa Manager"
+
+    choice LORA_MANAGER_REGION
+        prompt "LoRa region"
+        default LORA_REGION_US_915
+        help
+            Determines default frequency, TX power, and duty cycle limits.
+            Individual settings below can override regional defaults.
+            Only US_915 has been tested on hardware.
+
+        config LORA_REGION_US_915
+            bool "US 915 MHz (FCC, tested)"
+        config LORA_REGION_EU_868
+            bool "EU 868 MHz (CE, untested)"
+        config LORA_REGION_EU_433
+            bool "EU 433 MHz (CE, untested)"
+        config LORA_REGION_AU_915
+            bool "AU 915 MHz (untested)"
+    endchoice
+
+    config LORA_MANAGER_TX_POWER_DBM
+        int "TX power (dBm)"
+        default 22
+        range -9 22
+        help
+            Regional defaults are advisory. If this exceeds the regional
+            default, a warning is logged but transmission is not blocked.
+
+    config LORA_MANAGER_SPREADING_FACTOR
+        int "Spreading factor"
+        default 9
+        range 7 12
+        help
+            Higher = longer range, slower data rate.
+            SF7: fastest, shortest range.
+            SF12: slowest, longest range.
+
+    config LORA_MANAGER_BANDWIDTH
+        int "Bandwidth (0=125kHz, 1=250kHz, 2=500kHz)"
+        default 0
+        range 0 2
+        help
+            Narrower = longer range, slower. 125kHz is most common.
+
+    config LORA_MANAGER_CODING_RATE
+        int "Coding rate (5=4/5, 6=4/6, 7=4/7, 8=4/8)"
+        default 5
+        range 5 8
+        help
+            Higher = more error correction, slower. 4/5 is standard.
+
+    config LORA_MANAGER_PREAMBLE_LENGTH
+        int "Preamble length (symbols)"
+        default 8
+        range 6 65535
+
+    config LORA_MANAGER_DUTY_CYCLE_PCT
+        int "Duty cycle limit (%)"
+        default 10
+        range 1 100
+        help
+            Duty cycle limit as a percentage of airtime per hour.
+            Default: 10%. Lower values are always accepted.
+            Capped at the regional legal maximum at runtime.
+
+endmenu
